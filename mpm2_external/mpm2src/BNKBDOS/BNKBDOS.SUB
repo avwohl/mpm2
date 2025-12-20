@@ -1,0 +1,11 @@
+rmac bnkbdos
+xref bnkbdos
+era bnkbdos.prn
+vax bnkbdos.xrf $$STRAnp
+era bnkbdos.xrf
+link bnkbdos[os]
+era bnkbdos.rel
+era bnkbdos.sym
+gensys $$a
+pip d:[g0]=mpm.sys
+

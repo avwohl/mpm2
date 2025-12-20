@@ -1,0 +1,553 @@
+$title ('MP/M II V2.0  Loader')
+mpmldr:
+do;
+
+/*
+  Copyright (C) 1979,1980,1981
+  Digital Research
+  P.O. Box 579
+  Pacific Grove, CA 93950
+
+  Revised:
+    14 Sept 81 by Thomas Rolander
+*/
+
+  declare true literally '0FFH';
+  declare false literally '0';
+  declare forever literally 'while true';
+  declare boolean literally 'byte';
+
+  declare start label;
+  declare jmp$to$start structure (
+    jmp$instr byte,
+    jmp$location address  ) data (
+      0C3H,.start-3);
+
+  declare signon (*) byte data (
+    0dh,   /* Filler */
+    0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,
+    0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,
+    'MP/M II V2.0 Loader   ',0dh,0ah,
+    'Copyright (C) 1981, Digital Research',0dh,0dh,0ah,'$');
+
+  /****************  Warning  ******************/
+  /*                                           */
+  /*  This location must be at or above 015CH  */
+  /*                                           */
+  /*********************************************/
+
+  declare copyright (*) byte data (
+    'COPYRIGHT (C) 1981,');
+  declare company$name (*) byte data (
+    ' DIGITAL RESEARCH ');
+  declare serial$number (6) byte data (
+    '654321');
+
+  declare err$msgadr address initial (.default$err$msg);
+  declare err$msg based err$msgadr (1) byte;
+  declare default$err$msg (*) byte data (
+    'Dsk rd err','$');
+
+  declare mon1 literally 'ldmon1';
+  declare mon2 literally 'ldmon2';
+
+  mon1:
+    procedure (func,info) external;
+      declare func byte;
+      declare info address;
+    end mon1;
+
+  mon2:
+    procedure (func,info) byte external;
+      declare func byte;
+      declare info address;
+    end mon2;
+
+  declare fcb (1) byte external;
+  declare fcb16 (1) byte external;
+  declare tbuff (1) byte external;
+
+
+  /**************************************
+   *                                    *
+   *       B D O S   Externals          *
+   *                                    *
+   **************************************/
+
+  write$console:
+    procedure (char);
+      declare char byte;
+      call mon1 (2,char);
+    end write$console;
+
+  print$buffer:
+    procedure (buffer$address);
+      declare buffer$address address;
+      call mon1 (9,buffer$address);
+    end print$buffer;
+
+  reset$disk$system:
+    procedure;
+      call mon1 (13,0);
+    end reset$disk$system;
+
+  open$file:
+    procedure (fcb$address) byte;
+      declare fcb$address address;
+      return mon2 (15,fcb$address);
+    end open$file;
+
+  read$record:
+    procedure (fcb$address) byte;
+      declare fcb$address address;
+      return mon2 (20,fcb$address);
+    end read$record;
+
+  set$DMA$address:
+    procedure (DMA$address);
+      declare DMA$address address;
+      call mon1 (26,DMA$address);
+    end set$DMA$address;
+  
+
+  /**************************************
+   *                                    *
+   *      Misc. BDOS        procs       *
+   *                                    *
+   **************************************/
+
+  crlf:
+    procedure;
+      call write$console (0dh);
+      call write$console (0ah);
+    end crlf;
+
+  printdecimal:
+    procedure (n);
+      declare n byte;
+      declare (digit,pdigit) byte;
+      pdigit = false;
+      digit = '0';
+      do while n >= 100;
+        pdigit = true;
+        digit = digit + 1;
+        n = n - 100;
+      end;
+      if pdigit then
+      do;
+        call write$console (digit);
+        digit = '0';
+      end;
+      do while n >= 10;
+        pdigit = true;
+        digit = digit + 1;
+        n = n - 10;
+      end;
+      if pdigit then
+        call write$console (digit);
+      call write$console ('0'+n);
+    end printdecimal;
+
+  printnib:
+    procedure (n);
+      declare n byte;
+      if n > 9
+        then call write$console (n+'A'-10);
+        else call write$console (n+'0');
+   end printnib;
+
+  printhex:
+    procedure (b);
+      declare b byte;
+      call printnib (shr(b,4));
+      call printnib (b and 0fh);
+    end printhex;
+
+  printaddr:
+    procedure (a);
+      declare a address;
+      call write$console (' ');
+      call write$console (' ');
+      call printhex (high(a));
+      call printhex (low(a));
+      call write$console ('H');
+    end printaddr;
+
+  printstring:
+    procedure (sadr,sz);
+      declare sadr address;
+      declare sz byte;
+      declare s based sadr (1) byte;
+      declare i byte;
+      do i = 0 to sz-1;
+        call write$console (s(i) and 7fh);
+      end;
+    end printstring;
+
+  printname:
+    procedure (nadr);
+      declare nadr address;
+      call printstring (nadr,11);
+    end printname;
+
+  printitems:
+    procedure (nadr,base,size);
+      declare (nadr,base,size) address;
+      call print$name (nadr);
+      call printaddr (base);
+      call printaddr (size);
+      call crlf;
+    end printitems;
+
+  printitemsadr:
+    procedure (nadr,base,size);
+      declare nadr address;
+      declare (base,size) byte;
+      call printitems (nadr,
+                      double (base)*256,
+                      double (size)*256);
+    end printitemsadr;
+
+  match$serial:
+    procedure (cpyrtadr,memadr);
+      declare (cpyrtadr,memadr) address;
+      declare (i,j) byte;
+      declare cpyrt based cpyrtadr (1) byte;
+      declare mem based memadr (1) byte;
+
+      do forever;
+        i,j = -1;
+        do while cpyrt(i:=i+1) = mem(j:=j+1);
+          ;
+        end;
+        if i > 23 then return;
+        if (memadr = 0) or (i > 17) then
+        do;
+          err$msgadr = .('Synchronization: Serial numbers do not match','$');
+          go to error;
+        end;
+        memadr = memadr + 1;
+      end;
+    end match$serial;
+
+  declare (base,cur$top,prev$top) address;
+  declare cur$record address;
+  declare sysdatadr address;
+  declare wordadr address;
+  declare word based wordadr address;
+  declare xios$common based cur$top structure (
+    jmpinstr byte,
+    base address );
+  declare actual$xios$common$base address;
+
+  declare nrec byte;
+  declare notdone boolean;
+
+  declare rspname (11) byte initial (
+    '????????RSP');
+  declare brspname (11) byte initial (
+    '????????BRS');
+
+  declare mpm$sys$fcb (36) byte initial (
+    0,'MPM     ','SYS',0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+
+  declare entry$point (3) address;
+
+  declare system$data (256) byte at (.fcb);
+
+$include (sysdat.lit)
+
+  declare break boolean;
+  declare debug$RST byte;
+  declare destination based cur$top (1) byte;
+  declare link based cur$top address;
+  declare test$byte based cur$top byte;
+  declare rspcnt byte;
+
+  print2addr:
+    procedure;
+      call printaddr (cur$top);
+      call printaddr (prev$top-cur$top);
+      call crlf;
+    end print2addr;
+
+  load$system$data:
+    procedure;
+      declare cntr byte;
+      call set$DMA$address (.system$data);
+      if open$file (.mpm$sys$fcb) = 0ffh then
+      do;
+        call move (4,.('  ?','$'),.mpm$sys$fcb(12));
+        err$msgadr = .mpm$sys$fcb(1);
+        go to error;
+      end;
+      if read$record (.mpm$sys$fcb) <> 0 then
+      do;
+        go to error;
+      end;
+      call set$DMA$address (.system$data(128));
+      if read$record (.mpm$sys$fcb) <> 0 then
+      do;
+        go to error;
+      end;
+      sysdatadr,
+      cur$top = shl(double(mem$top),8);
+
+      call print$buffer (.(
+        'Nmb of consoles     =  ','$'));
+      call printnib (nmb$cns);
+      call print$buffer (.(0dh,0ah,
+        'Breakpoint RST #    =  ','$'));
+      call printnib (brkpt$RST);
+/**********************************************************
+      if z80$cpu then
+        call print$buffer (.(0dh,0ah,
+          'Z80 Alternate register set saved/restored',
+          ' by dispatcher','$'));
+      if bank$switched <> 0 then
+      do;
+        call print$buffer (.(0dh,0ah,
+          'Common base addr    =','$'));
+        call printaddr (double (common$base) * 256);
+      end;
+      if banked$bdos then
+        call print$buffer (.(0dh,0ah,
+          'Banked BDOS file manager','$'));
+      call print$buffer (.(0dh,0ah,
+        'Nmb of ticks/second =  ','$'));
+      call printdecimal (ticks$per$second);
+      call print$buffer (.(0dh,0ah,
+        'System drive        =  ','$'));
+      call write$console ('A'+system$drive-1);
+      call write$console (':');
+      call print$buffer (.(0dh,0ah,
+        'Max lckd recs/proc  =  ','$'));
+      call printdecimal (max$locked$records);
+      call print$buffer (.(0dh,0ah,
+        'Totl lckd recs/sys  =  ','$'));
+      call printdecimal (total$system$locked$records);
+      call print$buffer (.(0dh,0ah,
+        'Max open files/proc =  ','$'));
+      call printdecimal (max$open$files);
+      call print$buffer (.(0dh,0ah,
+        'Totl open files/sys =  ','$'));
+      call printdecimal (total$system$open$files);
+      call print$buffer (.(0dh,0ah,
+        'Toð oæ MP/M-80      =','$'));
+      call printaddr (cur$top + 255);
+*************************************************************/
+
+      call print$buffer (.(0dh,0ah,
+        'Memory Segment Table:',0dh,0ah,'$'));
+      call printitems (.('SYSTEM  DAT'),cur$top,256);
+      cur$top = cur$top
+              - (prev$top := (shr(nmb$cns-1,2)+1)*256);
+      call printitems (.('TMPD    DAT'),cur$top,prev$top);
+      if sys$call$stks then
+      do;
+        cur$top = cur$top
+                - (prev$top := (shr(nmb$mem$seg-2,2)+1)*256);
+        call printitems (.('USERSYS STK'),cur$top,prev$top);
+      end;
+    end load$system$data;
+
+  display$OS:
+    procedure;
+      declare (base,cntr) byte;
+      declare rspsadr (16) address;
+      declare temp$rspl address;
+      declare temp$rspl$adr based temp$rspl address;
+      call printitemsadr (.('XIOSJMP TBL'),
+                          xios$jmp$tbl$base,
+                          1);
+      call printitemsadr (.('RESBDOS SPR'),
+                          resbdos$base,
+                          xios$jmp$tbl$base-resbdos$base);
+      call printitemsadr (.('XDOS    SPR'),
+                          xdos$base,
+                          resbdos$base-xdos$base);
+      if nmb$rsps <> 0 then
+      do;
+        cntr = 0;
+        temp$rspl = rspl;
+        do while (rspsadr(cntr):=temp$rspl) <> 0;
+          cntr = cntr + 1;
+          temp$rspl = temp$rspl$adr;
+        end;
+        rspsadr(cntr) = double (xdos$base)*256;
+        do while (cntr:=cntr-1) <> -1;
+          call move (8,rspsadr(cntr)+6+2,.rspname);
+          call printitems (.rspname,
+                           rspsadr(cntr),
+                           rspsadr(cntr+1)-rspsadr(cntr));
+        end;
+      end;
+      call printitemsadr (.('BNKXIOS SPR'),
+                          bnkxios$base,
+                          rsp$base-bnkxios$base);
+      call printitemsadr (.('BNKBDOS SPR'),
+                          bnkbdos$base,
+                          bnkxios$base-bnkbdos$base);
+      call printitemsadr (.('BNKXDOS SPR'),
+                          bnkxdos$base,
+                          bnkbdos$base-bnkxdos$base);
+      call printitemsadr (.('TMP     SPR'),
+                          tmp$base,
+                          bnkxdos$base-tmp$base);
+      if nmb$brsps <> 0 then
+      do;
+        cntr = 0;
+        temp$rspl = brspl;
+        do while (rspsadr(cntr):=temp$rspl) <> 0;
+          cntr = cntr + 1;
+          temp$rspl = temp$rspl + 2;
+          temp$rspl = temp$rspl$adr;
+        end;
+        rspsadr(cntr) = double (tmp$base)*256;
+        do while (cntr:=cntr-1) <> -1;
+          call move (8,rspsadr(cntr)+4,.brspname);
+          call printitems (.brspname,
+                           rspsadr(cntr),
+                           rspsadr(cntr+1)-rspsadr(cntr));
+        end;
+        base = brsp$base;
+      end;
+      else
+      do;
+        base = tmp$base;
+      end;
+      cntr = base - high (total$list$items*10 + 255);
+      call printitemsadr (.('LCKLSTS DAT'),
+                          cntr,
+                          base-cntr);
+      if nmb$cns <> 0 then
+      do;
+        base = cntr;
+        cntr = base - nmb$cns;
+        call printitemsadr (.('CONSOLE DAT'),
+                           cntr,
+                           base-cntr);
+      end;
+    end display$OS;
+
+  display$mem$map:
+    procedure;
+      declare msgadr address;
+
+      call print$buffer (.(
+        '-------------------------',0dh,0ah,'$'));
+      msgadr = .('MP/M II Sys','$');
+      do nrec = 0 to nmb$mem$seg-1;
+        call print$buffer (msgadr);
+        msgadr = .('Memseg  Usr','$');
+        call printaddr (shl(double(mem$seg$tbl(nrec).base),8));
+        call printaddr (shl(double(mem$seg$tbl(nrec).size),8));
+        if bank$switched <> 0 then
+        do;
+          call print$buffer (.('  Bank ','$'));
+          call printdecimal (mem$seg$tbl(nrec).bank);
+        end;
+        call crlf;
+      end;
+    end display$mem$map;
+
+  Restart$instr:
+    procedure;
+      disable;      /* this disable is overlayed with RST x */
+    end Restart$instr;
+
+  xeq$mpm:
+    procedure;
+      declare brkpt$adr address data (.Restart$instr);
+      declare brkpt based brkpt$adr byte;
+      declare loc$0007 byte at (0007h);
+
+      stack$ptr = .entry$point(2);
+      /* if command tail starts with 'B' then break */
+      if break then
+      do;
+        if mem$top >= loc$0007 then
+        do;
+          errmsg$adr = .('No break, CP/M debugger overlaid by MP/M',
+                         '$');
+          go to error;
+        end;
+        brkpt = 1100$0111b or shl(debug$RST,3);
+        call Restart$instr;
+      end;
+    end xeq$mpm;
+
+  command$tail:
+    procedure;
+      declare fcbstr$adr address;
+      declare fcbstr based fcbstr$adr (1) byte;
+      break = false;
+      fcbstr$adr = .fcb;
+      if fcbstr(1) = ' ' then
+        return;
+      if fcbstr(1) = '$' then
+      do;
+        if fcbstr(2) = 'B' then
+        do;
+          break = true;
+          if fcbstr(3) = ' '
+            then debug$RST = 7;
+            else debug$RST = fcbstr(3) and 0000$0111b;
+        end;
+        fcbstr$adr = .fcb16;
+      end;
+      if (fcbstr( 9) = 'S') and
+         (fcbstr(10) = 'Y') and
+         (fcbstr(11) = 'S') then
+      do;
+        call move (9,fcbstr$adr,.mpm$sys$fcb);
+      end;
+    end command$tail;
+
+
+  /*
+    Main Program
+  */
+
+  start:
+    /* disable;   -> removed from base of MP/M 1.x loader */
+    call reset$disk$system;
+    call command$tail;
+    call print$buffer (.signon);
+    call load$system$data;
+
+    cur$top = sysdatadr;
+
+    cur$record = 1;
+    do while (cur$record:=cur$record+1) <> nmb$records;
+      call set$DMA$address (cur$top:=cur$top-128);
+      if read$record (.mpm$sys$fcb) <> 0 then
+      do;
+        errmsg$adr = .('failed to read MPM.SYS','$');
+        go to error;
+      end;
+    end;
+
+    entry$point(2) = double (xdos$base)*256;
+    call match$serial (.company$name,.system$data);
+
+    call display$OS;
+    call display$mem$map;
+
+    call move (256,.system$data,sysdatadr);
+
+    call xeq$mpm;
+
+  error:
+    call print$buffer (.(0dh,0ah,
+      'MPMLDR error: ','$'));
+    call print$buffer (err$msgadr);
+    do forever;
+      stackptr = 0;
+      disable;
+      halt;
+    end;
+
+end mpmldr;
+

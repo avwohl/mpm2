@@ -52,9 +52,7 @@ asm/*.bin
 asm/*.lst
 
 # External MP/M II source/binaries
-# These are copyrighted Digital Research materials
-# Developers must obtain these separately
-mpm2_external/
+# Digital Research materials - now freely available for non-commercial use
 
 # Patched system files
 /tmp/MPM*.SYS

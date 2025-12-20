@@ -1,0 +1,72 @@
+pip a:=e:dir.plm
+seteof dir.plm
+isx
+plm80 dir.plm pagewidth(80) debug
+era dir.plm
+link dir.obj,x0100,plm80.lib to dir1.mod
+locate dir1.mod code(0100H) stacksize(100)
+era dir1.mod
+objhex dir1 to dir1.hex
+link dir.obj,x0200,plm80.lib to dir2.mod
+locate dir2.mod code(0200H) stacksize(100)
+era dir2.mod
+objhex dir2 to dir2.hex
+era dir2
+cpm
+objcpm dir1
+ren dir.sym=dir1.sym
+ren dir.lin=dir1.lin
+vax dir.lst $$stan
+vax dir.sym $$stan
+vax dir.lin $$stan
+era dir*.
+era dir1.com
+pip dir.hex=dir1.hex,dir2.hex
+era dir1.hex
+era dir2.hex
+zero
+genmod dir.hex xdir.prl 
+pip e:dir.prl=a:xdir.prl
+pip b:dir.prl=a:xdir.prl
+era *.hex
+era *.sym
+era *.lin
+era *.lst
+era xdir.*
+pip a:=e:era.plm
+seteof era.plm
+isx
+plm80 era.plm pagewidth(80) debug
+era era.plm
+link era.obj,x0100,plm80.lib to era1.mod
+locate era1.mod code(0100H) stacksize(100)
+era era1.mod
+objhex era1 to era1.hex
+link era.obj,x0200,plm80.lib to era2.mod
+locate era2.mod code(0200H) stacksize(100)
+era era2.mod
+objhex era2 to era2.hex
+era era2
+cpm
+objcpm era1
+era era*.
+era era1.com
+ren era.sym=era1.sym
+ren era.lin=era1.lin
+vax era.lst $$stan
+vax era.sym $$stan
+vax era.lin $$stan
+pip era.hex=era1.hex,era2.hex
+era era1.hex
+era era2.hex
+zero
+genmod era.hex xera.prl 
+pip e:era.prl=a:xera.prl
+pip b:era.prl=a:xera.prl
+era xera.*
+era *.sym
+era *.lin
+era *.lst
+era *.hex
+submit e:prla2
+

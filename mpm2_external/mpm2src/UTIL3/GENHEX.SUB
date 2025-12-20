@@ -1,0 +1,14 @@
+era genhex.asm
+era xgenhex.asm
+pip a:xgenhex.asm=e:genhex.asm
+mac xgenhex
+xref xgenhex
+ren genhex.xrf=xgengex.xrf
+vax genhex.xrf $$stan
+load xgenhex
+pip e:genhex.com=a:xgenhex.com
+pip b:genhex.com=a:xgenhex.com
+era xgenhex.*
+era *.xrf
+;end genhex submit
+

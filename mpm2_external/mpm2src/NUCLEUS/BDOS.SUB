@@ -1,0 +1,31 @@
+ren resbdos.rps=resbdos.spr
+ren bnkbdos.rps=bnkbdos.spr
+era resbdos.asm
+pip a:=e:*.asm
+pip resbdos.asm=resbdos1.asm,conbdos.asm
+rmac resbdos
+era resbdos.asm
+xref resbdos
+vax resbdos.xrf $$stan
+link resbdos[os]
+era bnkbdos.asm
+pip bnkbdos.asm=bnkbdos1.asm,bdos30.asm
+rmac bnkbdos
+era bnkbdos.asm
+xref bnkbdos
+vax bnkbdos.xrf $$stan
+link bnkbdos[os]
+pip e:=a:resbdos.spr
+pip e:=a:bnkbdos.spr
+pip b:=a:resbdos.spr
+pip b:=a:bnkbdos.spr
+era resbdos.spr
+era bnkbdos.spr
+ren resbdos.spr=resbdos.rps
+ren bnkbdos.spr=bnkbdos.rps
+era bdos30.asm
+era bnkbdos1.asm
+era conbdos.asm
+era resbdos1.asm
+;end bdos submit
+

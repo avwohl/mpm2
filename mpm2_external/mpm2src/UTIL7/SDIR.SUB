@@ -1,0 +1,67 @@
+pip a:=e:dm.plm
+seteof dm.plm
+pip a:=e:sn.plm
+seteof sn.plm
+pip a:=e:dse.plm
+seteof dse.plm
+pip a:=e:dsh.plm
+seteof dsh.plm
+pip a:=e:dso.plm
+seteof dso.plm
+pip a:=e:da.plm
+seteof da.plm
+pip a:=e:dp.plm
+seteof dp.plm
+pip a:=e:dts.plm
+seteof dts.plm
+isx
+plm80 dm.plm object(dm) debug pagewidth(130)
+plm80 sn.plm object(sn) debug pagewidth(130)
+plm80 dse.plm object(dse) debug pagewidth(130)
+plm80 dsh.plm object(dsh) debug pagewidth(130)
+plm80 dso.plm object(dso) debug pagewidth(130)
+plm80 dp.plm object(dp) debug pagewidth(130)
+plm80 da.plm object(da) debug pagewidth(130)
+plm80 dts.plm object(dts) debug pagewidth(130)
+link x0100,dm,sn,dse,dso,dsh,dp,da,dts,plm80.lib to d1.lnk
+locate d1.lnk code(0100H) stacksize(50)
+era d1.lnk
+objhex d1 to d1.hex
+link x0200,dm,sn,dse,dso,dsh,dp,da,dts,plm80.lib to d2.lnk
+locate d2.lnk code(0200H) stacksize(50)
+era d2.lnk
+objhex d2 to d2.hex
+cpm
+objcpm d1
+ren sdir1.lst=dm.lst
+ren sdir2.lst=sn.lst
+ren sdir3.lst=dse.lst
+ren sdir4.lst=dsh.lst
+ren sdir5.lst=dso.lst
+ren sdir6.lst=dp.lst
+ren sdir7.lst=da.lst
+ren sdir8.lst=dts.lst
+ren sdir.sym=d1.sym
+ren sdir.lin=d1.lin
+vax sdir1.lst $$stan
+vax sdir2.lst $$stan
+vax sdir3.lst $$stan
+vax sdir4.lst $$stan
+vax sdir5.lst $$stan
+vax sdir6.lst $$stan
+vax sdir7.lst $$stan
+vax sdir8.lst $$stan
+vax sdir.sym $$stan
+vax sdir.lin $$stan
+pip d.hex=d1.hex,d2.hex
+genmod d.hex xsdir.prl 
+pip e:sdir.prl=a:xsdir.prl
+pip b:sdir.prl=a:xsdir.prl
+era xsdir.*
+era *.hex
+era *.obj
+era *.lst
+era *.lin
+era *.sym
+;end sdir submit
+

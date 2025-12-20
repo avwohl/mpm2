@@ -1,0 +1,21 @@
+;era *.lst
+;era *.lin
+;era *.sym
+;era *.bak
+;pip a:=$1.plm[g2]
+;seteof $1.plm
+;isx
+;plm80 $1.plm debug
+;cpm
+;vax $1.lst $$stan
+;era $1.lst
+isx
+link $1.obj,x0100,plm80.lib to x$1.mod
+locate x$1.mod code(0100H) stacksize(48)
+era x$1.mod
+cpm
+objcpm x$1
+era x$1
+vax x$1.sym $$stan
+vax x$1.lin $$stan
+

@@ -1,0 +1,98 @@
+pip a:=e:eraq.plm
+seteof eraq.plm
+isx
+plm80 eraq.plm pagewidth(80) debug
+era eraq.plm
+link eraq.obj,x0100,plm80.lib to eraq1.mod
+locate eraq1.mod code(0100H) stacksize(100)
+era eraq1.mod
+objhex eraq1 to eraq1.hex
+link eraq.obj,x0200,plm80.lib to eraq2.mod
+locate eraq2.mod code(0200H) stacksize(100)
+era eraq2.mod
+objhex eraq2 to eraq2.hex
+era eraq2
+cpm
+objcpm eraq1
+era eraq1.com
+ren eraq.sym=eraq1.sym
+ren eraq.lin=eraq1.lin
+vax eraq.lst $$stan
+vax eraq.sym $$stan
+vax eraq.lin $$stan
+pip eraq.hex=eraq1.hex,eraq2.hex
+era eraq1.hex
+era eraq2.hex
+zero
+genmod eraq.hex xeraq.prl 
+pip e:eraq.prl=a:xeraq.prl
+pip b:eraq.prl=a:xeraq.prl
+era *.hex
+pip a:=e:ren.plm
+seteof ren.plm
+isx
+plm80 ren.plm pagewidth(80) debug
+era ren.plm
+link ren.obj,x0100,plm80.lib to ren1.mod
+locate ren1.mod code(0100H) stacksize(100)
+era ren1.mod
+objhex ren1 to ren1.hex
+link ren.obj,x0200,plm80.lib to ren2.mod
+locate ren2.mod code(0200H) stacksize(100)
+era ren2.mod
+objhex ren2 to ren2.hex
+era ren2
+cpm
+objcpm ren1
+era ren1.com
+ren ren.sym=ren1.sym
+ren ren.lin=ren1.lin
+vax ren.lst $$stan
+vax ren.sym $$stan
+vax ren.lin $$stan
+pip ren.hex=ren1.hex,ren2.hex
+era ren1.hex
+era ren2.hex
+zero
+genmod ren.hex xren.prl 
+pip e:ren.prl=a:xren.prl
+pip b:ren.prl=a:xren.prl
+era *.hex
+pip a:=e:set.plm
+seteof set.plm
+isx
+plm80 set.plm pagewidth(80) debug
+era set.plm
+link set.obj,x0100,plm80.lib to set1.mod
+locate set1.mod code(0100H) stacksize(100)
+era set1.mod
+objhex set1 to set1.hex
+link set.obj,x0200,plm80.lib to set2.mod
+locate set2.mod code(0200H) stacksize(100)
+era set2.mod
+objhex set2 to set2.hex
+era set2
+cpm
+objcpm set1
+era set1.com
+ren set.sym=set1.sym
+ren set.lin=set1.lin
+vax set.lst $$stan
+vax set.sym $$stan
+vax set.lin $$stan
+pip set.hex=set1.hex,set2.hex
+era set1.hex
+era set2.hex
+zero
+genmod set.hex xset.prl 
+pip e:set.prl=a:xset.prl
+pip b:set.prl=a:xset.prl
+era *.sym
+era *.lin
+era *.lst
+era xset.prl
+era xeraq.prl
+era xren.prl
+era *.hex
+submit e:prla3
+

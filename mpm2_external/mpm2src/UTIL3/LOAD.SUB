@@ -1,0 +1,28 @@
+era *.lst
+era *.lin
+era *.sym
+era *.bak
+pip a:=e:load.plm
+seteof load.plm
+isx
+plm80 load.plm pagewidth(80) debug
+cpm
+vax load.lst $$stan
+isx
+link load.obj,x0100,plm80.lib to xload.mod
+locate xload.mod code(0100H) stacksize(48)
+era xload.mod
+cpm
+objcpm xload
+ren load.sym=xload.sym
+ren load.lin=xload.lin
+vax load.sym $$stan
+vax load.lin $$stan
+pip e:load.com=a:xload.com
+pip b:load.com=a:xload.com
+era load.lin
+era load.sym
+era load.lst
+era xload.*
+;end load submit
+

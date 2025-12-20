@@ -1,0 +1,19 @@
+vax printer.lst $$stan
+vax printer.sym $$stan
+vax printer.lin $$stan
+era print1.com
+pip print.hex=print1.hex,print2.hex
+era print1.hex
+era print2.hex
+zero
+genmod print.hex xprint.prl 
+era *.hex
+pip e:printer.prl=a:xprint.prl
+pip b:printer.prl=a:xprint.prl
+era *.lst
+era *.lin
+era *.sym
+era *.plm
+era xprint*.*
+submit e:prlb2
+

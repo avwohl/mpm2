@@ -1,0 +1,18 @@
+vax schedp.lst $$stan
+vax schedp.sym $$stan
+vax schedp.lin $$stan
+pip mschd.hex=mschd1.hex,mschd2.hex
+era mschd1.hex
+era mschd2.hex
+zero
+genmod mschd.hex xmschd.prl 
+era *.hex
+pip e:sched.prl=a:xmschd.prl
+pip b:sched.prl=a:xmschd.prl
+era *.lst
+era *.lin
+era *.sym
+era *.obj
+era xmschd.*
+submit e:prlb4
+

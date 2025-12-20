@@ -1,0 +1,63 @@
+stat rdt.prl $$r/w
+stat ddt.com $$r/w
+ren rdt.gen=rdt.prl
+ren ddt.gen=ddt.com
+pip a:=e:ddt*.asm
+mac ddt1asm
+xref ddt1asm
+vax ddt1asm.xrf $$stan
+vax ddt1asm.sym $$stan
+era ddt1asm0.hex
+ren ddt1asm0.hex=ddt1asm.hex
+mac ddt1asm $$pzsz+r
+era ddt1asm1.hex
+ren ddt1asm1.hex=ddt1asm.hex
+mac ddt2mon
+xref ddt2mon
+vax ddt2mon.xrf $$stan
+vax ddt2mon.sym $$stan
+era ddt2mon0.hex
+ren ddt2mon0.hex=ddt2mon.hex
+mac ddt2mon $$pzsz+r
+era ddt2mon1.hex
+ren ddt2mon1.hex=ddt2mon.hex
+pip relddt0.hex=ddt1asm0.hex[i],ddt2mon0.hex[h]
+pip relddt1.hex=ddt1asm1.hex[i],ddt2mon1.hex[h]
+pip relddt.hex=relddt0.hex,relddt1.hex
+genmod relddt.hex relddt.com
+genhex relddt 100
+era relddt0.hex
+ren relddt0.hex=relddt.hex
+genhex relddt 200
+era relddt1.hex
+ren relddt1.hex=relddt.hex
+mac ddt0mov
+xref ddt0mov
+vax ddt0mov.xrf $$stan
+vax ddt0mov.sym $$stan
+era ddt0mov0.hex
+ren ddt0mov0.hex=ddt0mov.hex
+mac ddt0mov $$pzsz+r
+era ddt0mov1.hex
+ren ddt0mov1.hex=ddt0mov.hex
+pip relddt0.hex=relddt0.hex[i],ddt0mov0.hex[h]
+pip relddt1.hex=relddt1.hex[i],ddt0mov1.hex[h]
+pip relddt.hex=relddt0.hex,relddt1.hex
+genmod relddt.hex rdt.prl $$z1500
+prlcom rdt.prl ddt.com
+pip e:=a:ddt.com
+pip e:=a:rdt.prl
+pip b:=a:ddt.com
+pip b:=a:rdt.prl
+era ddt*.asm
+era *.hex
+era *.prn
+era *.xrf
+era ddt.com
+era rdt.prl
+ren ddt.com=ddt.gen
+ren rdt.prl=rdt.gen
+stat rdt.prl $$r/o
+stat ddt.com $$r/o
+;end ddt submit
+

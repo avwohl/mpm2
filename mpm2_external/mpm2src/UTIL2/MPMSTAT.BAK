@@ -1,0 +1,74 @@
+era mscmn.plm
+pip a:=e:mscmn.plm
+seteof mscmn.plm
+era brspbi.asm
+pip a:=e:brspbi.asm
+seteof brspbi.asm
+isx
+asm80 brspbi.asm pagewidth(80) debug
+era brspbi.asm
+ren brspbi=brspbi.obj
+cpm
+vax brspbi.lst $$stan
+era msrsp.plm
+pip a:=e:msrsp.plm
+seteof msrsp.plm
+era msbrs.plm
+pip a:=e:msbrs.plm
+seteof msbrs.plm
+era *.lst
+era *.sym
+era *.lin
+era *.bak
+isx
+plm80 msrsp.plm pagewidth(80) debug
+era msrsp.plm
+link msrsp.obj to msrsp.mod
+era msrsp.obj
+locate msrsp.mod to msrsp1 code(0000H) stacksize(0)
+locate msrsp.mod to msrsp2 code(0100H) stacksize(0)
+era msrsp.mod
+objhex msrsp1 to msrsp1.hex
+objhex msrsp2 to msrsp2.hex
+era msrsp2
+cpm
+objcpm msrsp1
+era msrsp1
+era msrsp1.com
+pip msrsp.hex=msrsp1.hex,msrsp2.hex
+genmod msrsp.hex msrsp.rsp
+pip e:mpmstat.rsp=a:msrsp.rsp
+pip b:mpmstat.rsp=a:msrsp.rsp
+vax msrsp.lst $$stan
+vax msrsp1.sym $$stan
+vax msrsp1.lin $$stan
+era msrsp*.*
+era *.lst
+era *.sym
+era *.lin
+era *.bak
+isx
+plm80 msbrs.plm pagewidth(80) debug
+era msbrs.plm
+link msbrs.obj,brspbi,plm80.lib to msbrs.mod
+era msbrs.obj
+locate msbrs.mod to msbrs1 code(0000H) stacksize(0)
+locate msbrs.mod to msbrs2 code(0100H) stacksize(0)
+era msbrs.mod
+objhex msbrs1 to msbrs1.hex
+objhex msbrs2 to msbrs2.hex
+era msbrs2
+cpm
+objcpm msbrs1
+era msbrs1
+era msbrs1.com
+pip msbrs.hex=msbrs1.hex,msbrs2.hex
+genmod msbrs.hex msbrs.brs
+pip e:mpmstat.brs=a:msbrs.brs
+pip b:mpmstat.brs=a:msbrs.brs
+vax msbrs.lst $$stan
+vax msbrs1.sym $$stan
+vax msbrs1.lin $$stan
+era msbrs*.*
+;end mpmstat submit
+

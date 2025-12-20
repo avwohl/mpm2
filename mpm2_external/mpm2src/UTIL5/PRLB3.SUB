@@ -1,0 +1,85 @@
+pip a:=e:user.plm
+seteof user.plm
+isx
+plm80 user.plm pagewidth(80) debug
+era user.plm
+link user.obj,x0100,plm80.lib to user1.mod
+locate user1.mod code(0100H) stacksize(100)
+era user1.mod
+objhex user1 to user1.hex
+link user.obj,x0200,plm80.lib to user2.mod
+locate user2.mod code(0200H) stacksize(100)
+era user2.mod
+objhex user2 to user2.hex
+era user2
+cpm
+objcpm user1
+ren user.sym=user1.sym
+ren user.lin=user1.lin
+vax user.lst $$stan
+vax user.sym $$stan
+vax user.lin $$stan
+era user1.com
+pip user.hex=user1.hex,user2.hex
+era user1.hex
+era user2.hex
+zero
+genmod user.hex xuser.prl 
+era *.hex
+pip e:user.prl=a:xuser.prl
+pip b:user.prl=a:xuser.prl
+era xuser.*
+pip a:=e:abort.plm
+seteof abort.plm
+isx
+plm80 abort.plm pagewidth(80) debug
+era abort.plm
+link abort.obj,x0100,plm80.lib to abort1.mod
+locate abort1.mod code(0100H) stacksize(100)
+era abort1.mod
+objhex abort1 to abort1.hex
+link abort.obj,x0200,plm80.lib to abort2.mod
+locate abort2.mod code(0200H) stacksize(100)
+era abort2.mod
+objhex abort2 to abort2.hex
+era abort2
+cpm
+objcpm abort1
+era abort1.com
+ren abortp.lst=abort.lst
+ren abortp.sym=abort1.sym
+ren abortp.lin=abort1.lin
+vax abortp.lst $$stan
+vax abortp.sym $$stan
+vax abortp.lin $$stan
+pip abort.hex=abort1.hex,abort2.hex
+era abort1.hex
+era abort2.hex
+zero
+genmod abort.hex xabort.prl 
+era *.hex
+pip e:abort.prl=a:xabort.prl
+pip b:abort.prl=a:xabort.prl
+era xabort.*
+pip a:=e:mschd.plm
+seteof mschd.plm
+isx
+plm80 mschd.plm pagewidth(80) debug
+era mschd.plm
+link mschd.obj,x0100,plm80.lib to mschd1.mod
+locate mschd1.mod code(0100H) stacksize(100)
+era mschd1.mod
+objhex mschd1 to mschd1.hex
+link mschd.obj,x0200,plm80.lib to mschd2.mod
+locate mschd2.mod code(0200H) stacksize(100)
+era mschd2.mod
+objhex mschd2 to mschd2.hex
+era mschd2
+cpm
+objcpm mschd1
+era mschd1.com
+ren schedp.lst=mschd.lst
+ren schedp.sym=mschd1.sym
+ren schedp.lin=mschd1.lin
+submit e:prlb3b
+

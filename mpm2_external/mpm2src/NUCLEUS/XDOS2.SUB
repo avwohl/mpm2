@@ -1,0 +1,35 @@
+pip b:=a:xdos.spr
+pip b:=a:bnkxdos.spr
+pip b:=a:tmp.spr
+pip e:=a:bnkxdos.spr
+pip e:=a:xdos.spr
+pip e:=a:tmp.spr
+era bnkxdos.spr
+era xdos.spr
+era tmp.spr
+ren xdos.spr=xdos.rps
+ren tmp.spr=tmp.rps
+ren bnkxdos.spr=bnkxdos.rps
+era attach.*
+era bnkxdos.*
+era clbdos.*
+era cli.*
+era clock.*
+era datapg.*
+era dsptch.*
+era flag.*
+era lst.*
+era memmgr.*
+era mpm.*
+era patch.*
+era queue.*
+era rlsdev.*
+era rlsmx.*
+era th.*
+era tick.*
+era tmpsub.*
+era ver.*
+era xdos.*
+era xdosif.*
+;end nucleus submit
+

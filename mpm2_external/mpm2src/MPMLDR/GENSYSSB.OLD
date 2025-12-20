@@ -1,0 +1,39 @@
+stat gensys.com $$r/w
+era *.lst
+era *.lin
+era *.sym
+era *.bak
+era gensys.plm
+pip a:=a:gensys.plm[g9]
+seteof gensys.plm
+era ldrlwr.asm
+pip a:=a:ldrlwr.asm[g9]
+seteof ldrlwr.asm
+era x0100.asm
+pip a:=a:x0100.asm[g9]
+seteof x0100.asm
+isx
+plm80 gensys.plm debug
+era gensys.plm
+asm80 ldrlwr.asm debug
+era ldrlwr.asm
+asm80 x0100.asm debug
+era x0100.asm
+link gensys.obj,ldrlwr.obj,x0100.obj,plm80.lib to gensys.mod
+era gensys.obj
+era ldrlwr.obj
+era x0100.obj
+locate gensys.mod code(0100H) stacksize(100)
+era gensys.mod
+cpm
+objcpm gensys
+era gensys
+vax gensys.lst $$stan
+vax gensys.sym $$stan
+vax gensys.lin $$stan
+vax ldrlwr.lst $$stan
+vax x0100.lst $$stan
+era *.lst
+era *.sym
+era *.lin
+

@@ -1,0 +1,71 @@
+stat asm.prl $$r/w
+ren asm.gen=asm.prl
+pip a:=e:as*.asm
+mac as0com
+xref as0com
+vax as0com.xrf $$stan
+vax as0com.sym $$stan
+era *.prn
+era *.sym
+mac as1io
+xref as1io
+vax as1io.xrf $$stan
+vax as1io.sym $$stan
+era *.prn
+era *.sym
+mac as2scan
+xref as2scan
+vax as2scan.xrf $$stan
+vax as2scan.sym $$stan
+era *.prn
+era *.sym
+mac as3sym
+vax as3sym.xrf $$stan
+vax as3sym.sym $$stan
+era *.prn
+era *.sym
+pip as00.hex=as0com.hex[i],as1io.hex[i],as2scan.hex[i],as3sym.hex[h]
+mac as0com $$pzsz+r
+mac as1io $$pzsz+r
+mac as2scan $$pzsz+r
+mac as3sym $$pzsz+r
+pip as01.hex=as0com.hex[i],as1io.hex[i],as2scan.hex[i],as3sym.hex[h]
+mac as4sear
+xref as4sear
+vax as4sear.xrf $$stan
+vax as4sear.sym $$stan
+era *.prn
+era *.sym
+mac as5oper
+xref as5oper
+vax as5oper.xrf $$stan
+vax as5oper.sym $$stan
+era *.prn
+era *.sym
+mac as6main
+xref as6main
+vax as6main.xrf $$stan
+vax as6main.sym $$stan
+era *.prn
+era *.sym
+pip as10.hex=as4sear.hex[i],as5oper.hex[i],as6main.hex[h]
+mac as4sear $$pzsz+r
+mac as5oper $$pzsz+r
+mac as6main $$pzsz+r
+pip as11.hex=as4sear.hex[i],as5oper.hex[i],as6main.hex[h]
+pip as0.hex=as00.hex[i],as10.hex[h]
+pip as1.hex=as01.hex[i],as11.hex[h]
+pip asm.hex=as0.hex,as1.hex
+genmod asm.hex asm.prl $$1000
+era *.xrf
+era *.hex
+era *.sym
+era *.prn
+era as*.asm
+pip e:=a:asm.prl
+pip b:=a:asm.prl
+era asm.prl
+ren asm.prl=asm.gen
+stat asm.prl $$r/o
+;end asm submit
+

@@ -1,0 +1,60 @@
+stat mpmldr.com $$r/w
+ren mpmldr.gen=mpmldr.com
+era *.lst
+era *.bak
+era *.sym
+era *.lin
+era mpmldr.plm
+pip a:=e:mpmldr.plm
+seteof mpmldr.plm
+era ldmonx.asm
+pip a:=e:ldmonx.asm
+seteof ldmonx.asm
+isx
+plm80 mpmldr.plm debug
+era mpmldr.plm
+asm80 ldmonx.asm debug
+era ldmonx.asm
+link mpmldr.obj,ldmonx.obj,plm80.lib to mpmldr.mod
+era mpmldr.obj
+era ldmonx.obj
+locate mpmldr.mod stacksize(20) code(0100h)
+era mpmldr.mod
+objhex mpmldr to impmldr.hex
+cpm
+objcpm mpmldr
+vax mpmldr.lst $$stan
+vax mpmldr.sym $$stan
+vax mpmldr.lin $$stan
+vax ldmonx.lst $$stan
+era *.lst
+era *.lin
+era *.sym
+era ldrbdos.asm
+pip a:=e:ldrbdos.asm
+seteof ldrbdos.asm
+era ldrbios.asm
+pip a:=e:ldrbios.asm
+seteof ldrbios.asm
+mac ldrbdos
+xref ldrbdos
+era ldrbdos.asm
+vax ldrbdos.xrf $$stan
+vax ldrbdos.sym $$stan
+mac ldrbios
+xref ldrbios
+era ldrbios.asm
+vax ldrbios.xrf $$stan
+vax ldrbios.sym $$stan
+pip mpmldr.hex=impmldr.hex[I],ldrbdos.hex[I],ldrbios.hex[H]
+era impmldr.hex
+era ldrbdos.hex
+era ldrbios.hex
+load mpmldr
+era mpmldr.hex
+pip e:=a:mpmldr.com
+pip b:=a:mpmldr.com
+era mpmldr.com
+ren mpmldr.com=mpmldr.gen
+;end mpmldr submit
+

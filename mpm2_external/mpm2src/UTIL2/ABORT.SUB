@@ -1,0 +1,19 @@
+stat abort.rsp $$r/w
+ren abort.gen=abort.rsp
+pip a:=e:abort.asm
+rmac abort
+xref abort
+vax abort.xrf $$stan
+link abort[or]
+pip e:=a:abort.rsp
+pip b:=a:abort.rsp
+era abort.rsp
+era abort.asm
+era abort.sym
+era abort.prn
+era abort.xrf
+era abort.rel
+ren abort.rsp=abort.gen
+stat abort.rsp $$r/o
+;end abort submit
+

@@ -1,0 +1,72 @@
+era brspbi.asm
+pip a:=e:brspbi.asm
+seteof brspbi.asm
+isx
+asm80 brspbi.asm pagewidth(80) debug
+era brspbi.asm
+ren brspbi=brspbi.obj
+cpm
+vax brspbi.lst $$stan
+era sprsp.plm
+pip a:=e:sprsp.plm
+seteof sprsp.plm
+era spbrs.plm
+pip a:=e:spbrs.plm
+seteof spbrs.plm
+era *.lst
+era *.sym
+era *.lin
+era *.bak
+isx
+plm80 sprsp.plm pagewidth(80) debug
+era sprsp.plm
+link sprsp.obj to sprsp.mod
+era sprsp.obj
+locate sprsp.mod to sprsp1 code(0000H) stacksize(0)
+locate sprsp.mod to sprsp2 code(0100H) stacksize(0)
+era sprsp.mod
+objhex sprsp1 to sprsp1.hex
+objhex sprsp2 to sprsp2.hex
+era sprsp2
+cpm
+objcpm sprsp1
+era sprsp1
+era sprsp1.com
+pip sprsp.hex=sprsp1.hex,sprsp2.hex
+genmod sprsp.hex sprsp.rsp
+pip e:spool.rsp=a:sprsp.rsp
+pip b:spool.rsp=a:sprsp.rsp
+vax sprsp.lst $$stan
+vax sprsp1.sym $$stan
+vax sprsp1.lin $$stan
+era sprsp*.*
+era *.lst
+era *.sym
+era *.lin
+era *.bak
+isx
+plm80 spbrs.plm pagewidth(80) debug
+era spbrs.plm
+link spbrs.obj,brspbi,plm80.lib to spbrs.mod
+era spbrs.obj
+locate spbrs.mod to spbrs1 code(0000H) stacksize(0)
+locate spbrs.mod to spbrs2 code(0100H) stacksize(0)
+era spbrs.mod
+objhex spbrs1 to spbrs1.hex
+objhex spbrs2 to spbrs2.hex
+era spbrs2
+cpm
+objcpm spbrs1
+era spbrs1
+era spbrs1.com
+pip spbrs.hex=spbrs1.hex,spbrs2.hex
+genmod spbrs.hex spbrs.brs
+pip e:spool.brs=a:spbrs.brs
+pip b:spool.brs=a:spbrs.brs
+vax spbrs.lst $$stan
+vax spbrs1.sym $$stan
+vax spbrs1.lin $$stan
+era spbrs*.*
+era brspbi.*
+;end spool submit
+
