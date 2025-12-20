@@ -1,0 +1,192 @@
+// mkboot.cpp - Create MP/M II boot image for emulator
+// Part of MP/M II Emulator
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Creates a boot image with components at their correct addresses:
+//   0x0100 - MPMLDR.COM (CP/M loader)
+//   0xF000 - LDRBIOS (loader BIOS)
+//   0xFC00 - XIOS (extended I/O system)
+//
+// Usage: mkboot -l ldrbios.bin -x xios.bin -m mpmldr.com -o boot.img
+
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <cstdint>
+#include <cstring>
+#include <getopt.h>
+
+void print_usage(const char* prog) {
+    std::cerr << "Usage: " << prog << " [options]\n"
+              << "\n"
+              << "Options:\n"
+              << "  -l, --ldrbios FILE   LDRBIOS binary (loaded at 0xF000)\n"
+              << "  -x, --xios FILE      XIOS binary (loaded at 0xFC00)\n"
+              << "  -m, --mpmldr FILE    MPMLDR.COM (loaded at 0x0100)\n"
+              << "  -o, --output FILE    Output boot image\n"
+              << "  -h, --help           Show this help\n"
+              << "\n";
+}
+
+bool load_file(const std::string& filename, std::vector<uint8_t>& data) {
+    std::ifstream file(filename, std::ios::binary);
+    if (!file) {
+        std::cerr << "Error: Cannot open " << filename << "\n";
+        return false;
+    }
+
+    file.seekg(0, std::ios::end);
+    size_t size = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    data.resize(size);
+    file.read(reinterpret_cast<char*>(data.data()), size);
+
+    return true;
+}
+
+int main(int argc, char* argv[]) {
+    std::string ldrbios_file;
+    std::string xios_file;
+    std::string mpmldr_file;
+    std::string output_file;
+
+    static struct option long_options[] = {
+        {"ldrbios", required_argument, nullptr, 'l'},
+        {"xios",    required_argument, nullptr, 'x'},
+        {"mpmldr",  required_argument, nullptr, 'm'},
+        {"output",  required_argument, nullptr, 'o'},
+        {"help",    no_argument,       nullptr, 'h'},
+        {nullptr,   0,                 nullptr, 0}
+    };
+
+    int opt;
+    while ((opt = getopt_long(argc, argv, "l:x:m:o:h", long_options, nullptr)) != -1) {
+        switch (opt) {
+            case 'l': ldrbios_file = optarg; break;
+            case 'x': xios_file = optarg; break;
+            case 'm': mpmldr_file = optarg; break;
+            case 'o': output_file = optarg; break;
+            case 'h':
+                print_usage(argv[0]);
+                return 0;
+            default:
+                print_usage(argv[0]);
+                return 1;
+        }
+    }
+
+    if (output_file.empty()) {
+        std::cerr << "Error: Output file required (-o)\n";
+        print_usage(argv[0]);
+        return 1;
+    }
+
+    // Create 64KB memory image (all 0x00)
+    std::vector<uint8_t> image(65536, 0x00);
+
+    // Set up page zero with standard CP/M vectors
+    // 0x0000: JP to warm boot (LDRBIOS+3 at 0x1703)
+    image[0x0000] = 0xC3;  // JP
+    image[0x0001] = 0x03;
+    image[0x0002] = 0x17;  // JP 0x1703 (WBOOT in LDRBIOS)
+
+    // 0x0003: I/O byte (not used much)
+    image[0x0003] = 0x00;
+
+    // 0x0004: Current disk/user
+    image[0x0004] = 0x00;
+
+    // 0x0005: JP to BDOS entry
+    // MPMLDR has its own LDRBDOS at 0x0D00 - we don't need to redirect
+    // But we set a BDOS address for compatibility
+    image[0x0005] = 0xC3;  // JP
+    image[0x0006] = 0x06;
+    image[0x0007] = 0x0D;  // JP 0x0D06 (MPMLDR's internal BDOS)
+
+    // RST 7 / RST 38H (0x0038): JP to XIOS tick handler at 0xFC80
+    image[0x0038] = 0xC3;  // JP
+    image[0x0039] = 0x80;
+    image[0x003A] = 0xFC;  // 0xFC80
+
+    // 0x005C-0x007F: Default FCB (for MPMLDR to find MPM.SYS)
+    // Set up FCB for "MPM     SYS" on drive A:
+    image[0x005C] = 0x00;  // Drive A: (0 = default)
+    // Filename: "MPM     " (8 chars, space padded)
+    image[0x005D] = 'M';
+    image[0x005E] = 'P';
+    image[0x005F] = 'M';
+    image[0x0060] = ' ';
+    image[0x0061] = ' ';
+    image[0x0062] = ' ';
+    image[0x0063] = ' ';
+    image[0x0064] = ' ';
+    // Extension: "SYS"
+    image[0x0065] = 'S';
+    image[0x0066] = 'Y';
+    image[0x0067] = 'S';
+
+    // 0x0080: Default DMA buffer (command line tail)
+
+    // Load MPMLDR at 0x0100
+    if (!mpmldr_file.empty()) {
+        std::vector<uint8_t> mpmldr;
+        if (!load_file(mpmldr_file, mpmldr)) {
+            return 1;
+        }
+
+        if (mpmldr.size() > 0xF000 - 0x0100) {
+            std::cerr << "Error: MPMLDR too large\n";
+            return 1;
+        }
+
+        std::memcpy(&image[0x0100], mpmldr.data(), mpmldr.size());
+        std::cout << "Loaded MPMLDR at 0x0100 (" << mpmldr.size() << " bytes)\n";
+    }
+
+    // Load LDRBIOS at 0x1700 (as expected by MPMLDR's LDRBDOS)
+    if (!ldrbios_file.empty()) {
+        std::vector<uint8_t> ldrbios;
+        if (!load_file(ldrbios_file, ldrbios)) {
+            return 1;
+        }
+
+        // LDRBIOS must fit before MPMLDR ends (around 0x1780)
+        // and before high memory
+        if (ldrbios.size() > 0x1000) {  // 4KB max
+            std::cerr << "Error: LDRBIOS too large (max 4096 bytes)\n";
+            return 1;
+        }
+
+        std::memcpy(&image[0x1700], ldrbios.data(), ldrbios.size());
+        std::cout << "Loaded LDRBIOS at 0x1700 (" << ldrbios.size() << " bytes)\n";
+    }
+
+    // Load XIOS at 0xFC00
+    if (!xios_file.empty()) {
+        std::vector<uint8_t> xios;
+        if (!load_file(xios_file, xios)) {
+            return 1;
+        }
+
+        if (xios.size() > 0x10000 - 0xFC00) {
+            std::cerr << "Error: XIOS too large\n";
+            return 1;
+        }
+
+        std::memcpy(&image[0xFC00], xios.data(), xios.size());
+        std::cout << "Loaded XIOS at 0xFC00 (" << xios.size() << " bytes)\n";
+    }
+
+    // Write output file
+    std::ofstream out(output_file, std::ios::binary);
+    if (!out) {
+        std::cerr << "Error: Cannot create " << output_file << "\n";
+        return 1;
+    }
+
+    out.write(reinterpret_cast<const char*>(image.data()), image.size());
+    std::cout << "Created boot image: " << output_file << " (65536 bytes)\n";
+
+    return 0;
+}

@@ -1,0 +1,66 @@
+# Build artifacts
+build/
+*.o
+*.a
+*.so
+*.dylib
+
+# Executables
+mpm2_emu
+mkboot
+mkdisk
+
+# Disk images (regenerated from source files)
+disks/*.img
+disks/*.dsk
+
+# SSH keys (sensitive - generate locally)
+keys/
+
+# Editor/IDE files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.sublime-*
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+Makefile
+
+# wolfSSL and wolfSSH libraries
+# These must be downloaded separately by developers due to:
+# - Copyright restrictions
+# - Cryptographic export control regulations
+# Developers should install these system-wide or in a local prefix
+wolfssl/
+wolfssh/
+wolfssl-*/
+wolfssh-*/
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+
+# Assembled binaries (regenerate with z80asm)
+asm/*.bin
+asm/*.lst
+
+# External MP/M II source/binaries
+# These are copyrighted Digital Research materials
+# Developers must obtain these separately
+mpm2_external/
+
+# Patched system files
+/tmp/MPM*.SYS
+
+# macOS
+.DS_Store
+
+# Linux
+*.core

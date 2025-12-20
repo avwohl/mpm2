@@ -1,0 +1,138 @@
+// xios.h - MP/M II Extended I/O System
+// Part of MP/M II Emulator
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+#ifndef XIOS_H
+#define XIOS_H
+
+#include <cstdint>
+#include <atomic>
+
+class qkz80;
+class BankedMemory;
+
+// XIOS jump table offsets (from BIOS base)
+// Standard BIOS entries (00H-30H)
+constexpr uint8_t XIOS_BOOT      = 0x00;  // Cold boot
+constexpr uint8_t XIOS_WBOOT     = 0x03;  // Warm boot
+constexpr uint8_t XIOS_CONST     = 0x06;  // Console status
+constexpr uint8_t XIOS_CONIN     = 0x09;  // Console input
+constexpr uint8_t XIOS_CONOUT    = 0x0C;  // Console output
+constexpr uint8_t XIOS_LIST      = 0x0F;  // List output
+constexpr uint8_t XIOS_PUNCH     = 0x12;  // Punch output
+constexpr uint8_t XIOS_READER    = 0x15;  // Reader input
+constexpr uint8_t XIOS_HOME      = 0x18;  // Home disk
+constexpr uint8_t XIOS_SELDSK    = 0x1B;  // Select disk
+constexpr uint8_t XIOS_SETTRK    = 0x1E;  // Set track
+constexpr uint8_t XIOS_SETSEC    = 0x21;  // Set sector
+constexpr uint8_t XIOS_SETDMA    = 0x24;  // Set DMA address
+constexpr uint8_t XIOS_READ      = 0x27;  // Read sector
+constexpr uint8_t XIOS_WRITE     = 0x2A;  // Write sector
+constexpr uint8_t XIOS_LISTST    = 0x2D;  // List status
+constexpr uint8_t XIOS_SECTRAN   = 0x30;  // Sector translate
+
+// Extended XIOS entries (33H-48H)
+constexpr uint8_t XIOS_SELMEMORY   = 0x33;  // Select memory bank
+constexpr uint8_t XIOS_POLLDEVICE  = 0x36;  // Poll device
+constexpr uint8_t XIOS_STARTCLOCK  = 0x39;  // Start system clock
+constexpr uint8_t XIOS_STOPCLOCK   = 0x3C;  // Stop system clock
+constexpr uint8_t XIOS_EXITREGION  = 0x3F;  // Exit critical region
+constexpr uint8_t XIOS_MAXCONSOLE  = 0x42;  // Maximum console number
+constexpr uint8_t XIOS_SYSTEMINIT  = 0x45;  // System initialization
+constexpr uint8_t XIOS_IDLE        = 0x48;  // Idle procedure
+
+// MP/M II flags (set by interrupt handlers)
+constexpr uint8_t FLAG_TICK     = 1;   // System tick (16.67ms)
+constexpr uint8_t FLAG_SECOND   = 2;   // One-second flag
+constexpr uint8_t FLAG_DISK     = 5;   // Disk operation complete
+
+// XIOS context - maintains state for XIOS calls
+class XIOS {
+public:
+    XIOS(qkz80* cpu, BankedMemory* mem);
+
+    // Set XIOS base address (jump table location)
+    void set_base(uint16_t base) { xios_base_ = base; }
+    uint16_t base() const { return xios_base_; }
+
+    // Set LDRBIOS base address (used during boot)
+    void set_ldrbios_base(uint16_t base) { ldrbios_base_ = base; }
+    uint16_t ldrbios_base() const { return ldrbios_base_; }
+
+    // Set BDOS stub address (for boot phase)
+    void set_bdos_stub(uint16_t addr) { bdos_stub_ = addr; }
+
+    // Check if address is an XIOS, LDRBIOS, or BDOS entry point
+    bool is_xios_call(uint16_t pc) const;
+
+    // Handle XIOS call at current PC
+    // Returns true if call was handled
+    bool handle_call(uint16_t pc);
+
+    // Timer tick - called from interrupt handler
+    void tick();
+
+    // One-second tick
+    void one_second_tick();
+
+    // Clock control (STARTCLOCK/STOPCLOCK)
+    bool clock_enabled() const { return tick_enabled_.load(); }
+
+    // PREEMPT flag for interrupt handling
+    bool is_preempted() const { return preempted_.load(); }
+    void set_preempted(bool p) { preempted_.store(p); }
+
+private:
+    // BIOS-compatible entries
+    void do_boot();
+    void do_wboot();
+    void do_const();
+    void do_conin();
+    void do_conout();
+    void do_list();
+    void do_punch();
+    void do_reader();
+    void do_home();
+    void do_seldsk();
+    void do_settrk();
+    void do_setsec();
+    void do_setdma();
+    void do_read();
+    void do_write();
+    void do_listst();
+    void do_sectran();
+
+    // Extended XIOS entries
+    void do_selmemory();
+    void do_polldevice();
+    void do_startclock();
+    void do_stopclock();
+    void do_exitregion();
+    void do_maxconsole();
+    void do_systeminit();
+    void do_idle();
+
+    // BDOS stub (for boot phase)
+    void do_bdos();
+
+    // Simulate RET instruction
+    void do_ret();
+
+    qkz80* cpu_;
+    BankedMemory* mem_;
+    uint16_t xios_base_;
+    uint16_t ldrbios_base_;
+    uint16_t bdos_stub_;
+
+    // Disk state
+    uint8_t current_disk_;
+    uint16_t current_track_;
+    uint16_t current_sector_;
+    uint16_t dma_addr_;
+
+    // Clock control
+    std::atomic<bool> tick_enabled_;
+    std::atomic<bool> preempted_;
+};
+
+#endif // XIOS_H
