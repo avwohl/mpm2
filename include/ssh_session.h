@@ -17,6 +17,7 @@
 // Forward declarations for wolfSSH types
 struct WOLFSSH_CTX;
 struct WOLFSSH;
+struct WOLFSSH_CHANNEL;
 struct WS_UserAuthData;
 
 // wolfSSH uses 'byte' type
@@ -92,6 +93,7 @@ private:
 
     // wolfSSH callbacks
     static int user_auth_callback(byte auth_type, WS_UserAuthData* auth_data, void* ctx);
+    static int channel_shell_callback(WOLFSSH_CHANNEL* channel, void* ctx);
 
     WOLFSSH_CTX* ctx_;
     int listen_fd_;

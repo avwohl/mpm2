@@ -131,6 +131,31 @@ void Z80Thread::thread_func() {
             }
         }
 
+        // Check for HALT instruction (0x76) - handle specially for MP/M
+        // qkz80 library calls exit() on HALT, but MP/M uses HALT in idle loop
+        uint8_t opcode = memory_->fetch_mem(pc);
+        if (opcode == 0x76) {
+            // HALT - wait for interrupt
+            // Advance PC past HALT
+            cpu_->regs.PC.set_pair16(pc + 1);
+            instruction_count_++;
+
+            // Wait for timer interrupt or stop request
+            while (!stop_requested_.load() && !xios_->clock_enabled()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+
+            // If interrupts are enabled and clock is running, wait for tick
+            if (cpu_->regs.IFF1 && xios_->clock_enabled()) {
+                // Sleep until next tick
+                auto now = std::chrono::steady_clock::now();
+                if (now < next_tick_) {
+                    std::this_thread::sleep_until(next_tick_);
+                }
+            }
+            continue;
+        }
+
         // Execute one instruction
         cpu_->execute();
         instruction_count_++;

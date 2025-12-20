@@ -204,22 +204,8 @@ int main(int argc, char* argv[]) {
     std::cout << "\nPress Ctrl+C to shutdown\n\n";
 
 #ifdef HAVE_WOLFSSH
-    // Run SSH accept loop in main thread
-    while (!g_shutdown_requested) {
-        // Clean up and accept with timeout
-        fd_set rfds;
-        FD_ZERO(&rfds);
-
-        struct timeval tv;
-        tv.tv_sec = 1;
-        tv.tv_usec = 0;
-
-        // Just sleep if no SSH
-        select(0, &rfds, nullptr, nullptr, &tv);
-
-        // Check for new connections periodically
-        // The accept_loop does its own select internally
-    }
+    // Run SSH accept loop in main thread (blocks until shutdown)
+    ssh_server.accept_loop();
 #else
     // Just wait for shutdown signal
     while (!g_shutdown_requested) {

@@ -207,6 +207,9 @@ bool SSHServer::init(const std::string& host_key_path,
     // Set up authentication callback
     wolfSSH_SetUserAuth(ctx_, user_auth_callback);
 
+    // Set up channel shell request callback
+    wolfSSH_CTX_SetChannelReqShellCb(ctx_, channel_shell_callback);
+
     return true;
 }
 
@@ -334,14 +337,15 @@ void SSHServer::cleanup_sessions() {
 
 int SSHServer::user_auth_callback(byte auth_type, WS_UserAuthData* auth_data, void* ctx) {
     (void)ctx;  // Unused for now
+    (void)auth_data;  // Accept all users
 
+    // Accept public key authentication
+    if (auth_type == WOLFSSH_USERAUTH_PUBLICKEY) {
+        return WOLFSSH_USERAUTH_SUCCESS;
+    }
+
+    // Accept password authentication
     if (auth_type == WOLFSSH_USERAUTH_PASSWORD) {
-        // Password authentication - accept all for now
-        // In a real implementation, verify username/password from auth_data
-        if (auth_data && auth_data->username) {
-            // Username is available at auth_data->username
-            // Password is at auth_data->sf.password.password
-        }
         return WOLFSSH_USERAUTH_SUCCESS;
     }
 
@@ -351,6 +355,13 @@ int SSHServer::user_auth_callback(byte auth_type, WS_UserAuthData* auth_data, vo
     }
 
     return WOLFSSH_USERAUTH_INVALID_AUTHTYPE;
+}
+
+int SSHServer::channel_shell_callback(WOLFSSH_CHANNEL* channel, void* ctx) {
+    (void)channel;
+    (void)ctx;
+    // Accept shell request
+    return WS_SUCCESS;
 }
 
 #endif // HAVE_WOLFSSH
