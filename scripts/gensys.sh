@@ -25,13 +25,14 @@ if [ ! -f "$DIST_DIR/GENSYS.COM" ]; then
     exit 1
 fi
 
-# Build RESXIOS.SPR if needed
-if [ ! -f "$DISKS_DIR/RESXIOS.SPR" ] || [ "$ASM_DIR/resxios.asm" -nt "$DISKS_DIR/RESXIOS.SPR" ]; then
-    echo "Building RESXIOS.SPR..."
+# Build BNKXIOS.SPR if needed (using um80/ul80)
+if [ ! -f "$DISKS_DIR/BNKXIOS.SPR" ] || [ "$ASM_DIR/bnkxios.mac" -nt "$DISKS_DIR/BNKXIOS.SPR" ]; then
+    echo "Building BNKXIOS.SPR..."
     cd "$ASM_DIR"
-    z80asm resxios.asm -o resxios.bin
-    "$BUILD_DIR/mkspr" resxios.bin "$DISKS_DIR/RESXIOS.SPR" 512
-    rm -f resxios.bin
+    um80 bnkxios.mac -o bnkxios.rel
+    ul80 bnkxios.rel --prl -o "$DISKS_DIR/BNKXIOS.SPR" -p 0
+    cp "$DISKS_DIR/BNKXIOS.SPR" "$DISKS_DIR/RESXIOS.SPR"
+    rm -f bnkxios.rel
 fi
 
 # Create a working directory with all needed files
@@ -50,8 +51,9 @@ cp "$DIST_DIR/BNKBDOS.SPR" "$WORKDIR/"
 cp "$DIST_DIR/BNKXDOS.SPR" "$WORKDIR/"
 cp "$DIST_DIR/TMP.SPR" "$WORKDIR/"
 
-# Copy our RESXIOS.SPR (for non-banked mode)
+# Copy our XIOS SPR files
 cp "$DISKS_DIR/RESXIOS.SPR" "$WORKDIR/"
+cp "$DISKS_DIR/BNKXIOS.SPR" "$WORKDIR/"
 
 # Copy RSP files (optional)
 for f in "$DIST_DIR"/*.RSP; do
@@ -77,7 +79,10 @@ echo ""
 
 "$CPMEMU" --z80 GENSYS.COM
 
-# Check if MPM.SYS was created
+# Check if MPM.SYS was created (cpmemu creates lowercase)
+if [ -f "$WORKDIR/mpm.sys" ]; then
+    mv "$WORKDIR/mpm.sys" "$WORKDIR/MPM.SYS"
+fi
 if [ -f "$WORKDIR/MPM.SYS" ]; then
     mkdir -p "$DISKS_DIR"
     cp "$WORKDIR/MPM.SYS" "$DISKS_DIR/"
@@ -86,6 +91,9 @@ if [ -f "$WORKDIR/MPM.SYS" ]; then
     ls -l "$DISKS_DIR/MPM.SYS"
 
     # Also copy SYSTEM.DAT if created
+    if [ -f "$WORKDIR/system.dat" ]; then
+        mv "$WORKDIR/system.dat" "$WORKDIR/SYSTEM.DAT"
+    fi
     if [ -f "$WORKDIR/SYSTEM.DAT" ]; then
         cp "$WORKDIR/SYSTEM.DAT" "$DISKS_DIR/"
         echo "SYSTEM.DAT created: $DISKS_DIR/SYSTEM.DAT"
