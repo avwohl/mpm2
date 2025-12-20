@@ -127,5 +127,11 @@ target_compile_options(mkdisk PRIVATE
     -Wall -Wextra -Wpedantic
 )
 
+# SPR file creation tool
+add_executable(mkspr tools/mkspr.cpp)
+target_compile_options(mkspr PRIVATE
+    -Wall -Wextra -Wpedantic
+)
+
 # Install targets
-install(TARGETS mpm2_emu mkboot mkdisk RUNTIME DESTINATION bin)
+install(TARGETS mpm2_emu mkboot mkdisk mkspr RUNTIME DESTINATION bin)
