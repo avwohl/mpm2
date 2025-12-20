@@ -54,8 +54,19 @@ echo "Step 3: Creating boot image..."
 echo ""
 echo "Step 4: Creating system disk..."
 
+# Check if MPM.SYS exists
+if [ ! -f "$DISKS_DIR/MPM.SYS" ]; then
+    echo "Warning: MPM.SYS not found. Run ./scripts/gensys.sh first."
+    echo "Continuing without MPM.SYS..."
+fi
+
 # Collect all files to add to disk
 FILES_TO_ADD=""
+
+# Add MPM.SYS first (if it exists)
+if [ -f "$DISKS_DIR/MPM.SYS" ]; then
+    FILES_TO_ADD="$DISKS_DIR/MPM.SYS"
+fi
 
 # Add RSP (Resident System Process) files
 for f in "$DIST_DIR"/*.RSP; do
