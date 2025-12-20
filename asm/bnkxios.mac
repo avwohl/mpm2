@@ -3,11 +3,17 @@
 ; BNKXIOS for MP/M II Emulator
 ; Assemble with um80, link with ul80 --prl
 ;
+; This XIOS forwards console/disk calls to the emulator's XIOS at 0xFC00.
+; The emulator intercepts calls at 0xFC00 and handles them in C++ code.
+;
 	.Z80
 	CSEG
 
 ; Number of consoles
 NMBCNS	EQU	8
+
+; Emulator XIOS base address - where the emulator intercepts calls
+EMUBASE	EQU	0FC00H
 
 ; XIOS Jump Table
 	JP	COMMONBASE	; 00 - to commonbase
@@ -50,34 +56,74 @@ WARMSTART:
 	LD	C,0
 	JP	XDOS
 
+; Console status - forward to emulator XIOS
 CONST:
+	JP	EMUBASE+06H
+
+; Console input - forward to emulator XIOS
 CONIN:
+	JP	EMUBASE+09H
+
+; Console output - forward to emulator XIOS
+CONOUT:
+	JP	EMUBASE+0CH
+
+; List output - forward to emulator XIOS
+LIST:
+	JP	EMUBASE+0FH
+
+; Punch/Reader - return empty
+RTNEMPTY:
 	XOR	A
 	RET
 
-CONOUT:
-LIST:
-RTNEMPTY:
+; Home disk - forward to emulator XIOS
 HOME:
-SETTRK:
-SETSEC:
-SETDMA:
-	RET
+	JP	EMUBASE+18H
 
+; Select disk - get our DPH, but let emulator handle the call
 SELDSK:
+	PUSH	BC
+	CALL	EMUBASE+1BH	; Let emulator know about selection
+	POP	BC
+	LD	A,C
+	OR	A		; Only drive A: supported for now
+	JR	NZ,SELDSK_BAD
 	LD	HL,DPH0
 	RET
+SELDSK_BAD:
+	LD	HL,0
+	RET
 
+; Set track - forward to emulator XIOS
+SETTRK:
+	JP	EMUBASE+1EH
+
+; Set sector - forward to emulator XIOS
+SETSEC:
+	JP	EMUBASE+21H
+
+; Set DMA - forward to emulator XIOS
+SETDMA:
+	JP	EMUBASE+24H
+
+; Read sector - forward to emulator XIOS
 READ:
+	JP	EMUBASE+27H
+
+; Write sector - forward to emulator XIOS
 WRITE:
-	XOR	A
-	RET
+	JP	EMUBASE+2AH
 
+; List status - forward to emulator XIOS
 LISTST:
-POLLDEV:
-	XOR	A
-	RET
+	JP	EMUBASE+2DH
 
+; Poll device - forward to emulator XIOS
+POLLDEV:
+	JP	EMUBASE+36H
+
+; Sector translate - no translation
 SECTRAN:
 	LD	H,B
 	LD	L,C
