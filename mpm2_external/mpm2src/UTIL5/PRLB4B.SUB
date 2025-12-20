@@ -1,0 +1,60 @@
+pip a:=e:stpsp.plm
+seteof stpsp.plm
+isx
+plm80 stpsp.plm pagewidth(80) debug
+era stpsp.plm
+link stpsp.obj,x0100,plm80.lib to stpsp1.mod
+locate stpsp1.mod code(0100H) stacksize(100)
+era stpsp1.mod
+objhex stpsp1 to stpsp1.hex
+link stpsp.obj,x0200,plm80.lib to stpsp2.mod
+locate stpsp2.mod code(0200H) stacksize(100)
+era stpsp2.mod
+objhex stpsp2 to stpsp2.hex
+era stpsp2
+cpm
+objcpm stpsp1
+ren stopsplr.lst=stpsp.lst
+ren stopsplr.sym=stpsp1.sym
+ren stopsplr.lin=stpsp1.lin
+vax stopsplr.lst $$stan
+vax stopsplr.sym $$stan
+vax stopsplr.lin $$stan
+era stpsp1.com
+pip stpsp.hex=stpsp1.hex,stpsp2.hex
+era stpsp1.hex
+era stpsp2.hex
+zero
+genmod stpsp.hex xstpsp.prl 
+pip e:stopsplr.prl=a:xstpsp.prl
+pip b:stopsplr.prl=a:xstpsp.prl
+era xstpsp.*
+era *.hex
+pip a:=e:dump.asm
+seteof dump.asm
+pip a:=e:extrn.asm
+seteof extrn.asm
+rmac dump
+xref dump
+vax dump.xrf $$stan
+era dump.asm
+rmac extrn
+xref extrn
+vax extrn.xrf $$stan
+era extrn.asm
+link xdump=dump,extrn[op]
+era dump.rel
+era extrn.rel
+era dump.xrf
+era dump.prn
+era extrn.xrf
+era extrn.prn
+pip e:dump.prl=a:xdump.prl
+pip b:dump.prl=a:xdump.prl
+era xdump.*
+era *.lst
+era *.lin
+era *.sym
+era *.obj
+;end prlb 1 2 3 4 submit
+

@@ -1,0 +1,71 @@
+pip a:=cns.plm[g8]
+seteof cns.plm
+isx
+plm80 cns.plm nolist debug
+era cns.plm
+link cns.obj,x0100,plm80.lib to cns1.mod
+locate cns1.mod code(0100H) stacksize(100)
+era cns1.mod
+objhex cns1 to cns1.hex
+link cns.obj,x0200,plm80.lib to cns2.mod
+locate cns2.mod code(0200H) stacksize(100)
+era cns2.mod
+objhex cns2 to cns2.hex
+era cns2
+cpm
+objcpm cns1
+era cns1.com
+pip cns.hex=cns1.hex,cns2.hex
+era cns1.hex
+era cns2.hex
+zero
+genmod cns.hex xcns.prl 
+era *.hex
+pip a:=drst.plm[g8]
+seteof drst.plm
+isx
+plm80 drst.plm nolist debug
+era drst.plm
+link drst.obj,x0100,plm80.lib to drst1.mod
+locate drst1.mod code(0100H) stacksize(100)
+era drst1.mod
+objhex drst1 to drst1.hex
+link drst.obj,x0200,plm80.lib to drst2.mod
+locate drst2.mod code(0200H) stacksize(100)
+era drst2.mod
+objhex drst2 to drst2.hex
+era drst2
+cpm
+objcpm drst1
+era drst1.com
+pip drst.hex=drst1.hex,drst2.hex
+era drst1.hex
+era drst2.hex
+zero
+genmod drst.hex xdrst.prl 
+era *.hex
+pip a:=print.plm[g8]
+seteof print.plm
+isx
+plm80 print.plm nolist debug
+era print.plm
+link print.obj,x0100,plm80.lib to print1.mod
+locate print1.mod code(0100H) stacksize(100)
+era print1.mod
+objhex print1 to print1.hex
+link print.obj,x0200,plm80.lib to print2.mod
+locate print2.mod code(0200H) stacksize(100)
+era print2.mod
+objhex print2 to print2.hex
+era print2
+cpm
+objcpm print1
+era print1.com
+pip print.hex=print1.hex,print2.hex
+era print1.hex
+era print2.hex
+zero
+genmod print.hex xprint.prl 
+era *.hex
+sub prlb2
+

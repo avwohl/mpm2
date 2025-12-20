@@ -1,0 +1,66 @@
+era brspbi.asm
+pip a:=brspbi.asm[g4]
+seteof brspbi.asm
+isx
+asm80 brspbi.asm pagewidth(80) debug
+era brspbi.asm
+ren brspbi=brspbi.obj
+cpm
+;vax brspbi.lst $$stan
+era $1rsp.plm
+pip a:=$1rsp.plm[g4]
+seteof $1rsp.plm
+era $1brs.plm
+pip a:=$1brs.plm[g4]
+seteof $1brs.plm
+era *.lst
+era *.sym
+era *.lin
+era *.bak
+isx
+plm80 $1rsp.plm pagewidth(80) debug
+era $1rsp.plm
+link $1rsp.obj to $1rsp.mod
+era $1rsp.obj
+locate $1rsp.mod to $1rsp1 code(0000H) stacksize(0)
+locate $1rsp.mod to $1rsp2 code(0100H) stacksize(0)
+era $1rsp.mod
+objhex $1rsp1 to $1rsp1.hex
+objhex $1rsp2 to $1rsp2.hex
+era $1rsp2
+cpm
+objcpm $1rsp1
+era $1rsp1
+era $1rsp1.com
+pip $1rsp.hex=$1rsp1.hex,$1rsp2.hex
+genmod $1rsp.hex $1rsp.rsp
+era $1rsp*.hex
+;vax $1rsp.lst $$stan
+;vax $1rsp1.sym $$stan
+;vax $1rsp1.lin $$stan
+era *.lst
+era *.sym
+era *.lin
+era *.bak
+isx
+plm80 $1brs.plm pagewidth(80) debug
+era $1brs.plm
+link $1brs.obj,brspbi,plm80.lib to $1brs.mod
+era $1brs.obj
+locate $1brs.mod to $1brs1 code(0000H) stacksize(0)
+locate $1brs.mod to $1brs2 code(0100H) stacksize(0)
+era $1brs.mod
+objhex $1brs1 to $1brs1.hex
+objhex $1brs2 to $1brs2.hex
+era $1brs2
+cpm
+objcpm $1brs1
+era $1brs1
+era $1brs1.com
+pip $1brs.hex=$1brs1.hex,$1brs2.hex
+genmod $1brs.hex $1brs.brs
+era $1brs*.hex
+;vax $1brs.lst $$stan
+;vax $1brs1.sym $$stan
+;vax $1brs1.lin $$stan
+

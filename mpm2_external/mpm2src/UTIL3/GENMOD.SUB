@@ -1,0 +1,14 @@
+era genmod.asm
+era xgenmod.asm
+pip a:xgenmod.asm=e:genmod.asm
+mac xgenmod
+xref xgenmod
+ren genmod.xrf=xgenmod.xrf
+vax genmod.xrf $$stan
+load xgenmod
+pip e:genmod.com=a:xgenmod.com
+pip b:genmod.com=a:xgenmod.com
+era *.xrf
+era xgenmod.*
+;end genmod submit
+

@@ -1,0 +1,82 @@
+ren tmp.rps=tmp.spr
+ren xdos.rps=xdos.spr
+ren bnkxdos.rps=bnkxdos.spr
+pip a:=e:*.asm
+era xdos*.lib
+rmac queue
+xref queue
+vax queue.xrf $$stan
+rmac dsptch
+xref dsptch
+vax dsptch.xrf $$stan
+rmac th
+xref th
+vax th.xrf $$stan
+rmac lst
+xref lst
+vax lst.xrf $$stan
+rmac xdos
+xref xdos
+vax xdos.xrf $$stan
+rmac memmgr
+xref memmgr
+vax memmgr.xrf $$stan
+rmac flag
+xref flag
+vax flag.xrf $$stan
+lib xdos1.lib=xdos.rel,dsptch.rel,queue.rel,flag.rel,memmgr.rel,th.rel,lst.rel
+rmac cli
+xref cli
+vax cli.xrf $$stan
+rmac tick
+xref tick
+vax tick.xrf $$stan
+rmac clock
+xref clock
+vax clock.xrf $$stan
+rmac attach
+xref attach
+vax attach.xrf $$stan
+lib xdos2.lib=cli.rel,tick.rel,clock.rel,attach.rel
+era *.sym
+rmac datapg
+xref datapg
+vax datapg.xrf $$stan
+rmac mpm
+xref mpm
+vax mpm.xrf $$stan
+rmac rlsmx
+xref rlsmx
+vax rlsmx.xrf $$stan
+rmac rlsdev
+xref rlsdev
+vax rlsdev.xrf $$stan
+lib xdos3.lib=datapg.rel,mpm.rel,rlsmx.rel,rlsdev.rel
+era *.sym
+rmac ver
+xref ver
+vax ver.xrf $$stan
+rmac clbdos
+xref clbdos
+vax clbdos.xrf $$stan
+rmac xdosif
+xref xdosif
+vax xdosif.xrf $$stan
+rmac patch
+xref patch
+vax patch.xrf $$stan
+link xdos.spr=ver.rel,xdos3.lib,xdos2.lib,xdos1.lib,patch.rel,clbdos.rel,xdosif.rel[os]
+era *.sym
+rmac tmpsub
+xref tmpsub
+vax tmpsub.xrf $$stan
+link tmpsub[os]
+era *.sym
+ren tmp.spr=tmpsub.spr
+rmac bnkxdos
+xref bnkxdos
+vax bnkxdos.xrf $$stan
+link bnkxdos[os]
+era *.sym
+submit xdos2
+

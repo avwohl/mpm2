@@ -1,0 +1,29 @@
+era b:*.lst
+era b:*.bak
+isx
+plm80 :f1:pip.plm debug nolist
+;era b:*.lst
+link :f1:pip.obj,:f1:x0100,plm80.lib to :f1:pip1.mod
+locate :f1:pip1.mod code(0100H) stacksize(100)
+era b:pip1.mod
+objhex :f1:pip1 to :f1:pip1.hex
+link :f1:pip.obj,:f1:x0200,plm80.lib to :f1:pip2.mod
+era b:pip.obj
+locate :f1:pip2.mod code(0200H) stacksize(100)
+era b:pip2.mod
+objhex :f1:pip2 to :f1:pip2.hex
+era b:pip2
+cpm
+;objcpm b:pip1
+era b:pip*.
+;pip lst:=b:pip1.sym[pt8]
+;pip lst:=b:pip1.lin[pt8]
+;pip lst:=nul:[p]
+era b:*.lin
+era b:*.sym
+pip b:pip.hex=b:pip1.hex,b:pip2.hex
+era b:pip1.hex
+era b:pip2.hex
+genmod b:pip.hex b:xpip.prl $$1000
+era b:*.hex
+

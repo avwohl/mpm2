@@ -1,0 +1,68 @@
+pip a:=e:mspl.plm
+seteof mspl.plm
+isx
+plm80 mspl.plm pagewidth(80) debug
+era mspl.plm
+link mspl.obj,x0100,plm80.lib to mspl1.mod
+locate mspl1.mod code(0100H) stacksize(100)
+era mspl1.mod
+objhex mspl1 to mspl1.hex
+link mspl.obj,x0200,plm80.lib to mspl2.mod
+locate mspl2.mod code(0200H) stacksize(100)
+era mspl2.mod
+objhex mspl2 to mspl2.hex
+era mspl2
+cpm
+objcpm mspl1
+ren spoolp.lst=mspl.lst
+ren spoolp.lin=mspl1.lin
+ren spoolp.sym=mspl1.sym
+vax spoolp.lst $$stan
+vax spoolp.sym $$stan
+vax spoolp.lin $$stan
+era mspl1.com
+pip mspl.hex=mspl1.hex,mspl2.hex
+era mspl1.hex
+era mspl2.hex
+zero
+genmod mspl.hex xmspl.prl 
+pip e:spool.prl=a:xmspl.prl
+pip b:spool.prl=a:xmspl.prl
+era xmspl.prl
+era *.hex
+pip a:=e:mscmn.plm
+seteof mscmn.plm
+pip a:=e:msts.plm
+seteof msts.plm
+isx
+plm80 msts.plm pagewidth(80) debug
+era mscmn.plm
+era msts.plm
+link msts.obj,x0100,plm80.lib to msts1.mod
+locate msts1.mod code(0100H) stacksize(100)
+era msts1.mod
+objhex msts1 to msts1.hex
+link msts.obj,x0200,plm80.lib to msts2.mod
+locate msts2.mod code(0200H) stacksize(100)
+era msts2.mod
+objhex msts2 to msts2.hex
+era msts2
+cpm
+objcpm msts1
+ren mpmstatp.lst=msts.lst
+ren mpmstatp.lin=msts1.lin
+ren mpmstatp.sym=msts1.sym
+vax mpmstatp.lst $$stan
+vax mpmstatp.sym $$stan
+vax mpmstatp.lin $$stan
+era msts1.com
+pip msts.hex=msts1.hex,msts2.hex
+era msts1.hex
+era msts2.hex
+zero
+genmod msts.hex xmsts.prl 
+pip e:mpmstat.prl=a:xmsts.prl
+pip b:mpmstat.prl=a:xmsts.prl
+era *.hex
+era xmsts.*
+submit e:prlb4b

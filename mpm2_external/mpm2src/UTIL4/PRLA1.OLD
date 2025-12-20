@@ -1,0 +1,73 @@
+pip a:=dir.plm[g8]
+seteof dir.plm
+isx
+plm80 dir.plm nolist debug
+era dir.plm
+link dir.obj,x0100,plm80.lib to dir1.mod
+locate dir1.mod code(0100H) stacksize(100)
+era dir1.mod
+objhex dir1 to dir1.hex
+link dir.obj,x0200,plm80.lib to dir2.mod
+locate dir2.mod code(0200H) stacksize(100)
+era dir2.mod
+objhex dir2 to dir2.hex
+era dir2
+cpm
+objcpm dir1
+era dir*.
+era dir1.com
+pip dir.hex=dir1.hex,dir2.hex
+era dir1.hex
+era dir2.hex
+zero
+genmod dir.hex xdir.prl 
+era *.hex
+pip a:=ed.plm[g8]
+seteof ed.plm
+isx
+plm80 ed.plm nolist debug
+era ed.plm
+link ed.obj,x0100,plm80.lib to ed1.mod
+locate ed1.mod code(0100H) stacksize(100)
+era ed1.mod
+objhex ed1 to ed1.hex
+link ed.obj,x0200,plm80.lib to ed2.mod
+locate ed2.mod code(0200H) stacksize(100)
+era ed2.mod
+objhex ed2 to ed2.hex
+era ed2
+cpm
+objcpm ed1
+era ed1.com
+pip ed.hex=ed1.hex,ed2.hex
+era ed1.hex
+era ed2.hex
+zero
+genmod ed.hex xed.prl $$1000
+era *.hex
+pip a:=era.plm[g8]
+seteof era.plm
+isx
+plm80 era.plm nolist debug
+era era.plm
+link era.obj,x0100,plm80.lib to era1.mod
+locate era1.mod code(0100H) stacksize(100)
+era era1.mod
+objhex era1 to era1.hex
+link era.obj,x0200,plm80.lib to era2.mod
+locate era2.mod code(0200H) stacksize(100)
+era era2.mod
+objhex era2 to era2.hex
+era era2
+cpm
+objcpm era1
+era era*.
+era era1.com
+pip era.hex=era1.hex,era2.hex
+era era1.hex
+era era2.hex
+zero
+genmod era.hex xera.prl 
+era *.hex
+sub prla2
+

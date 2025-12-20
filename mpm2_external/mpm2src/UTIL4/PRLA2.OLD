@@ -1,0 +1,71 @@
+pip a:=eraq.plm[g8]
+seteof eraq.plm
+isx
+plm80 eraq.plm nolist debug
+era eraq.plm
+link eraq.obj,x0100,plm80.lib to eraq1.mod
+locate eraq1.mod code(0100H) stacksize(100)
+era eraq1.mod
+objhex eraq1 to eraq1.hex
+link eraq.obj,x0200,plm80.lib to eraq2.mod
+locate eraq2.mod code(0200H) stacksize(100)
+era eraq2.mod
+objhex eraq2 to eraq2.hex
+era eraq2
+cpm
+objcpm eraq1
+era eraq1.com
+pip eraq.hex=eraq1.hex,eraq2.hex
+era eraq1.hex
+era eraq2.hex
+zero
+genmod eraq.hex xeraq.prl 
+era *.hex
+pip a:=ren.plm[g8]
+seteof ren.plm
+isx
+plm80 ren.plm nolist debug
+era ren.plm
+link ren.obj,x0100,plm80.lib to ren1.mod
+locate ren1.mod code(0100H) stacksize(100)
+era ren1.mod
+objhex ren1 to ren1.hex
+link ren.obj,x0200,plm80.lib to ren2.mod
+locate ren2.mod code(0200H) stacksize(100)
+era ren2.mod
+objhex ren2 to ren2.hex
+era ren2
+cpm
+objcpm ren1
+era ren1.com
+pip ren.hex=ren1.hex,ren2.hex
+era ren1.hex
+era ren2.hex
+zero
+genmod ren.hex xren.prl 
+era *.hex
+pip a:=set.plm[g8]
+seteof set.plm
+isx
+plm80 set.plm nolist debug
+era set.plm
+link set.obj,x0100,plm80.lib to set1.mod
+locate set1.mod code(0100H) stacksize(100)
+era set1.mod
+objhex set1 to set1.hex
+link set.obj,x0200,plm80.lib to set2.mod
+locate set2.mod code(0200H) stacksize(100)
+era set2.mod
+objhex set2 to set2.hex
+era set2
+cpm
+objcpm set1
+era set1.com
+pip set.hex=set1.hex,set2.hex
+era set1.hex
+era set2.hex
+zero
+genmod set.hex xset.prl 
+era *.hex
+sub prla3
+

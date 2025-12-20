@@ -1,0 +1,21 @@
+attach b 4
+b:is14
+:f1:link $1.obj,:f1:x0100,:f1:plm80.lib to $11.mod 
+:f1:locate $11.mod code(0100H) stacksize(100) map print($1.tra)
+:f1:objhex $11 to $11.hex
+:f1:link $1.obj,:f1:x0200,:f1:plm80.lib to $12.mod 
+:f1:locate $12.mod code(0200H) stacksize(100) 
+:f1:objhex $12 to $12.hex
+:f1:cpm
+era *.mod
+era $1
+pip $1.hex=$11.hex,$12.hex
+xsub
+sid
+f100,8000,0
+g0
+b:dexsub
+b:genmod $1.hex $1.prl
+era *.hex
+attach b 1
+

@@ -1,0 +1,37 @@
+pip a:=e:ed.plm
+seteof ed.plm
+isx
+plm80 ed.plm pagewidth(80) debug
+era ed.plm
+link ed.obj,x0100,plm80.lib to ed1.mod
+locate ed1.mod code(0100H) stacksize(100)
+era ed1.mod
+objhex ed1 to ed1.hex
+link ed.obj,x0200,plm80.lib to ed2.mod
+locate ed2.mod code(0200H) stacksize(100)
+era ed2.mod
+objhex ed2 to ed2.hex
+era ed2
+cpm
+objcpm ed1
+ren ed.lin=ed1.lin
+ren ed.sym=ed1.sym
+vax ed.lst $$stan
+vax ed.sym $$stan
+vax ed.lin $$stan
+era ed1.com
+pip ed.hex=ed1.hex,ed2.hex
+era ed1.hex
+era ed2.hex
+zero
+genmod ed.hex xed.prl $$1000
+era *.hex
+era *.sym
+era *.lin
+era *.lst
+pip e:ed.prl=a:xed.prl
+pip b:ed.prl=a:xed.prl
+era xed.*
+era *.obj
+;end ed submit
+
