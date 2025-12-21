@@ -1,0 +1,38 @@
+WIP: MP/M II Boot Progress
+===========================
+
+Session: 2025-12-21
+
+COMPLETED:
+- Fixed double character console output issue in xios.cpp do_conout()
+  (was outputting to both stderr debug trace AND stdout via console)
+- Fixed sector translation in disk.cpp - cpmtools images store sectors
+  in logical order, no skew translation needed
+- Identified root cause of "MPMLDR error: failed to read MPM.SYS"
+
+CURRENT ISSUE:
+- nmb$records in MPM.SYS header (bytes 120-121) was 198 (0x00C6)
+- But file is 25600 bytes = 200 records
+- MPMLDR loop reads based on nmb$records, causing premature EOF
+- Patched header to 200 (0x00C8) - needs testing
+
+NEXT STEPS:
+1. Test boot with patched nmb$records = 200
+2. If boot proceeds further, debug any subsequent issues
+3. The boot was getting to:
+   - Directory reads succeed
+   - Copyright banner displays
+   - Memory layout partially displays (SYSTEM DAT E500H, TMPD DAT AB00H)
+   - Then fails on file read
+
+FILES CHANGED:
+- src/xios.cpp: Removed debug trace in do_conout() causing double output
+- src/disk.cpp: Simplified translate() to return logical sector (no skew)
+- disks/MPM.SYS: Patched nmb$records from 198 to 200
+- disks/mpm2_test.img: Updated with patched MPM.SYS
+
+NOTES:
+- MPMLDR uses its own internal BDOS, not our do_bdos() stub
+- All BIOS-level disk reads succeed (result=0)
+- The loop reads records 2 through nmb$records-1
+- With nmb$records=198, it reads 196 records but file has 198 data records

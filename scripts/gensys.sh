@@ -25,14 +25,15 @@ if [ ! -f "$DIST_DIR/GENSYS.COM" ]; then
     exit 1
 fi
 
-# Build BNKXIOS.SPR if needed (using um80/ul80)
-if [ ! -f "$DISKS_DIR/BNKXIOS.SPR" ] || [ "$ASM_DIR/bnkxios.mac" -nt "$DISKS_DIR/BNKXIOS.SPR" ]; then
+# Build BNKXIOS.SPR if needed (using z80asm + mkspr)
+if [ ! -f "$DISKS_DIR/BNKXIOS.SPR" ] || [ "$ASM_DIR/bnkxios_stub.asm" -nt "$DISKS_DIR/BNKXIOS.SPR" ]; then
     echo "Building BNKXIOS.SPR..."
     cd "$ASM_DIR"
-    um80 bnkxios.mac -o bnkxios.rel
-    ul80 bnkxios.rel --prl -o "$DISKS_DIR/BNKXIOS.SPR" -p 0
+    z80asm -v bnkxios_stub.asm -o bnkxios_stub.bin
+    # Use --no-reloc because BNKXIOS contains absolute addresses (jumps to FC00 XIOS)
+    "$BUILD_DIR/mkspr" bnkxios_stub.bin "$DISKS_DIR/BNKXIOS.SPR" --no-reloc
     cp "$DISKS_DIR/BNKXIOS.SPR" "$DISKS_DIR/RESXIOS.SPR"
-    rm -f bnkxios.rel
+    rm -f bnkxios_stub.bin
 fi
 
 # Create a working directory with all needed files
@@ -67,17 +68,70 @@ echo "Running GENSYS.COM..."
 echo ""
 echo "IMPORTANT: For this emulator, use these settings:"
 echo "  Top page of operating system: FF"
-echo "  Number of consoles: 1"
+echo "  Number of consoles: 4"
 echo "  Number of printers: 1"
 echo "  Breakpoint RST: 6"
 echo "  Add system call user stacks: Y"
 echo "  Z80 CPU: Y"
 echo "  Number of ticks/second: 60"
-echo "  Bank switched memory: N  <-- IMPORTANT!"
+echo "  Bank switched memory: N (emulator handles this)"
 echo "  Number of memory segments: 1"
 echo ""
 
-"$CPMEMU" --z80 GENSYS.COM
+# Create input file for GENSYS
+# Non-bank-switched configuration (simpler, emulator handles banking)
+# Prompts sequence:
+# 1. Top page (ff)
+# 2. Number of consoles (4)
+# 3. Number of printers (1)
+# 4. Breakpoint RST (6)
+# 5. Compatibility attributes (n)
+# 6. System call user stacks (y)
+# 7. Z80 CPU (y)
+# 8-14. Defaults (7 blanks): ticks, sys drive, temp drive, max locked, total locked, max open, total open
+# 15. Bank switched memory (y)
+# 16. Common base page (80 for 8000H)
+# 17. Bank select mask and pattern (blank = hardware handles)
+# 18. Number of memory segments (1)
+# 19. Dayfile logging (blank for Y)
+# 20. Accept system data page entries (blank for Y)
+# 21-24. RSP selections (4 n's for no RSPs)
+# 25. Memory segment base,size,attrib (blank for default)
+# 26. Accept memory segment table (blank for Y)
+cat > gensys_input.txt << 'EOF'
+ff
+4
+1
+6
+n
+y
+y
+
+
+
+
+
+
+
+y
+1
+80
+
+
+n
+n
+n
+n
+
+
+
+
+
+
+EOF
+
+echo "Running GENSYS.COM with automated input..."
+"$CPMEMU" --z80 GENSYS.COM < gensys_input.txt
 
 # Check if MPM.SYS was created (cpmemu creates lowercase)
 if [ -f "$WORKDIR/mpm.sys" ]; then

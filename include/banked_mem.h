@@ -50,9 +50,10 @@ public:
     // Get total number of banks
     int num_banks() const { return num_banks_; }
 
-    // Common base address
-    static constexpr uint16_t COMMON_BASE = 0x8000;
-    static constexpr uint16_t BANK_SIZE = 0x8000;  // 32KB
+    // Common base address - NUCLEUS uses C000
+    static constexpr uint16_t COMMON_BASE = 0xC000;
+    static constexpr uint16_t BANK_SIZE = 0xC000;  // 48KB per bank
+    static constexpr uint16_t COMMON_SIZE = 0x4000;  // 16KB common area
 
 private:
     int num_banks_;

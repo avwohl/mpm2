@@ -49,7 +49,7 @@ int main(int argc, char* argv[]) {
     int ssh_port = 2222;
     std::string host_key = "keys/ssh_host_rsa_key.der";
     std::string boot_image;
-    uint16_t xios_base = 0xFC00;
+    uint16_t xios_base = 0x8800;
     bool local_console = false;
     std::vector<std::pair<int, std::string>> disk_mounts;
 
@@ -114,9 +114,16 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    std::cerr << "[DEBUG] boot_image='" << boot_image << "'" << std::endl;
+
     // Set up signal handlers
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
+
+    // Force unbuffered output for non-TTY environments
+    std::ios::sync_with_stdio(true);
+    std::cout.setf(std::ios::unitbuf);
+    std::cerr.setf(std::ios::unitbuf);
 
     std::cout << "MP/M II Emulator\n";
     std::cout << "================\n\n";

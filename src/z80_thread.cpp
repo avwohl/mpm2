@@ -9,6 +9,7 @@
 #include <fstream>
 #include <cstring>
 #include <iostream>
+#include <iomanip>
 
 Z80Thread::Z80Thread()
     : running_(false)
@@ -23,6 +24,7 @@ Z80Thread::~Z80Thread() {
 }
 
 bool Z80Thread::init(const std::string& boot_image) {
+    std::cerr << "[Z80] init() called with boot_image='" << boot_image << "'" << std::endl;
     // Create memory (4 banks = 128KB + 32KB common)
     memory_ = std::make_unique<BankedMemory>(4);
 
@@ -49,21 +51,34 @@ bool Z80Thread::init(const std::string& boot_image) {
         std::vector<uint8_t> buffer(size);
         file.read(reinterpret_cast<char*>(buffer.data()), size);
 
-        // Load at 0x0000 in bank 0
-        // For 64KB boot images, this loads the entire memory map
+        // Boot image is a 64KB memory image created by mkboot
+        // It contains: page zero setup, MPMLDR at 0x0100, XIOS at 0x8800
+        // Load at 0x0000 (the image is already positioned correctly)
         memory_->load(0, 0x0000, buffer.data(), buffer.size());
+
+        // Debug: verify FF4E loaded correctly
+        std::cerr << "[Z80] After load, FF4E=" << std::hex
+                  << (int)memory_->fetch_mem(0xFF4E) << " "
+                  << (int)memory_->fetch_mem(0xFF4F) << " "
+                  << (int)memory_->fetch_mem(0xFF50) << std::dec << std::endl;
+
+        // Note: BNKXIOS pre-loading disabled - using patched NUCLEUS MPM.SYS
+        // which already contains the BNKXIOS forwarding stub at BA00
 
         // Set PC to 0x0100 where MPMLDR starts
         cpu_->regs.PC.set_pair16(0x0100);
 
-        // Set up stack pointer below TPA
-        cpu_->regs.SP.set_pair16(0x0100);
+        // Set up stack pointer in high memory (will be reset by MPMLDR)
+        cpu_->regs.SP.set_pair16(0x0080);
+        std::cerr << "[Z80] Boot image loaded, PC=0x0100" << std::endl;
     }
 
+    std::cerr << "[Z80] init() returning true" << std::endl;
     return true;
 }
 
 void Z80Thread::start() {
+    std::cerr << "[Z80] start() called" << std::endl;
     if (running_.load()) return;
 
     stop_requested_.store(false);
@@ -72,7 +87,9 @@ void Z80Thread::start() {
     tick_count_ = 0;
     instruction_count_.store(0);
 
+    std::cerr << "[Z80] Creating thread..." << std::endl;
     thread_ = std::thread(&Z80Thread::thread_func, this);
+    std::cerr << "[Z80] Thread created" << std::endl;
 }
 
 void Z80Thread::stop() {
@@ -103,6 +120,18 @@ uint64_t Z80Thread::cycles() const {
 }
 
 void Z80Thread::thread_func() {
+    std::cerr << "[Z80 Thread] Starting execution at PC=0x"
+              << std::hex << cpu_->regs.PC.get_pair16() << std::dec << std::endl;
+
+    // Debug: verify memory is accessible
+    uint16_t test_pc = cpu_->regs.PC.get_pair16();
+    std::cerr << "[Z80 Thread] Testing memory at PC=0x" << std::hex << test_pc << std::endl;
+    uint8_t byte0 = memory_->fetch_mem(test_pc);
+    uint8_t byte1 = memory_->fetch_mem(test_pc + 1);
+    uint8_t byte2 = memory_->fetch_mem(test_pc + 2);
+    std::cerr << "[Z80 Thread] Memory at PC: " << std::hex
+              << (int)byte0 << " " << (int)byte1 << " " << (int)byte2 << std::dec << std::endl;
+
     while (!stop_requested_.load()) {
         // Check for timer interrupt
         auto now = std::chrono::steady_clock::now();
@@ -124,6 +153,13 @@ void Z80Thread::thread_func() {
         // Check for XIOS trap before executing
         uint16_t pc = cpu_->regs.PC.get_pair16();
 
+        // Debug: trace PC values in XIOS range
+        static int xios_trace_count = 0;
+        if (pc >= 0x8800 && pc < 0x8900 && xios_trace_count++ < 50) {
+            std::cout << "[Z80] PC=0x" << std::hex << pc
+                      << " is_xios=" << xios_->is_xios_call(pc) << std::dec << std::endl;
+        }
+
         if (xios_->is_xios_call(pc)) {
             if (xios_->handle_call(pc)) {
                 instruction_count_++;
@@ -131,9 +167,54 @@ void Z80Thread::thread_func() {
             }
         }
 
+        // Boot tracing - trace all jumps into high memory
+        static bool booted = false;
+        static int pre_boot_trace = 0;
+        static int post_boot_trace = 0;
+        static uint16_t last_pc = 0;
+
+        // Trace jumps from low memory (loader) to high memory (nucleus)
+        if (!booted && last_pc < 0x8000 && pc >= 0x8000) {
+            fprintf(stderr, "\n[BOOT JUMP] from %04X to %04X\n", last_pc, pc);
+            // Dump memory at the jump destination
+            fprintf(stderr, "[BOOT JUMP] Code at %04X: ", pc);
+            for (int i = 0; i < 16; i++) {
+                fprintf(stderr, "%02X ", memory_->fetch_mem(pc + i));
+            }
+            fprintf(stderr, "\n");
+        }
+
+        // Trace when we first reach the nucleus area (CE00+)
+        if (!booted && pc >= 0xCE00) {
+            booted = true;
+            fprintf(stderr, "\n[BOOT] System reached high memory at 0x%04X (came from 0x%04X)\n", pc, last_pc);
+            // Dump memory map around BNKXIOS (CD00-CDFF)
+            fprintf(stderr, "[BOOT] BNKXIOS area (CD00-CD30):\n");
+            for (uint16_t addr = 0xCD00; addr < 0xCD30; addr += 16) {
+                fprintf(stderr, "  %04X: ", addr);
+                for (int i = 0; i < 16; i++) {
+                    fprintf(stderr, "%02X ", memory_->fetch_mem(addr + i));
+                }
+                fprintf(stderr, "\n");
+            }
+        }
+
+        // Trace PC values in BNKXIOS range (CD00-CDFF)
+        if (pc >= 0xCD00 && pc < 0xCE00 && pre_boot_trace++ < 20) {
+            fprintf(stderr, "[BNKXIOS] PC=%04X op=%02X\n", pc, memory_->fetch_mem(pc));
+        }
+
+        // Trace PC after boot to understand where we go
+        if (booted && post_boot_trace++ < 50) {
+            uint8_t op = memory_->fetch_mem(pc);
+            fprintf(stderr, "[POST-BOOT %d] PC=%04X op=%02X\n", post_boot_trace, pc, op);
+        }
+
+        last_pc = pc;
+
         // Check for HALT instruction (0x76) - handle specially for MP/M
-        // qkz80 library calls exit() on HALT, but MP/M uses HALT in idle loop
         uint8_t opcode = memory_->fetch_mem(pc);
+        // qkz80 library calls exit() on HALT, but MP/M uses HALT in idle loop
         if (opcode == 0x76) {
             // HALT - wait for interrupt
             // Advance PC past HALT

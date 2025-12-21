@@ -31,16 +31,22 @@ uint8_t Console::read_char() {
 }
 
 void Console::write_char(uint8_t ch) {
-    if (!connected_.load()) return;
-
     if (local_mode_.load()) {
         // Local mode - output directly to stdout
         std::cout.put(static_cast<char>(ch));
         std::cout.flush();
-    } else {
-        // Non-blocking - drop if full (shouldn't happen normally)
-        output_queue_.try_write(ch);
+        return;
     }
+
+    if (connected_.load()) {
+        // Connected - queue for SSH transmission
+        output_queue_.try_write(ch);
+    } else if (id_ == 0) {
+        // Console 0 not connected - output to stdout for boot messages
+        std::cout.put(static_cast<char>(ch));
+        std::cout.flush();
+    }
+    // Other consoles not connected - drop output
 }
 
 void Console::reset() {

@@ -216,12 +216,12 @@ CURDMA: DW      0080H           ; Current DMA address
 ; =============================================================================
 
 DPH_TABLE:
-; DPH for drive A
+; DPH for drive A (8" SSSD for boot disk)
 DPH_A:
         DW      0               ; XLT
         DW      0,0,0           ; Scratch
         DW      DIRBUF          ; DIRBUF
-        DW      DPB_HD1K        ; DPB
+        DW      DPB_SSSD        ; DPB for ibm-3740
         DW      0               ; CSV
         DW      ALV_A           ; ALV
 
@@ -251,6 +251,22 @@ DPH_D:
         DW      DPB_HD1K
         DW      0
         DW      ALV_D
+
+; =============================================================================
+; Disk Parameter Block for 8" SSSD (ibm-3740)
+; =============================================================================
+
+DPB_SSSD:
+        DW      26              ; SPT - sectors per track
+        DB      3               ; BSH - block shift (1K blocks)
+        DB      7               ; BLM - block mask
+        DB      0               ; EXM - extent mask
+        DW      242             ; DSM - disk size - 1 (243 blocks)
+        DW      63              ; DRM - directory max - 1 (64 entries)
+        DB      0C0H            ; AL0 - first 2 blocks for directory
+        DB      000H            ; AL1
+        DW      16              ; CKS - checksum size
+        DW      2               ; OFF - reserved tracks
 
 ; =============================================================================
 ; Disk Parameter Block for hd1k

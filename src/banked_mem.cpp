@@ -5,6 +5,7 @@
 #include "banked_mem.h"
 #include <cstring>
 #include <stdexcept>
+#include <iostream>
 
 BankedMemory::BankedMemory(int num_banks)
     : num_banks_(num_banks)
@@ -22,12 +23,12 @@ BankedMemory::BankedMemory(int num_banks)
         banks_.push_back(std::move(bank));
     }
 
-    // Allocate common area (32KB)
-    common_ = std::make_unique<uint8_t[]>(BANK_SIZE);
-    std::memset(common_.get(), 0, BANK_SIZE);
+    // Allocate common area (16KB for NUCLEUS layout)
+    common_ = std::make_unique<uint8_t[]>(COMMON_SIZE);
+    std::memset(common_.get(), 0, COMMON_SIZE);
 }
 
-qkz80_uint8 BankedMemory::fetch_mem(qkz80_uint16 addr, bool /* is_instruction */) {
+qkz80_uint8 BankedMemory::fetch_mem(qkz80_uint16 addr, bool is_instruction) {
     if (addr >= COMMON_BASE) {
         // Common area
         return common_[addr - COMMON_BASE];
@@ -94,8 +95,15 @@ void BankedMemory::write_common(uint16_t addr, uint8_t byte) {
 void BankedMemory::load(uint8_t bank, uint16_t addr, const uint8_t* data, size_t len) {
     if (bank >= num_banks_) return;
 
-    for (size_t i = 0; i < len && (addr + i) < BANK_SIZE; i++) {
-        banks_[bank][addr + i] = data[i];
+    for (size_t i = 0; i < len; i++) {
+        uint16_t target = addr + i;
+        if (target >= COMMON_BASE) {
+            // Load to common area
+            common_[target - COMMON_BASE] = data[i];
+        } else {
+            // Load to banked area
+            banks_[bank][target] = data[i];
+        }
     }
 }
 

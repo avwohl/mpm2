@@ -133,7 +133,7 @@ public:
     int write(class BankedMemory* mem);
 
     // Sector translation (for skewed disks)
-    uint16_t translate(uint16_t logical_sector);
+    uint16_t translate(uint16_t logical_sector, uint16_t track);
 
 private:
     DiskSystem();

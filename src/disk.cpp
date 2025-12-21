@@ -6,6 +6,7 @@
 #include "banked_mem.h"
 #include <cstring>
 #include <iostream>
+#include <iomanip>
 
 Disk::Disk()
     : read_only_(false)
@@ -160,9 +161,8 @@ DiskFormat Disk::detect_format() const {
 
 size_t Disk::sector_offset() const {
     // Calculate byte offset in image file
-    // Sectors are typically numbered 1-N, not 0-(N-1)
-    size_t sector_idx = (current_sector_ > 0) ? current_sector_ - 1 : 0;
-    size_t offset = (current_track_ * sectors_per_track_ + sector_idx) * sector_size_;
+    // LDRBIOS uses 0-based sector numbers, so no translation needed
+    size_t offset = (current_track_ * sectors_per_track_ + current_sector_) * sector_size_;
     return offset;
 }
 
@@ -271,18 +271,16 @@ int DiskSystem::read(BankedMemory* mem) {
     uint16_t track = disk->current_track();
     uint16_t phys_sector_size = disk->sector_size();
 
+    // Apply sector skew translation for formats that use it (e.g., ibm-3740)
+    uint16_t translated_sector = translate(logical_sector, track);
+
     // Calculate physical sector and offset within it
     uint16_t records_per_phys = phys_sector_size / 128;  // 4 for 512-byte sectors
-    uint16_t phys_sector = (logical_sector / records_per_phys) + 1;  // 1-based
-    uint16_t offset_in_phys = (logical_sector % records_per_phys) * 128;
+    uint16_t phys_sector = translated_sector / records_per_phys;  // 0-based (disk image is 0-indexed)
+    uint16_t offset_in_phys = (translated_sector % records_per_phys) * 128;
 
-    // Debug output (always show to see all reads)
-    std::cerr << "[DISK READ] drv=" << current_drive_
-              << " trk=" << track
-              << " lsec=" << logical_sector
-              << " -> psec=" << phys_sector
-              << " off=" << offset_in_phys
-              << " dma=0x" << std::hex << dma_addr_ << std::dec << "\n";
+    // Trace all disk reads
+    bool trace_this = false;
 
     // Temporarily set physical sector for reading
     disk->set_sector(phys_sector);
@@ -299,6 +297,21 @@ int DiskSystem::read(BankedMemory* mem) {
         for (uint16_t i = 0; i < 128; i++) {
             mem->store_mem(dma_addr_ + i, buffer[offset_in_phys + i]);
         }
+
+        // Trace key addresses
+        if (trace_this) {
+            std::cout << "[DISK READ] trk=" << std::dec << track
+                      << " logsec=" << logical_sector
+                      << " physec=" << phys_sector
+                      << " off=" << offset_in_phys
+                      << " dma=0x" << std::hex << dma_addr_
+                      << " first bytes: ";
+            for (int i = 0; i < 8; i++) {
+                std::cout << std::hex << std::setw(2) << std::setfill('0')
+                          << (int)buffer[offset_in_phys + i] << " ";
+            }
+            std::cout << std::dec << std::endl;
+        }
     }
 
     return result;
@@ -312,12 +325,16 @@ int DiskSystem::write(BankedMemory* mem) {
     // For writes, we need to read-modify-write the physical sector
 
     uint16_t logical_sector = disk->current_sector();
+    uint16_t track = disk->current_track();
     uint16_t phys_sector_size = disk->sector_size();
+
+    // Apply sector skew translation for formats that use it (e.g., ibm-3740)
+    uint16_t translated_sector = translate(logical_sector, track);
 
     // Calculate physical sector and offset within it
     uint16_t records_per_phys = phys_sector_size / 128;  // 4 for 512-byte sectors
-    uint16_t phys_sector = (logical_sector / records_per_phys) + 1;  // 1-based
-    uint16_t offset_in_phys = (logical_sector % records_per_phys) * 128;
+    uint16_t phys_sector = translated_sector / records_per_phys;  // 0-based (disk image is 0-indexed)
+    uint16_t offset_in_phys = (translated_sector % records_per_phys) * 128;
 
     uint8_t buffer[1024];  // Max sector size
 
@@ -339,8 +356,19 @@ int DiskSystem::write(BankedMemory* mem) {
     return result;
 }
 
-uint16_t DiskSystem::translate(uint16_t logical_sector) {
-    // TODO: Implement sector translation for skewed disks
-    // For now, return unchanged (1:1 mapping)
+// Sector skew table for ibm-3740 (26 sectors, skew factor 6)
+// Maps logical sector to physical sector position in disk image
+static const uint8_t skew_table_26_6[26] = {
+    1, 6, 12, 18, 24, 4, 10, 16, 22, 2, 8, 14, 20, 0, 7, 13, 19, 25, 5, 11, 17, 23, 3, 9, 15, 21
+};
+
+uint16_t DiskSystem::translate(uint16_t logical_sector, uint16_t track) {
+    // cpmtools disk images store sectors in LOGICAL order in the file,
+    // not in physical order with skew. The skew table is only needed for
+    // real hardware where sectors are interleaved on the disk.
+    //
+    // So for disk images, we do NO translation - just return the logical
+    // sector number which is used as the index into the image file.
+    (void)track;  // Unused for disk images
     return logical_sector;
 }

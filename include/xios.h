@@ -41,6 +41,16 @@ constexpr uint8_t XIOS_MAXCONSOLE  = 0x42;  // Maximum console number
 constexpr uint8_t XIOS_SYSTEMINIT  = 0x45;  // System initialization
 constexpr uint8_t XIOS_IDLE        = 0x48;  // Idle procedure
 
+// Commonbase entries (at XIOS base + 0x4B, 3-byte aligned after IDLE at 0x48)
+// These are patched by GENSYS and called by XDOS/BNKBDOS
+// Note: Entries are spaced 3 bytes apart (JP instructions)
+constexpr uint8_t XIOS_COMMONBASE  = 0x4B;  // Entry that returns commonbase address
+constexpr uint8_t XIOS_SWTUSER     = 0x4E;  // Switch to user bank (first commonbase entry)
+constexpr uint8_t XIOS_SWTSYS      = 0x51;  // Switch to system bank
+constexpr uint8_t XIOS_PDISP       = 0x54;  // Process dispatcher
+constexpr uint8_t XIOS_XDOSENT     = 0x57;  // XDOS entry
+constexpr uint8_t XIOS_SYSDAT      = 0x5A;  // System data pointer (2-byte DW)
+
 // MP/M II flags (set by interrupt handlers)
 constexpr uint8_t FLAG_TICK     = 1;   // System tick (16.67ms)
 constexpr uint8_t FLAG_SECOND   = 2;   // One-second flag
@@ -111,6 +121,13 @@ private:
     void do_maxconsole();
     void do_systeminit();
     void do_idle();
+
+    // Commonbase entries
+    void do_swtuser();   // Switch to user bank
+    void do_swtsys();    // Switch to system bank
+    void do_pdisp();     // Process dispatcher
+    void do_xdosent();   // XDOS entry point
+    void do_sysdat();    // System data pointer
 
     // BDOS stub (for boot phase)
     void do_bdos();

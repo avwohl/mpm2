@@ -337,23 +337,33 @@ void SSHServer::cleanup_sessions() {
 
 int SSHServer::user_auth_callback(byte auth_type, WS_UserAuthData* auth_data, void* ctx) {
     (void)ctx;  // Unused for now
-    (void)auth_data;  // Accept all users
+
+    std::cerr << "[SSH AUTH] auth_type=" << (int)auth_type;
+    if (auth_data) {
+        std::cerr << " user=" << std::string(reinterpret_cast<const char*>(auth_data->username),
+                                              auth_data->usernameSz);
+    }
+    std::cerr << "\n";
 
     // Accept public key authentication
     if (auth_type == WOLFSSH_USERAUTH_PUBLICKEY) {
+        std::cerr << "[SSH AUTH] Accepting public key auth\n";
         return WOLFSSH_USERAUTH_SUCCESS;
     }
 
-    // Accept password authentication
+    // Accept password authentication - any password is accepted
     if (auth_type == WOLFSSH_USERAUTH_PASSWORD) {
+        std::cerr << "[SSH AUTH] Accepting password auth\n";
         return WOLFSSH_USERAUTH_SUCCESS;
     }
 
     // Accept none auth type for simple access
     if (auth_type == WOLFSSH_USERAUTH_NONE) {
+        std::cerr << "[SSH AUTH] Accepting none auth\n";
         return WOLFSSH_USERAUTH_SUCCESS;
     }
 
+    std::cerr << "[SSH AUTH] Invalid auth type\n";
     return WOLFSSH_USERAUTH_INVALID_AUTHTYPE;
 }
 
