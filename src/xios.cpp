@@ -24,6 +24,9 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
 {
 }
 
+// DEPRECATED: PC-based interception has been replaced by I/O port dispatch.
+// All XIOS calls now go through port 0xE0 with function code in B register.
+// These functions are kept for reference but are no longer called.
 bool XIOS::is_xios_call(uint16_t pc) const {
     // Check XIOS range (FC00-FCFF)
     if (pc >= xios_base_ && pc < xios_base_ + 0x100) {
@@ -168,7 +171,58 @@ bool XIOS::handle_call(uint16_t pc) {
     return true;
 }
 
+void XIOS::handle_port_dispatch(uint8_t func) {
+    // Port-based dispatch: function offset in B register
+    // The Z80 code does: LD B, func; OUT (0xE0), A; RET
+    // So we don't call do_ret() here - the Z80 has its own RET
+
+    // Temporarily set skip_ret flag so handlers don't do RET
+    skip_ret_ = true;
+
+    switch (func) {
+        case XIOS_BOOT:      do_boot(); break;
+        case XIOS_WBOOT:     do_wboot(); break;
+        case XIOS_CONST:     do_const(); break;
+        case XIOS_CONIN:     do_conin(); break;
+        case XIOS_CONOUT:    do_conout(); break;
+        case XIOS_LIST:      do_list(); break;
+        case XIOS_PUNCH:     do_punch(); break;
+        case XIOS_READER:    do_reader(); break;
+        case XIOS_HOME:      do_home(); break;
+        case XIOS_SELDSK:    do_seldsk(); break;
+        case XIOS_SETTRK:    do_settrk(); break;
+        case XIOS_SETSEC:    do_setsec(); break;
+        case XIOS_SETDMA:    do_setdma(); break;
+        case XIOS_READ:      do_read(); break;
+        case XIOS_WRITE:     do_write(); break;
+        case XIOS_LISTST:    do_listst(); break;
+        case XIOS_SECTRAN:   do_sectran(); break;
+        case XIOS_SELMEMORY: do_selmemory(); break;
+        case XIOS_POLLDEVICE: do_polldevice(); break;
+        case XIOS_STARTCLOCK: do_startclock(); break;
+        case XIOS_STOPCLOCK:  do_stopclock(); break;
+        case XIOS_EXITREGION: do_exitregion(); break;
+        case XIOS_MAXCONSOLE: do_maxconsole(); break;
+        case XIOS_SYSTEMINIT: do_systeminit(); break;
+        case XIOS_IDLE:       do_idle(); break;
+        case XIOS_COMMONBASE: do_boot(); break;  // Returns commonbase address
+        case XIOS_SWTUSER:    do_swtuser(); break;
+        case XIOS_SWTSYS:     do_swtsys(); break;
+        case XIOS_PDISP:      do_pdisp(); break;
+        case XIOS_XDOSENT:    do_xdosent(); break;
+        case XIOS_SYSDAT:     do_sysdat(); break;
+
+        default:
+            std::cerr << "[XIOS PORT] Unknown function 0x" << std::hex << (int)func << std::dec << std::endl;
+            break;
+    }
+
+    skip_ret_ = false;
+}
+
 void XIOS::do_ret() {
+    // Skip RET when using I/O port dispatch (Z80 code has its own RET)
+    if (skip_ret_) return;
     // Pop return address from stack and set PC
     uint16_t sp = cpu_->regs.SP.get_pair16();
     uint8_t lo = mem_->fetch_mem(sp);
@@ -352,19 +406,25 @@ void XIOS::do_seldsk() {
 }
 
 void XIOS::do_settrk() {
-    current_track_ = cpu_->regs.BC.get_pair16();  // BC = track number
+    // For port dispatch: assembly copies BC to HL before OUT
+    // For PC-based dispatch (legacy): BC = track number
+    current_track_ = skip_ret_ ? cpu_->regs.HL.get_pair16() : cpu_->regs.BC.get_pair16();
     do_ret();
 }
 
 void XIOS::do_setsec() {
-    current_sector_ = cpu_->regs.BC.get_pair16();  // BC = sector number
+    // For port dispatch: assembly copies BC to HL before OUT
+    // For PC-based dispatch (legacy): BC = sector number
+    current_sector_ = skip_ret_ ? cpu_->regs.HL.get_pair16() : cpu_->regs.BC.get_pair16();
     do_ret();
 }
 
 void XIOS::do_setdma() {
     uint16_t old_dma = dma_addr_;
-    dma_addr_ = cpu_->regs.BC.get_pair16();  // BC = DMA address
-    std::cerr << "[SETDMA] BC=0x" << std::hex << dma_addr_
+    // For port dispatch: assembly copies BC to HL before OUT
+    // For PC-based dispatch (legacy): BC = DMA address
+    dma_addr_ = skip_ret_ ? cpu_->regs.HL.get_pair16() : cpu_->regs.BC.get_pair16();
+    std::cerr << "[SETDMA] addr=0x" << std::hex << dma_addr_
               << " (was 0x" << old_dma << ")" << std::dec << std::endl;
     do_ret();
 }
@@ -416,8 +476,9 @@ void XIOS::do_write() {
 
 void XIOS::do_sectran() {
     // Sector translation
-    // BC = logical sector, DE = translation table address (from DPH)
-    uint16_t logical = cpu_->regs.BC.get_pair16();
+    // For port dispatch: assembly copies BC to HL before OUT, DE = translation table
+    // For PC-based dispatch (legacy): BC = logical sector, DE = translation table
+    uint16_t logical = skip_ret_ ? cpu_->regs.HL.get_pair16() : cpu_->regs.BC.get_pair16();
     uint16_t xlat_table = cpu_->regs.DE.get_pair16();
 
     uint16_t physical = logical;  // Default: no translation

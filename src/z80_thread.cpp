@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "z80_thread.h"
-#include "qkz80.h"
+#include "mpm_cpu.h"
 #include "banked_mem.h"
 #include "xios.h"
 #include <fstream>
@@ -28,12 +28,16 @@ bool Z80Thread::init(const std::string& boot_image) {
     // Create memory (4 banks = 128KB + 32KB common)
     memory_ = std::make_unique<BankedMemory>(4);
 
-    // Create CPU with memory
-    cpu_ = std::make_unique<qkz80>(memory_.get());
+    // Create CPU with memory (MpmCpu extends qkz80 with I/O port handling)
+    cpu_ = std::make_unique<MpmCpu>(memory_.get());
     cpu_->set_cpu_mode(qkz80::MODE_Z80);
 
     // Create XIOS
     xios_ = std::make_unique<XIOS>(cpu_.get(), memory_.get());
+
+    // Connect CPU to XIOS and banked memory for port dispatch
+    cpu_->set_xios(xios_.get());
+    cpu_->set_banked_mem(memory_.get());
 
     // Load boot image if provided
     if (!boot_image.empty()) {
@@ -153,19 +157,10 @@ void Z80Thread::thread_func() {
         // Check for XIOS trap before executing
         uint16_t pc = cpu_->regs.PC.get_pair16();
 
-        // Debug: trace PC values in XIOS range
-        static int xios_trace_count = 0;
-        if (pc >= 0x8800 && pc < 0x8900 && xios_trace_count++ < 50) {
-            std::cout << "[Z80] PC=0x" << std::hex << pc
-                      << " is_xios=" << xios_->is_xios_call(pc) << std::dec << std::endl;
-        }
-
-        if (xios_->is_xios_call(pc)) {
-            if (xios_->handle_call(pc)) {
-                instruction_count_++;
-                continue;
-            }
-        }
+        // NOTE: PC-based XIOS interception has been removed.
+        // All XIOS calls now use I/O port dispatch via port 0xE0.
+        // The Z80 XIOS code does: LD B, func; OUT (0xE0), A; RET
+        // and the emulator's MpmCpu::port_out() handles the dispatch.
 
         // Boot tracing - trace all jumps into high memory
         static bool booted = false;

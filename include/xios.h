@@ -75,9 +75,14 @@ public:
     // Check if address is an XIOS, LDRBIOS, or BDOS entry point
     bool is_xios_call(uint16_t pc) const;
 
-    // Handle XIOS call at current PC
+    // Handle XIOS call at current PC (legacy PC-based interception)
     // Returns true if call was handled
     bool handle_call(uint16_t pc);
+
+    // Handle XIOS call via I/O port dispatch
+    // func = function offset (matches jump table: 0x00=BOOT, 0x06=CONST, etc.)
+    // Called when Z80 executes OUT (0xE0), A with B=function
+    void handle_port_dispatch(uint8_t func);
 
     // Timer tick - called from interrupt handler
     void tick();
@@ -150,6 +155,9 @@ private:
     // Clock control
     std::atomic<bool> tick_enabled_;
     std::atomic<bool> preempted_;
+
+    // Skip RET flag for I/O port dispatch
+    bool skip_ret_ = false;
 };
 
 #endif // XIOS_H

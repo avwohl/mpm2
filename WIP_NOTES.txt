@@ -1,38 +1,76 @@
 WIP: MP/M II Boot Progress
 ===========================
 
-Session: 2025-12-21
+Session: 2025-12-21 (Updated)
+
+PORT-BASED XIOS DISPATCH
+------------------------
+Replaced PC-based XIOS interception with I/O port dispatch (port 0xE0).
+This matches the approach used in romwbw_emu and is cleaner than PC trapping.
+
+Protocol:
+- Port 0xE0: XIOS dispatch (A = function offset, other regs as per XIOS spec)
+- Port 0xE1: Bank select (A = bank number)
+- For SETTRK/SETSEC/SETDMA/SECTRAN: BC is copied to HL before OUT
+  because BC contains the parameter and we need A for function code
+
+New Files:
+- asm/xios_port.asm - XIOS with OUT (0xE0), A dispatch, ORG at 0xFC00
+- asm/ldrbios_port.asm - LDRBIOS with port dispatch, own DPH/DPB
+- include/mpm_cpu.h - MpmCpu class extending qkz80 with port handling
+- src/mpm_cpu.cpp - Port dispatch implementation
+
+Modified Files:
+- src/xios.cpp - handle_port_dispatch(), skip_ret_ flag, HL-based params
+- src/z80_thread.cpp - Removed PC interception, uses MpmCpu
+- include/xios.h - Added handle_port_dispatch(), skip_ret_ member
+
+LDRBIOS Changes:
+- SELDSK returns own DPH (not emulator's) to avoid address conflicts
+- SECTRAN returns physical=logical (no translation for 8" SSSD)
+- DPB updated for 8" SSSD format (SPT=26, BSH=3, DSM=242, etc.)
+
+CURRENT STATUS
+--------------
+Boot progress with port-based dispatch:
+- MPMLDR starts and displays banner: "MP/M II V2.1 Loader"
+- Copyright message shown
+- Memory Segment Table displayed (SYSTEM DAT E500H, TMPD DAT AB00H, etc.)
+- Disk reads succeed with correct track/sector numbers
+- Track numbers now reasonable (69-70) vs previous garbage (46536)
+- Still fails: "MPMLDR error: failed to read MPM.SYS"
+
+REMAINING ISSUE
+---------------
+MPMLDR reads up to track 69-70 for a 25KB file (should only need ~10 tracks).
+Track 69 = 0x45 = 'E' which matches "E500H" from Memory Segment Table.
+Suspect mismatch between MPMLDR's address calculation and file layout.
+
+PREVIOUS SESSION NOTES
+----------------------
+(From earlier debugging session)
 
 COMPLETED:
 - Fixed double character console output issue in xios.cpp do_conout()
-  (was outputting to both stderr debug trace AND stdout via console)
 - Fixed sector translation in disk.cpp - cpmtools images store sectors
   in logical order, no skew translation needed
 - Identified root cause of "MPMLDR error: failed to read MPM.SYS"
 
-CURRENT ISSUE:
+PREVIOUS ISSUE:
 - nmb$records in MPM.SYS header (bytes 120-121) was 198 (0x00C6)
 - But file is 25600 bytes = 200 records
 - MPMLDR loop reads based on nmb$records, causing premature EOF
 - Patched header to 200 (0x00C8) - needs testing
 
-NEXT STEPS:
-1. Test boot with patched nmb$records = 200
-2. If boot proceeds further, debug any subsequent issues
-3. The boot was getting to:
-   - Directory reads succeed
-   - Copyright banner displays
-   - Memory layout partially displays (SYSTEM DAT E500H, TMPD DAT AB00H)
-   - Then fails on file read
+NEXT STEPS
+----------
+1. Check MPM.SYS file format - may need version matching emulator config
+2. Trace MPMLDR's block-to-track calculation
+3. Verify SYSTEM.DAT configuration matches emulator memory layout
+4. Try different MPM.SYS versions from disks/ directory
+5. Test with patched nmb$records = 200
 
-FILES CHANGED:
-- src/xios.cpp: Removed debug trace in do_conout() causing double output
-- src/disk.cpp: Simplified translate() to return logical sector (no skew)
-- disks/MPM.SYS: Patched nmb$records from 198 to 200
-- disks/mpm2_test.img: Updated with patched MPM.SYS
-
-NOTES:
-- MPMLDR uses its own internal BDOS, not our do_bdos() stub
-- All BIOS-level disk reads succeed (result=0)
-- The loop reads records 2 through nmb$records-1
-- With nmb$records=198, it reads 196 records but file has 198 data records
+BUILD ARTIFACTS
+---------------
+- Boot image: build/boot_port.img (also in disks/)
+- Assembled: asm/xios_port.bin, asm/ldrbios_port.bin

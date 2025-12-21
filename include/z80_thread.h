@@ -11,6 +11,7 @@
 #include <memory>
 
 class qkz80;
+class MpmCpu;
 class BankedMemory;
 class XIOS;
 
@@ -31,7 +32,7 @@ public:
     bool is_running() const { return running_.load(); }
 
     // Access to components
-    qkz80* cpu() { return cpu_.get(); }
+    MpmCpu* cpu() { return cpu_.get(); }
     BankedMemory* memory() { return memory_.get(); }
     XIOS* xios() { return xios_.get(); }
 
@@ -51,7 +52,7 @@ private:
     // Timer interrupt delivery
     void deliver_tick_interrupt();
 
-    std::unique_ptr<qkz80> cpu_;
+    std::unique_ptr<MpmCpu> cpu_;
     std::unique_ptr<BankedMemory> memory_;
     std::unique_ptr<XIOS> xios_;
 
