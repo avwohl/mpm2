@@ -1,0 +1,42 @@
+- create private github repository mpm2
+- add this current tree ~/src/mpm2 and fugure work
+
+We wrote an ada compiler (uada80) for the z80. For a lot of its multi tasking tests
+it needs a multi tasking OS.
+
+One of the few multi tasking OSes for the z80 is MP/M II. 
+In mpm2_external/mpm2dist is the mpm2 distribution.
+In mpm2_external/mpm2src is the full source code for for mpm2 for refrence.
+
+Your job is to bring up an mpm II system for the ada compiler to test
+its multi user aspects.
+ - to start convert mpm2_external/docs/*.pdf to text. otherwise
+ you tend to lock up trying to read large pdfs
+ - minimum of 4 terminals (so multi part programs can be run at the same time)
+ - mpm2dist assumes you are starting with a working cp/m 2.2 system
+ - ~/src/cpmemu/src/cpmemu is cp/m 2 emulator at the bdos level
+ it translate cp/m bdos calls to linux.  So you can ask for FOO.TXT
+ to open in cpm and it will find foo.txt in linux.  Add to CLAUDE.md
+ info about the .cfg files it use as they control the crlf end of line
+ per file type. and mappign long linux file names into the 8.3 cpm file space
+ * in cpmemu are qkz* files. They are a z80/8080 emulator in c++ that can
+ be embeded. you will probably need to use this directly to get all the multi
+ user syncronization right.  It was not written with threading in mind
+ and may need some updates for it
+ - ~/src/romwmw_emu is a cli z80 emulator that boots the romwbw eco system.
+ That supports multiple OSes.  But I don't see MP/M II as an option.  It may or may not
+ be of use in building a mpm 2 system
+ - ~/src/um80_and_friends is a python based assembler, linker, library manager
+ it can be used to assemble the needed bios and boot files for mp/m 2
+ - it is not clear to me how the needed 4 termianals for mp/m 2 should work.
+ Maybe mp/m 2 should be one multi threaded process.  You can ssh into it get a different thread
+ and a mp/m 2 terminal
+ - I generally prefer to write in python. However the above qkz80* library is in c++
+ And I think if we the ssh in to a terminal thing thats going work a lot better with c++
+ - to start build a one terminal mp/m 2 system.  I think if you target the romwbw_emu
+ hbios system it should be straight forward.  Note that the romwbw_emu emulator supports
+ maskable and nmi periodic interrupts that can be used for mp/m 2 scheduling
+ - mpm2_external/docs/MPM2SYS.TXT is the guide on how bring up new mp/m system
+ starting with cp/m 2.2 which is roughly what we have
+ 
+  
