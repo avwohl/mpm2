@@ -6,6 +6,7 @@
 #include "xios.h"
 #include "banked_mem.h"
 #include <iostream>
+#include <iomanip>
 
 MpmCpu::MpmCpu(qkz80_cpu_mem* memory)
     : qkz80(memory)
@@ -102,4 +103,43 @@ void MpmCpu::handle_bank_select(uint8_t bank) {
     }
 
     banked_mem_->select_bank(bank);
+}
+
+void MpmCpu::halt(void) {
+    // Z80 HALT instruction - CPU waits for interrupt
+    // In MP/M II context, this typically means system idle or error
+    std::cerr << "\n*** HALT instruction at PC=0x" << std::hex
+              << regs.PC.get_pair16() << std::dec << " ***\n";
+    std::cerr << "    Bank=" << (int)(banked_mem_ ? banked_mem_->current_bank() : 0)
+              << " SP=0x" << std::hex << regs.SP.get_pair16()
+              << " AF=0x" << regs.AF.get_pair16()
+              << " BC=0x" << regs.BC.get_pair16()
+              << " DE=0x" << regs.DE.get_pair16()
+              << " HL=0x" << regs.HL.get_pair16()
+              << std::dec << std::endl;
+    halted_ = true;
+}
+
+void MpmCpu::unimplemented_opcode(qkz80_uint8 opcode, qkz80_uint16 pc) {
+    // Encountered an invalid or unimplemented Z80 opcode
+    std::cerr << "\n*** Unimplemented opcode 0x" << std::hex << (int)opcode
+              << " at PC=0x" << pc << std::dec << " ***\n";
+    std::cerr << "    Bank=" << (int)(banked_mem_ ? banked_mem_->current_bank() : 0)
+              << " SP=0x" << std::hex << regs.SP.get_pair16()
+              << " AF=0x" << regs.AF.get_pair16()
+              << std::dec << std::endl;
+
+    // Dump surrounding memory for context
+    std::cerr << "    Memory at PC: ";
+    for (int i = -2; i <= 5; i++) {
+        uint16_t addr = pc + i;
+        uint8_t byte = mem->fetch_mem(addr);
+        if (i == 0) std::cerr << "[";
+        std::cerr << std::hex << std::setfill('0') << std::setw(2) << (int)byte;
+        if (i == 0) std::cerr << "]";
+        std::cerr << " ";
+    }
+    std::cerr << std::dec << std::endl;
+
+    halted_ = true;
 }
