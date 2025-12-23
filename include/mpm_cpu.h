@@ -35,12 +35,23 @@ public:
     void port_out(qkz80_uint8 port, qkz80_uint8 value) override;
     qkz80_uint8 port_in(qkz80_uint8 port) override;
 
+    // Override halt - for proper shutdown handling
+    void halt(void) override;
+
+    // Override unimplemented opcode - for better diagnostics
+    void unimplemented_opcode(qkz80_uint8 opcode, qkz80_uint16 pc) override;
+
+    // Check if CPU is halted
+    bool is_halted() const { return halted_; }
+    void clear_halted() { halted_ = false; }
+
     // Debug/statistics
     bool debug_io = false;
 
 private:
     XIOS* xios_ = nullptr;
     BankedMemory* banked_mem_ = nullptr;
+    bool halted_ = false;
 
     // Handle XIOS dispatch via port 0xE0
     void handle_xios_dispatch();
