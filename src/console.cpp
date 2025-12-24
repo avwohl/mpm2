@@ -21,11 +21,13 @@ uint8_t Console::const_status() {
 }
 
 uint8_t Console::read_char() {
-    if (!connected_.load()) return 0x1A;  // EOF
+    // For non-connected, non-local consoles, return 0x00 (no input)
+    // MP/M should use CONST to poll first; CONIN returning 0 means no char
+    if (!connected_.load() && !local_mode_.load()) return 0x00;
 
     // Brief wait - MP/M should poll with CONST first
     int ch = input_queue_.read(10);  // 10ms timeout
-    if (ch < 0) return 0x00;
+    if (ch < 0) return 0x00;  // No character available
 
     return static_cast<uint8_t>(ch);
 }

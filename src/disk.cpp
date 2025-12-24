@@ -279,8 +279,8 @@ int DiskSystem::read(BankedMemory* mem) {
     uint16_t phys_sector = translated_sector / records_per_phys;  // 0-based (disk image is 0-indexed)
     uint16_t offset_in_phys = (translated_sector % records_per_phys) * 128;
 
-    // Trace all disk reads
-    bool trace_this = false;
+    // Trace all disk reads, especially to E700 range
+    bool trace_this = (dma_addr_ >= 0xE700 && dma_addr_ < 0xE800);
 
     // Temporarily set physical sector for reading
     disk->set_sector(phys_sector);
@@ -300,17 +300,25 @@ int DiskSystem::read(BankedMemory* mem) {
 
         // Trace key addresses
         if (trace_this) {
-            std::cout << "[DISK READ] trk=" << std::dec << track
+            std::cerr << "[DISK READ] trk=" << std::dec << track
                       << " logsec=" << logical_sector
+                      << " xlat=" << translated_sector
                       << " physec=" << phys_sector
                       << " off=" << offset_in_phys
                       << " dma=0x" << std::hex << dma_addr_
                       << " first bytes: ";
             for (int i = 0; i < 8; i++) {
-                std::cout << std::hex << std::setw(2) << std::setfill('0')
+                std::cerr << std::hex << std::setw(2) << std::setfill('0')
                           << (int)buffer[offset_in_phys + i] << " ";
             }
-            std::cout << std::dec << std::endl;
+            std::cerr << std::dec << std::endl;
+            // Verify the data was actually written
+            std::cerr << "[DISK READ] Verifying at 0x" << std::hex << dma_addr_ << " after store: ";
+            for (int i = 0; i < 8; i++) {
+                std::cerr << std::hex << std::setw(2) << std::setfill('0')
+                          << (int)mem->fetch_mem(dma_addr_ + i) << " ";
+            }
+            std::cerr << std::dec << std::endl;
         }
     }
 
@@ -356,19 +364,26 @@ int DiskSystem::write(BankedMemory* mem) {
     return result;
 }
 
-// Sector skew table for ibm-3740 (26 sectors, skew factor 6)
-// Maps logical sector to physical sector position in disk image
-static const uint8_t skew_table_26_6[26] = {
+// Standard CP/M skew table for ibm-3740 (26 sectors, skew factor 6)
+// This table maps physical->logical: skew[physical] = logical
+static const uint8_t skew_phys_to_log[26] = {
     1, 6, 12, 18, 24, 4, 10, 16, 22, 2, 8, 14, 20, 0, 7, 13, 19, 25, 5, 11, 17, 23, 3, 9, 15, 21
 };
 
+// Inverse table: given logical, find physical position
+// inverse[logical] = physical where skew[physical] = logical
+// Computed from the above: if skew[P] = L, then inverse[L] = P
+static const uint8_t skew_log_to_phys[26] = {
+    13, 0, 9, 22, 5, 18, 1, 14, 10, 23, 6, 19, 2, 15, 11, 24, 7, 20, 3, 16, 12, 25, 8, 21, 4, 17
+};
+
 uint16_t DiskSystem::translate(uint16_t logical_sector, uint16_t track) {
-    // cpmtools disk images store sectors in LOGICAL order in the file,
-    // not in physical order with skew. The skew table is only needed for
-    // real hardware where sectors are interleaved on the disk.
-    //
-    // So for disk images, we do NO translation - just return the logical
-    // sector number which is used as the index into the image file.
-    (void)track;  // Unused for disk images
+    // Disk image created with cpmtools using skew 0 (no interleave)
+    // So no translation is needed - logical sector = physical sector
+    (void)track;
+    (void)skew_phys_to_log;  // Keep for reference
+    (void)skew_log_to_phys;  // Keep for reference
+
+    // No skew translation - disk image has no interleave
     return logical_sector;
 }

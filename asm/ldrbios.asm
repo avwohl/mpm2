@@ -45,6 +45,18 @@
 
 CONSOLE:        EQU     0       ; Boot console number
 BOOTDRV:        EQU     0       ; Boot drive (A:)
+DISPATCH_PORT:  EQU     0E0H    ; I/O port for emulator dispatch
+
+; Function offsets for dispatch
+FUNC_CONST:     EQU     006H
+FUNC_CONIN:     EQU     009H
+FUNC_CONOUT:    EQU     00CH
+FUNC_SELDSK:    EQU     01BH
+FUNC_SETTRK:    EQU     01EH
+FUNC_SETSEC:    EQU     021H
+FUNC_SETDMA:    EQU     024H
+FUNC_READ:      EQU     027H
+FUNC_WRITE:     EQU     02AH
 
 ; =============================================================================
 ; BIOS Entry Points
@@ -70,19 +82,25 @@ WBOOT:
 CONST:
         ; Console status
         ; Returns A=0 if no char, A=FF if char ready
-        ; Emulator intercepts this
+        ; Dispatch to emulator via I/O port
+        LD      A,FUNC_CONST
+        OUT     (DISPATCH_PORT),A
         RET
 
 CONIN:
         ; Console input
         ; Returns A=character
-        ; Emulator intercepts this
+        ; Dispatch to emulator via I/O port
+        LD      A,FUNC_CONIN
+        OUT     (DISPATCH_PORT),A
         RET
 
 CONOUT:
         ; Console output
         ; C=character to output
-        ; Emulator intercepts this
+        ; Dispatch to emulator via I/O port
+        LD      A,FUNC_CONOUT
+        OUT     (DISPATCH_PORT),A
         RET
 
 LIST:
@@ -114,7 +132,16 @@ SELDSK:
         CP      4               ; Only A-D supported
         JR      NC,SELDSK_ERR
 
-        ; Calculate DPH address
+        ; Save current drive
+        LD      (CURDSK),A
+
+        ; Notify emulator (it tracks current disk for READ/WRITE)
+        PUSH    BC
+        LD      A,FUNC_SELDSK
+        OUT     (DISPATCH_PORT),A
+        POP     BC
+
+        ; Calculate DPH address (use LDRBIOS local DPH)
         LD      H,0
         LD      L,C
         ADD     HL,HL           ; *2
@@ -123,10 +150,6 @@ SELDSK:
         ADD     HL,HL           ; *16 (DPH size)
         LD      DE,DPH_TABLE
         ADD     HL,DE
-
-        ; Save current drive
-        LD      A,C
-        LD      (CURDSK),A
         RET
 
 SELDSK_ERR:
@@ -136,32 +159,51 @@ SELDSK_ERR:
 SETTRK:
         ; Set track
         ; BC=track number
+        ; Dispatch to emulator via I/O port (expects HL)
         LD      (CURTRK),BC
+        LD      H,B
+        LD      L,C
+        LD      A,FUNC_SETTRK
+        OUT     (DISPATCH_PORT),A
         RET
 
 SETSEC:
         ; Set sector
         ; BC=sector number
+        ; Dispatch to emulator via I/O port (expects HL)
         LD      (CURSEC),BC
+        LD      H,B
+        LD      L,C
+        LD      A,FUNC_SETSEC
+        OUT     (DISPATCH_PORT),A
         RET
 
 SETDMA:
         ; Set DMA address
         ; BC=address
+        ; Dispatch to emulator via I/O port (expects HL)
         LD      (CURDMA),BC
+        LD      H,B
+        LD      L,C
+        LD      A,FUNC_SETDMA
+        OUT     (DISPATCH_PORT),A
         RET
 
 READ:
         ; Read sector
-        ; Emulator intercepts and handles
+        ; Dispatch to emulator via I/O port
         ; Returns A=0 success, A=1 error
+        LD      A,FUNC_READ
+        OUT     (DISPATCH_PORT),A
         RET
 
 WRITE:
         ; Write sector
         ; C=write type
-        ; Emulator intercepts and handles
+        ; Dispatch to emulator via I/O port
         ; Returns A=0 success, A=1 error
+        LD      A,FUNC_WRITE
+        OUT     (DISPATCH_PORT),A
         RET
 
 LISTST:

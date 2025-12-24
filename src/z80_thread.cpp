@@ -11,6 +11,7 @@
 #include <iostream>
 #include <iomanip>
 
+
 Z80Thread::Z80Thread()
     : running_(false)
     , stop_requested_(false)
@@ -170,22 +171,104 @@ void Z80Thread::thread_func() {
 
         // Trace jumps from low memory (loader) to high memory (nucleus)
         if (!booted && last_pc < 0x8000 && pc >= 0x8000) {
-            fprintf(stderr, "\n[BOOT JUMP] from %04X to %04X\n", last_pc, pc);
+            uint16_t sp = cpu_->regs.SP.get_pair16();
+            fprintf(stderr, "\n[BOOT JUMP] from %04X to %04X, SP=%04X\n", last_pc, pc, sp);
             // Dump memory at the jump destination
             fprintf(stderr, "[BOOT JUMP] Code at %04X: ", pc);
             for (int i = 0; i < 16; i++) {
                 fprintf(stderr, "%02X ", memory_->fetch_mem(pc + i));
             }
             fprintf(stderr, "\n");
+            // Dump stack contents
+            fprintf(stderr, "[BOOT JUMP] Stack at %04X: ", sp);
+            for (int i = 0; i < 16; i++) {
+                fprintf(stderr, "%02X ", memory_->fetch_mem(sp + i));
+            }
+            fprintf(stderr, "\n");
+            // Dump what's at address 0A21 (where we came from)
+            fprintf(stderr, "[BOOT JUMP] Code at %04X (source): ", last_pc);
+            for (int i = 0; i < 8; i++) {
+                fprintf(stderr, "%02X ", memory_->fetch_mem(last_pc + i));
+            }
+            fprintf(stderr, "\n");
         }
 
-        // Trace when we first reach the nucleus area (CE00+)
-        if (!booted && pc >= 0xCE00) {
+        // Trace when we first reach the nucleus area (8D00+)
+        if (!booted && pc >= 0x8D00) {
             booted = true;
             fprintf(stderr, "\n[BOOT] System reached high memory at 0x%04X (came from 0x%04X)\n", pc, last_pc);
+
+            // Patch BNKXIOS with forwarding stubs before XDOS takes over
+            // The boot jump goes to XDOS (CD00), not BNKXIOS
+            // BNKXIOS address comes from memory (loader output shows it at BA00)
+            // Try reading from FF0D, or scan the header area for the BNKXIOS page
+            uint8_t bnkxios_page = memory_->fetch_mem(0xFF0D);
+            if (bnkxios_page == 0) {
+                // FF0D not set yet - try reading from FE0D (where header may be)
+                bnkxios_page = memory_->fetch_mem(0xFE0D);
+            }
+            if (bnkxios_page == 0) {
+                // Still not found - scan high memory for SPR modules
+                // Look for the pattern that indicates BNKXIOS (check loader output)
+                // For now, use hardcoded value from loader output: BA00
+                fprintf(stderr, "[BOOT] BNKXIOS page not found in memory, using BA00H\n");
+                bnkxios_page = 0xBA;
+            }
+            uint16_t bnkxios_addr = static_cast<uint16_t>(bnkxios_page) << 8;
+            fprintf(stderr, "[BOOT] BNKXIOS page=%02X, addr=%04X\n", bnkxios_page, bnkxios_addr);
+            xios_->patch_bnkxios(bnkxios_addr);
+
             // Dump memory map around BNKXIOS (CD00-CDFF)
             fprintf(stderr, "[BOOT] BNKXIOS area (CD00-CD30):\n");
             for (uint16_t addr = 0xCD00; addr < 0xCD30; addr += 16) {
+                fprintf(stderr, "  %04X: ", addr);
+                for (int i = 0; i < 16; i++) {
+                    fprintf(stderr, "%02X ", memory_->fetch_mem(addr + i));
+                }
+                fprintf(stderr, "\n");
+            }
+            // Also dump XDOS area to check if it's loaded (E000-E100)
+            fprintf(stderr, "[BOOT] XDOS area (E080-E0C0):\n");
+            for (uint16_t addr = 0xE080; addr < 0xE0C0; addr += 16) {
+                fprintf(stderr, "  %04X: ", addr);
+                for (int i = 0; i < 16; i++) {
+                    fprintf(stderr, "%02X ", memory_->fetch_mem(addr + i));
+                }
+                fprintf(stderr, "\n");
+            }
+            // Dump XDOS entry area (E500-E520)
+            fprintf(stderr, "[BOOT] XDOS entry (E500-E520):\n");
+            for (uint16_t addr = 0xE500; addr < 0xE520; addr += 16) {
+                fprintf(stderr, "  %04X: ", addr);
+                for (int i = 0; i < 16; i++) {
+                    fprintf(stderr, "%02X ", memory_->fetch_mem(addr + i));
+                }
+                fprintf(stderr, "\n");
+            }
+            // Dump broader XDOS area to find where code stops
+            fprintf(stderr, "[BOOT] XDOS broad scan (CD00-F000):\n");
+            for (uint16_t addr = 0xCD00; addr < 0xF000; addr += 0x100) {
+                // Check if this 256-byte block is all zeros
+                bool all_zero = true;
+                for (int i = 0; i < 256; i++) {
+                    if (memory_->fetch_mem(addr + i) != 0) {
+                        all_zero = false;
+                        break;
+                    }
+                }
+                if (!all_zero) {
+                    fprintf(stderr, "  %04X: ", addr);
+                    for (int i = 0; i < 16; i++) {
+                        fprintf(stderr, "%02X ", memory_->fetch_mem(addr + i));
+                    }
+                    fprintf(stderr, "...\n");
+                } else {
+                    fprintf(stderr, "  %04X: (all zeros)\n", addr);
+                }
+            }
+            // Specifically dump E720-E740 to debug the E72B issue
+            fprintf(stderr, "[BOOT] E720-E740 (call target E72B):\n");
+            for (uint16_t addr = 0xE720; addr < 0xE740; addr += 16) {
                 fprintf(stderr, "  %04X: ", addr);
                 for (int i = 0; i < 16; i++) {
                     fprintf(stderr, "%02X ", memory_->fetch_mem(addr + i));
@@ -202,10 +285,82 @@ void Z80Thread::thread_func() {
         // Trace PC after boot to understand where we go
         if (booted && post_boot_trace++ < 50) {
             uint8_t op = memory_->fetch_mem(pc);
-            fprintf(stderr, "[POST-BOOT %d] PC=%04X op=%02X\n", post_boot_trace, pc, op);
+            uint16_t sp = cpu_->regs.SP.get_pair16();
+            fprintf(stderr, "[POST-BOOT %d] PC=%04X op=%02X SP=%04X AF=%04X DE=%04X HL=%04X\n",
+                    post_boot_trace, pc, op, sp,
+                    cpu_->regs.AF.get_pair16(),
+                    cpu_->regs.DE.get_pair16(),
+                    cpu_->regs.HL.get_pair16());
+            // When we hit the RET at CD09, show stack contents
+            if (pc == 0xCD09 && op == 0xC9) {
+                fprintf(stderr, "[RET at CD09] Stack at %04X: %02X %02X (ret addr = %04X)\n",
+                        sp, memory_->fetch_mem(sp), memory_->fetch_mem(sp+1),
+                        memory_->fetch_mem(sp) | (memory_->fetch_mem(sp+1) << 8));
+            }
         }
 
         last_pc = pc;
+
+        // Periodic PC trace to see where CPU is when not calling XIOS
+        static uint64_t inst_trace_count = 0;
+        inst_trace_count++;
+        // After first 1000000 instructions, trace every 100000
+        if (inst_trace_count > 1000000 && (inst_trace_count % 100000) == 0) {
+            fprintf(stderr, "[PC TRACE] inst=%llu PC=%04X op=%02X SP=%04X\n",
+                    (unsigned long long)inst_trace_count, pc,
+                    memory_->fetch_mem(pc), cpu_->regs.SP.get_pair16());
+        }
+
+        // Detect loop at 0x05C0 and dump comparison data
+        static bool loop_05c0_dumped = false;
+        if (pc == 0x05C0 && !loop_05c0_dumped && inst_trace_count > 100000) {
+            loop_05c0_dumped = true;
+            fprintf(stderr, "\n[LOOP DETECTED at 0x05C0 after %llu instructions]\n",
+                    (unsigned long long)inst_trace_count);
+            // Dump the comparison data pointers
+            uint16_t base1 = memory_->fetch_mem(0x0B4E) | (memory_->fetch_mem(0x0B4F) << 8);
+            uint16_t base2 = memory_->fetch_mem(0x0B50) | (memory_->fetch_mem(0x0B51) << 8);
+            uint8_t ctr1 = memory_->fetch_mem(0x0B52);
+            uint8_t ctr2 = memory_->fetch_mem(0x0B53);
+            fprintf(stderr, "[LOOP] base1(0B4E)=%04X base2(0B50)=%04X ctr1(0B52)=%02X ctr2(0B53)=%02X\n",
+                    base1, base2, ctr1, ctr2);
+            // Dump first 24 bytes from both bases
+            fprintf(stderr, "[LOOP] Data at base1 (%04X): ", base1);
+            for (int i = 0; i < 24; i++) fprintf(stderr, "%02X ", memory_->fetch_mem(base1 + i));
+            fprintf(stderr, "\n");
+            fprintf(stderr, "[LOOP] Data at base2 (%04X): ", base2);
+            for (int i = 0; i < 24; i++) fprintf(stderr, "%02X ", memory_->fetch_mem(base2 + i));
+            fprintf(stderr, "\n");
+            // Also dump SP and memory around it
+            uint16_t sp = cpu_->regs.SP.get_pair16();
+            fprintf(stderr, "[LOOP] SP=%04X Stack: ", sp);
+            for (int i = 0; i < 16; i++) fprintf(stderr, "%02X ", memory_->fetch_mem(sp + i));
+            fprintf(stderr, "\n");
+        }
+
+        // Detect new loop at 0x0F84-0x0F8E
+        static bool loop_0f84_dumped = false;
+        if (pc == 0x0F84 && !loop_0f84_dumped && inst_trace_count > 100000) {
+            loop_0f84_dumped = true;
+            fprintf(stderr, "\n[LOOP DETECTED at 0x0F84 after %llu instructions]\n",
+                    (unsigned long long)inst_trace_count);
+            uint16_t sp = cpu_->regs.SP.get_pair16();
+            fprintf(stderr, "[LOOP] AF=%04X BC=%04X DE=%04X HL=%04X SP=%04X\n",
+                    cpu_->regs.AF.get_pair16(), cpu_->regs.BC.get_pair16(),
+                    cpu_->regs.DE.get_pair16(), cpu_->regs.HL.get_pair16(), sp);
+            // Dump memory at 0x165B (the limit value used in the loop)
+            uint16_t val_165b = memory_->fetch_mem(0x165B) | (memory_->fetch_mem(0x165C) << 8);
+            uint16_t val_1668 = memory_->fetch_mem(0x1668) | (memory_->fetch_mem(0x1669) << 8);
+            fprintf(stderr, "[LOOP] Memory at 0x165B=%04X 0x1668=%04X\n", val_165b, val_1668);
+            // Dump data area around 0x1650
+            fprintf(stderr, "[LOOP] Data at 1650: ");
+            for (int i = 0; i < 32; i++) fprintf(stderr, "%02X ", memory_->fetch_mem(0x1650 + i));
+            fprintf(stderr, "\n");
+            // Dump stack
+            fprintf(stderr, "[LOOP] Stack: ");
+            for (int i = 0; i < 16; i++) fprintf(stderr, "%02X ", memory_->fetch_mem(sp + i));
+            fprintf(stderr, "\n");
+        }
 
         // Check for HALT instruction (0x76) - handle specially for MP/M
         uint8_t opcode = memory_->fetch_mem(pc);

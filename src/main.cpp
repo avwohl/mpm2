@@ -133,12 +133,15 @@ int main(int argc, char* argv[]) {
     std::cout << "Initialized " << MAX_CONSOLES << " consoles\n";
 
     // Enable local console mode if requested
+    // Enable on all consoles since MP/M II may use any console for boot output
     if (local_console) {
-        Console* con = ConsoleManager::instance().get(0);
-        if (con) {
-            con->set_local_mode(true);
-            std::cout << "Local console enabled on console 0\n";
+        for (int i = 0; i < MAX_CONSOLES; i++) {
+            Console* con = ConsoleManager::instance().get(i);
+            if (con) {
+                con->set_local_mode(true);
+            }
         }
+        std::cout << "Local console enabled on all " << MAX_CONSOLES << " consoles\n";
     }
 
     // Mount disks
@@ -175,22 +178,28 @@ int main(int argc, char* argv[]) {
     std::cout << "XIOS base: 0x" << std::hex << xios_base << std::dec << "\n";
 
 #ifdef HAVE_WOLFSSH
-    // Initialize SSH server
+    // Initialize SSH server (skip if only using local console)
     SSHServer ssh_server;
-    if (!ssh_server.init(host_key)) {
-        std::cerr << "Failed to initialize SSH server\n";
-        std::cerr << "Make sure host key exists: " << host_key << "\n";
-        std::cerr << "Generate with: ssh-keygen -t rsa -f " << host_key << " -N ''\n";
-        return 1;
-    }
+    bool ssh_enabled = false;
+    if (!local_console) {
+        if (!ssh_server.init(host_key)) {
+            std::cerr << "Failed to initialize SSH server\n";
+            std::cerr << "Make sure host key exists: " << host_key << "\n";
+            std::cerr << "Generate with: ssh-keygen -t rsa -f " << host_key << " -N ''\n";
+            return 1;
+        }
 
-    if (!ssh_server.listen(ssh_port)) {
-        std::cerr << "Failed to listen on port " << ssh_port << "\n";
-        return 1;
-    }
+        if (!ssh_server.listen(ssh_port)) {
+            std::cerr << "Failed to listen on port " << ssh_port << "\n";
+            return 1;
+        }
 
-    std::cout << "SSH server listening on port " << ssh_port << "\n";
-    std::cout << "Connect with: ssh -p " << ssh_port << " user@localhost\n\n";
+        ssh_enabled = true;
+        std::cout << "SSH server listening on port " << ssh_port << "\n";
+        std::cout << "Connect with: ssh -p " << ssh_port << " user@localhost\n\n";
+    } else {
+        std::cout << "Running in local console mode (SSH disabled)\n\n";
+    }
 #else
     std::cout << "SSH support not available (wolfSSH not found)\n";
     std::cout << "Running in local mode only\n\n";
@@ -211,8 +220,18 @@ int main(int argc, char* argv[]) {
     std::cout << "\nPress Ctrl+C to shutdown\n\n";
 
 #ifdef HAVE_WOLFSSH
-    // Run SSH accept loop in main thread (blocks until shutdown)
-    ssh_server.accept_loop();
+    if (ssh_enabled) {
+        // Run SSH accept loop in main thread (blocks until shutdown)
+        ssh_server.accept_loop();
+    } else {
+        // Local console mode - just wait for shutdown signal
+        while (!g_shutdown_requested) {
+            struct timeval tv;
+            tv.tv_sec = 1;
+            tv.tv_usec = 0;
+            select(0, nullptr, nullptr, nullptr, &tv);
+        }
+    }
 #else
     // Just wait for shutdown signal
     while (!g_shutdown_requested) {
