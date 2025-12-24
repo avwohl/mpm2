@@ -1,0 +1,18 @@
+ cd ~/src/mpm2/build
+  ./mpm2_emu -l -d A:/tmp/mpm_boot_fixed.img -b /tmp/mpm2boot_serial.bin
+
+  The -l flag enables local console mode (no SSH needed).
+
+  You should see:
+  - MP/M II V2.1 Loader with memory segment table
+  - "MP/M II V2.0" banner
+  - "3A>" prompt
+
+  Note: The disk image at /tmp/mpm_boot_fixed.img was created during our debugging session. If you want a permanent test setup, you could copy it:
+
+  cp /tmp/mpm_boot_fixed.img ~/src/mpm2/disks/mpm_boot.img
+
+  Then run with:
+  ./mpm2_emu -l -d A:../disks/mpm_boot.img -b /tmp/mpm2boot_serial.bin
+
+  The "Bdos Err On A: Select" error about $3$.SUP is normal - the disk just doesn't have startup configuration files for console 3.

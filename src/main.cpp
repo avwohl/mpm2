@@ -16,6 +16,9 @@
 #include <csignal>
 #include <cstdlib>
 #include <getopt.h>
+#include <termios.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 // Global flag for clean shutdown
 static volatile sig_atomic_t g_shutdown_requested = 0;
@@ -23,6 +26,43 @@ static volatile sig_atomic_t g_shutdown_requested = 0;
 void signal_handler(int sig) {
     (void)sig;
     g_shutdown_requested = 1;
+}
+
+// Terminal raw mode handling for local console
+static struct termios g_orig_termios;
+static bool g_termios_saved = false;
+
+static void restore_terminal() {
+    if (g_termios_saved) {
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &g_orig_termios);
+        g_termios_saved = false;
+    }
+}
+
+static bool setup_raw_terminal() {
+    if (!isatty(STDIN_FILENO)) {
+        return false;  // Not a terminal
+    }
+
+    if (tcgetattr(STDIN_FILENO, &g_orig_termios) == -1) {
+        return false;
+    }
+    g_termios_saved = true;
+    atexit(restore_terminal);
+
+    struct termios raw = g_orig_termios;
+    // Disable canonical mode, echo, and signal chars
+    raw.c_lflag &= ~(ICANON | ECHO | ISIG);
+    // Disable Ctrl-S/Q flow control
+    raw.c_iflag &= ~(IXON | ICRNL);
+    // Non-blocking read: return immediately if no input
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 0;
+
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
+        return false;
+    }
+    return true;
 }
 
 void print_usage(const char* prog) {
@@ -224,21 +264,75 @@ int main(int argc, char* argv[]) {
         // Run SSH accept loop in main thread (blocks until shutdown)
         ssh_server.accept_loop();
     } else {
-        // Local console mode - just wait for shutdown signal
+        // Local console mode - read from stdin and broadcast to all local consoles
+        if (setup_raw_terminal()) {
+            while (!g_shutdown_requested) {
+                // Poll stdin for input
+                char ch;
+                ssize_t n = read(STDIN_FILENO, &ch, 1);
+                if (n > 0) {
+                    // Handle Ctrl+C for shutdown
+                    if (ch == 0x03) {
+                        g_shutdown_requested = 1;
+                        break;
+                    }
+                    // Broadcast to all local mode consoles
+                    for (int i = 0; i < MAX_CONSOLES; i++) {
+                        Console* con = ConsoleManager::instance().get(i);
+                        if (con && con->is_local()) {
+                            con->input_queue().try_write(static_cast<uint8_t>(ch));
+                        }
+                    }
+                } else {
+                    // No input available - sleep briefly to avoid busy-wait
+                    usleep(1000);  // 1ms
+                }
+            }
+            restore_terminal();
+        } else {
+            // Not a TTY - just wait for shutdown signal
+            while (!g_shutdown_requested) {
+                struct timeval tv;
+                tv.tv_sec = 1;
+                tv.tv_usec = 0;
+                select(0, nullptr, nullptr, nullptr, &tv);
+            }
+        }
+    }
+#else
+    // Local console mode - read from stdin and broadcast to all local consoles
+    if (setup_raw_terminal()) {
+        while (!g_shutdown_requested) {
+            // Poll stdin for input
+            char ch;
+            ssize_t n = read(STDIN_FILENO, &ch, 1);
+            if (n > 0) {
+                // Handle Ctrl+C for shutdown
+                if (ch == 0x03) {
+                    g_shutdown_requested = 1;
+                    break;
+                }
+                // Broadcast to all local mode consoles
+                for (int i = 0; i < MAX_CONSOLES; i++) {
+                    Console* con = ConsoleManager::instance().get(i);
+                    if (con && con->is_local()) {
+                        con->input_queue().try_write(static_cast<uint8_t>(ch));
+                    }
+                }
+            } else {
+                // No input available - sleep briefly to avoid busy-wait
+                usleep(1000);  // 1ms
+            }
+        }
+        restore_terminal();
+    } else {
+        // Not a TTY - just wait for shutdown signal
         while (!g_shutdown_requested) {
             struct timeval tv;
             tv.tv_sec = 1;
             tv.tv_usec = 0;
             select(0, nullptr, nullptr, nullptr, &tv);
         }
-    }
-#else
-    // Just wait for shutdown signal
-    while (!g_shutdown_requested) {
-        struct timeval tv;
-        tv.tv_sec = 1;
-        tv.tv_usec = 0;
-        select(0, nullptr, nullptr, nullptr, &tv);
     }
 #endif
 

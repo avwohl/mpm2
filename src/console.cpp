@@ -16,7 +16,8 @@ Console::Console(int id)
 }
 
 uint8_t Console::const_status() {
-    if (!connected_.load()) return 0x00;
+    // Check if input available - works for both connected and local mode
+    if (!connected_.load() && !local_mode_.load()) return 0x00;
     return input_queue_.available() > 0 ? 0xFF : 0x00;
 }
 
