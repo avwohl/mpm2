@@ -301,66 +301,22 @@ void Z80Thread::thread_func() {
 
         last_pc = pc;
 
-        // Periodic PC trace to see where CPU is when not calling XIOS
-        static uint64_t inst_trace_count = 0;
-        inst_trace_count++;
-        // After first 1000000 instructions, trace every 100000
-        if (inst_trace_count > 1000000 && (inst_trace_count % 100000) == 0) {
-            fprintf(stderr, "[PC TRACE] inst=%llu PC=%04X op=%02X SP=%04X\n",
-                    (unsigned long long)inst_trace_count, pc,
-                    memory_->fetch_mem(pc), cpu_->regs.SP.get_pair16());
-        }
+        // Periodic PC trace - disabled (too verbose)
+        // static uint64_t inst_trace_count = 0;
+        // inst_trace_count++;
+        // if (inst_trace_count > 1000000 && (inst_trace_count % 100000) == 0) {
+        //     fprintf(stderr, "[PC TRACE] inst=%llu PC=%04X op=%02X SP=%04X\n",
+        //             (unsigned long long)inst_trace_count, pc,
+        //             memory_->fetch_mem(pc), cpu_->regs.SP.get_pair16());
+        // }
 
-        // Detect loop at 0x05C0 and dump comparison data
-        static bool loop_05c0_dumped = false;
-        if (pc == 0x05C0 && !loop_05c0_dumped && inst_trace_count > 100000) {
-            loop_05c0_dumped = true;
-            fprintf(stderr, "\n[LOOP DETECTED at 0x05C0 after %llu instructions]\n",
-                    (unsigned long long)inst_trace_count);
-            // Dump the comparison data pointers
-            uint16_t base1 = memory_->fetch_mem(0x0B4E) | (memory_->fetch_mem(0x0B4F) << 8);
-            uint16_t base2 = memory_->fetch_mem(0x0B50) | (memory_->fetch_mem(0x0B51) << 8);
-            uint8_t ctr1 = memory_->fetch_mem(0x0B52);
-            uint8_t ctr2 = memory_->fetch_mem(0x0B53);
-            fprintf(stderr, "[LOOP] base1(0B4E)=%04X base2(0B50)=%04X ctr1(0B52)=%02X ctr2(0B53)=%02X\n",
-                    base1, base2, ctr1, ctr2);
-            // Dump first 24 bytes from both bases
-            fprintf(stderr, "[LOOP] Data at base1 (%04X): ", base1);
-            for (int i = 0; i < 24; i++) fprintf(stderr, "%02X ", memory_->fetch_mem(base1 + i));
-            fprintf(stderr, "\n");
-            fprintf(stderr, "[LOOP] Data at base2 (%04X): ", base2);
-            for (int i = 0; i < 24; i++) fprintf(stderr, "%02X ", memory_->fetch_mem(base2 + i));
-            fprintf(stderr, "\n");
-            // Also dump SP and memory around it
-            uint16_t sp = cpu_->regs.SP.get_pair16();
-            fprintf(stderr, "[LOOP] SP=%04X Stack: ", sp);
-            for (int i = 0; i < 16; i++) fprintf(stderr, "%02X ", memory_->fetch_mem(sp + i));
-            fprintf(stderr, "\n");
-        }
+        // Debug loop detection - disabled
+        // static bool loop_05c0_dumped = false;
+        // if (pc == 0x05C0 && !loop_05c0_dumped) { ... }
 
-        // Detect new loop at 0x0F84-0x0F8E
-        static bool loop_0f84_dumped = false;
-        if (pc == 0x0F84 && !loop_0f84_dumped && inst_trace_count > 100000) {
-            loop_0f84_dumped = true;
-            fprintf(stderr, "\n[LOOP DETECTED at 0x0F84 after %llu instructions]\n",
-                    (unsigned long long)inst_trace_count);
-            uint16_t sp = cpu_->regs.SP.get_pair16();
-            fprintf(stderr, "[LOOP] AF=%04X BC=%04X DE=%04X HL=%04X SP=%04X\n",
-                    cpu_->regs.AF.get_pair16(), cpu_->regs.BC.get_pair16(),
-                    cpu_->regs.DE.get_pair16(), cpu_->regs.HL.get_pair16(), sp);
-            // Dump memory at 0x165B (the limit value used in the loop)
-            uint16_t val_165b = memory_->fetch_mem(0x165B) | (memory_->fetch_mem(0x165C) << 8);
-            uint16_t val_1668 = memory_->fetch_mem(0x1668) | (memory_->fetch_mem(0x1669) << 8);
-            fprintf(stderr, "[LOOP] Memory at 0x165B=%04X 0x1668=%04X\n", val_165b, val_1668);
-            // Dump data area around 0x1650
-            fprintf(stderr, "[LOOP] Data at 1650: ");
-            for (int i = 0; i < 32; i++) fprintf(stderr, "%02X ", memory_->fetch_mem(0x1650 + i));
-            fprintf(stderr, "\n");
-            // Dump stack
-            fprintf(stderr, "[LOOP] Stack: ");
-            for (int i = 0; i < 16; i++) fprintf(stderr, "%02X ", memory_->fetch_mem(sp + i));
-            fprintf(stderr, "\n");
-        }
+        // Debug loop at 0x0F84 - disabled
+        // static bool loop_0f84_dumped = false;
+        // if (pc == 0x0F84 && !loop_0f84_dumped) { ... }
 
         // Check for HALT instruction (0x76) - handle specially for MP/M
         uint8_t opcode = memory_->fetch_mem(pc);
