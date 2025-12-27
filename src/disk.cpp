@@ -282,6 +282,9 @@ int DiskSystem::read(BankedMemory* mem) {
     // Trace all disk reads, especially to E700 range
     bool trace_this = (dma_addr_ >= 0xE700 && dma_addr_ < 0xE800);
 
+    // Trace directory sector 11 on track 2 which contains MPM.SYS (with skew)
+    bool trace_dir = (track == 2 && logical_sector == 11);
+
     // Temporarily set physical sector for reading
     disk->set_sector(phys_sector);
 
@@ -299,7 +302,7 @@ int DiskSystem::read(BankedMemory* mem) {
         }
 
         // Trace key addresses
-        if (trace_this) {
+        if (trace_this || trace_dir) {
             std::cerr << "[DISK READ] trk=" << std::dec << track
                       << " logsec=" << logical_sector
                       << " xlat=" << translated_sector
@@ -319,6 +322,15 @@ int DiskSystem::read(BankedMemory* mem) {
                           << (int)mem->fetch_mem(dma_addr_ + i) << " ";
             }
             std::cerr << std::dec << std::endl;
+            // Also show MPM.SYS entry position (32 bytes in)
+            if (trace_dir) {
+                std::cerr << "[DISK READ] MPM.SYS should be at offset 32: ";
+                for (int i = 0; i < 16; i++) {
+                    std::cerr << std::hex << std::setw(2) << std::setfill('0')
+                              << (int)buffer[offset_in_phys + 32 + i] << " ";
+                }
+                std::cerr << std::dec << std::endl;
+            }
         }
     }
 
@@ -365,25 +377,36 @@ int DiskSystem::write(BankedMemory* mem) {
 }
 
 // Standard CP/M skew table for ibm-3740 (26 sectors, skew factor 6)
-// This table maps physical->logical: skew[physical] = logical
-static const uint8_t skew_phys_to_log[26] = {
-    1, 6, 12, 18, 24, 4, 10, 16, 22, 2, 8, 14, 20, 0, 7, 13, 19, 25, 5, 11, 17, 23, 3, 9, 15, 21
+// These tables map between logical sector numbers and physical positions in disk images.
+// Disk images created by cpmtools with "skew 6" store sectors in interleaved order.
+// When reading logical sector L, we read from physical position log_to_phys[L].
+
+// log_to_phys[logical] = physical position in disk image
+static const uint8_t skew_log_to_phys[26] = {
+    0, 6, 12, 18, 24, 4, 10, 16, 22, 2, 8, 14, 20, 1, 7, 13, 19, 25, 5, 11, 17, 23, 3, 9, 15, 21
 };
 
-// Inverse table: given logical, find physical position
-// inverse[logical] = physical where skew[physical] = logical
-// Computed from the above: if skew[P] = L, then inverse[L] = P
-static const uint8_t skew_log_to_phys[26] = {
-    13, 0, 9, 22, 5, 18, 1, 14, 10, 23, 6, 19, 2, 15, 11, 24, 7, 20, 3, 16, 12, 25, 8, 21, 4, 17
+// phys_to_log[physical] = logical sector (inverse of above)
+static const uint8_t skew_phys_to_log[26] = {
+    0, 13, 9, 22, 5, 18, 1, 14, 10, 23, 6, 19, 2, 15, 11, 24, 7, 20, 3, 16, 12, 25, 8, 21, 4, 17
 };
 
 uint16_t DiskSystem::translate(uint16_t logical_sector, uint16_t track) {
-    // Disk image created with cpmtools using skew 0 (no interleave)
-    // So no translation is needed - logical sector = physical sector
-    (void)track;
-    (void)skew_phys_to_log;  // Keep for reference
-    (void)skew_log_to_phys;  // Keep for reference
+    // Check disk format - skew only applies to ibm-3740 (SSSD_8)
+    Disk* disk = get(current_drive_);
+    if (!disk) return logical_sector;
 
-    // No skew translation - disk image has no interleave
+    // Only apply skew for ibm-3740 format
+    // The MPMII_1.img disk image stores sectors in PHYSICAL order with skew
+    if (disk->format() == DiskFormat::SSSD_8) {
+        // ibm-3740 uses skew factor 6
+        // log_to_phys[L] = physical position where logical sector L is stored
+        if (logical_sector < 26) {
+            return skew_log_to_phys[logical_sector];
+        }
+    }
+
+    (void)track;
+    (void)skew_phys_to_log;  // Kept for reference
     return logical_sector;
 }

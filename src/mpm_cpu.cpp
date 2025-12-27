@@ -72,6 +72,12 @@ void MpmCpu::handle_xios_dispatch() {
     // We prefer A since that's what OUT actually outputs.
     uint8_t func = regs.AF.get_high();  // A register
 
+    // Trace BOOT function calls
+    if (func == 0x00) {
+        std::cerr << "[XIOS DISPATCH] BOOT called, PC=0x" << std::hex
+                  << regs.PC.get_pair16() << std::dec << std::endl;
+    }
+
     // Debug trace - trace dispatches with unknown functions
     if (func != 0x00 && func != 0x03 && func != 0x06 && func != 0x09 &&
         func != 0x0C && func != 0x0F && func != 0x12 && func != 0x15 &&

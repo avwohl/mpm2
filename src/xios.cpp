@@ -282,18 +282,10 @@ void XIOS::do_conout() {
     uint8_t console = (pc >= 0x8000) ? cpu_->regs.DE.get_high() : 0;
     uint8_t ch = cpu_->regs.BC.get_low();
 
-    // Debug: first few high-memory CONOUT calls
-    static int high_mem_count = 0;
-    if (pc >= 0x8000) {
-        high_mem_count++;
-        if (high_mem_count <= 50) {
-            std::cerr << "[CONOUT-HI] #" << high_mem_count
-                      << " PC=0x" << std::hex << pc
-                      << " D=" << (int)console
-                      << " ch=0x" << (int)ch
-                      << " '" << (char)(ch >= 0x20 && ch < 0x7f ? ch : '.')
-                      << "'" << std::dec << std::endl;
-        }
+    // For local mode: output post-boot console characters to stdout
+    // Only output from high memory (MP/M II kernel) to avoid double output
+    if (pc >= 0x8000 && (ch >= 0x20 || ch == '\r' || ch == '\n')) {
+        std::cout << (char)ch << std::flush;
     }
 
     // Get the specified console
