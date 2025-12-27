@@ -39,6 +39,23 @@ qkz80_uint8 BankedMemory::fetch_mem(qkz80_uint16 addr, bool is_instruction) {
 }
 
 void BankedMemory::store_mem(qkz80_uint16 addr, qkz80_uint8 byte) {
+    // Debug: intercept writes to A63D and FC00
+    static int fc00_write_count = 0;
+    static int a63d_write_count = 0;
+    if (addr == 0xFC00 && fc00_write_count++ < 10) {
+        std::cerr << "[WRITE FC00] value=0x" << std::hex << (int)byte
+                  << " bank=" << (int)current_bank_ << std::dec
+                  << " (was 0x" << std::hex << (int)common_[addr - COMMON_BASE] << ")"
+                  << std::dec << "\n";
+    }
+    // Track when A63D (in banked area) gets corrupted
+    if (addr == 0xA63D && a63d_write_count++ < 3) {
+        std::cerr << "[WRITE A63D] value=0x" << std::hex << (int)byte
+                  << " bank=" << (int)current_bank_ << std::dec
+                  << " (was 0x" << std::hex << (int)banks_[current_bank_][addr] << ")"
+                  << std::dec << "\n";
+    }
+
     if (addr >= COMMON_BASE) {
         // Common area
         common_[addr - COMMON_BASE] = byte;

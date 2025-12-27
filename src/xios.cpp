@@ -8,6 +8,7 @@
 #include "disk.h"
 #include "qkz80.h"
 #include <iostream>
+#include <iomanip>
 
 XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
     : cpu_(cpu)
@@ -26,7 +27,7 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
 
 // DEPRECATED: PC-based interception has been replaced by I/O port dispatch.
 // All XIOS calls now go through port 0xE0 with function code in A register.
-// Our port-dispatch code is installed at FB00H (XIOSJMP TBL location).
+// Our port-dispatch code is installed at FC00H (XIOSJMP TBL location).
 // These functions are kept for reference but are no longer called.
 bool XIOS::is_xios_call(uint16_t pc) const {
     // Check XIOS range (configurable via xios_base_)
@@ -173,9 +174,27 @@ bool XIOS::handle_call(uint16_t pc) {
 }
 
 void XIOS::handle_port_dispatch(uint8_t func) {
-    // Port-based dispatch: function offset in B register
-    // The Z80 code does: LD B, func; OUT (0xE0), A; RET
-    // So we don't call do_ret() here - the Z80 has its own RET
+    // Port-based dispatch: function offset written to port E0
+    // The A register contains the XIOS function offset (0, 3, 6, 9, etc.)
+
+    // Debug: trace calls, especially BOOT and after patch
+    static int total_calls = 0;
+    static bool patch_happened = false;
+    total_calls++;
+
+    // Always trace BOOT calls
+    if (func == XIOS_BOOT) {
+        std::cerr << "[PORT DISPATCH] BOOT called! (call #" << total_calls << ")\n";
+        patch_happened = true;
+    }
+
+    // Trace first 30 calls, or first 30 after patch
+    static int post_patch_count = 0;
+    if (total_calls <= 30 || (patch_happened && post_patch_count++ < 30)) {
+        std::cerr << "[PORT DISPATCH] func=0x" << std::hex << (int)func
+                  << " (call #" << std::dec << total_calls << ")"
+                  << (patch_happened ? " [post-patch]" : "") << "\n";
+    }
 
     // Temporarily set skip_ret flag so handlers don't do RET
     skip_ret_ = true;
@@ -249,43 +268,54 @@ void XIOS::do_ret() {
     }
 }
 
-// Console I/O - D register contains console number
+// Console I/O - B register contains console number (MP/M II convention)
 void XIOS::do_const() {
-    uint8_t console = cpu_->regs.DE.get_high();  // D = console number
+    uint8_t console = cpu_->regs.BC.get_high();  // B = console number
     Console* con = ConsoleManager::instance().get(console);
 
+    uint8_t status = 0x00;
     if (con) {
-        cpu_->regs.AF.set_high(con->const_status());
-    } else {
-        cpu_->regs.AF.set_high(0x00);
+        status = con->const_status();
     }
+    // Debug: show when input is available
+    static int last_status[8] = {0};
+    if (console < 8 && status != last_status[console]) {
+        std::cerr << "[CONST] con=" << (int)console << " status=" << (status ? "READY" : "empty") << "\n";
+        last_status[console] = status;
+    }
+    cpu_->regs.AF.set_high(status);
     do_ret();
 }
 
 void XIOS::do_conin() {
-    uint8_t console = cpu_->regs.DE.get_high();  // D = console number
+    uint8_t console = cpu_->regs.BC.get_high();  // B = console number
     Console* con = ConsoleManager::instance().get(console);
 
+    uint8_t ch = 0x1A;  // EOF default
     if (con) {
-        cpu_->regs.AF.set_high(con->read_char());
-    } else {
-        cpu_->regs.AF.set_high(0x1A);  // EOF
+        ch = con->read_char();
+        if (ch != 0x00) {
+            std::cerr << "[CONIN] con=" << (int)console << " ch=0x" << std::hex << (int)ch << std::dec << "\n";
+        }
     }
+    cpu_->regs.AF.set_high(ch);
     do_ret();
 }
 
 void XIOS::do_conout() {
-    // D = console number (for XIOS), C = character
-    // During LDRBIOS boot (PC < 0x8000), always use console 0
-    // During XIOS (PC >= 0x8000), use D register for console number
+    // B = console number (MP/M II), C = character
+    // For boot phase (LDRBIOS/MPMLDR at PC < 0x8000), always use console 0
+    // because B register contains garbage during boot
+    // Once MP/M II is running (code at 0x8000+), use B register
     uint16_t pc = cpu_->regs.PC.get_pair16();
-    uint8_t console = (pc >= 0x8000) ? cpu_->regs.DE.get_high() : 0;
+    uint8_t console = (pc < 0x8000) ? 0 : cpu_->regs.BC.get_high();
     uint8_t ch = cpu_->regs.BC.get_low();
 
-    // For local mode: output post-boot console characters to stdout
-    // Only output from high memory (MP/M II kernel) to avoid double output
-    if (pc >= 0x8000 && (ch >= 0x20 || ch == '\r' || ch == '\n')) {
-        std::cout << (char)ch << std::flush;
+    // Debug: show first few CONOUT calls to verify
+    static int debug_count = 0;
+    if (debug_count++ < 20) {
+        std::cerr << "[do_conout] skip_ret=" << skip_ret_ << " pc=0x" << std::hex << pc
+                  << " console=" << std::dec << (int)console << " ch=0x" << std::hex << (int)ch << std::dec << "\n";
     }
 
     // Get the specified console
@@ -434,20 +464,13 @@ void XIOS::do_setsec() {
 }
 
 void XIOS::do_setdma() {
-    uint16_t old_dma = dma_addr_;
     // For port dispatch: assembly copies BC to HL before OUT
     // For PC-based dispatch (legacy): BC = DMA address
     dma_addr_ = skip_ret_ ? cpu_->regs.HL.get_pair16() : cpu_->regs.BC.get_pair16();
-    std::cerr << "[SETDMA] addr=0x" << std::hex << dma_addr_
-              << " (was 0x" << old_dma << ")" << std::dec << std::endl;
     do_ret();
 }
 
 void XIOS::do_read() {
-    std::cerr << "[do_read] Called: trk=" << current_track_
-              << " sec=" << current_sector_
-              << " dma=0x" << std::hex << dma_addr_ << std::dec << std::endl;
-
     // Set up disk system with current parameters
     DiskSystem::instance().set_track(current_track_);
     DiskSystem::instance().set_sector(current_sector_);
@@ -456,18 +479,23 @@ void XIOS::do_read() {
     // Perform read
     int result = DiskSystem::instance().read(mem_);
 
-    // Trace reads to high memory (where system modules are loaded)
-    static int read_trace = 0;
-    if (read_trace++ < 300) {
-        std::cerr << "[XIOS READ] dma=0x" << std::hex << dma_addr_
-                  << " trk=" << std::dec << current_track_
+    // Debug reads - show all reads with unique DMA or track changes
+    static int read_count = 0;
+    static uint16_t last_dma = 0;
+    static uint16_t last_trk = 0xFFFF;
+    read_count++;
+    if (current_track_ != last_trk || dma_addr_ != last_dma || read_count < 5 || read_count % 50 == 0) {
+        std::cerr << "[DISK READ #" << read_count << "] trk=" << current_track_
                   << " sec=" << current_sector_
+                  << " dma=0x" << std::hex << dma_addr_ << std::dec
                   << " result=" << result << std::endl;
+        last_dma = dma_addr_;
+        last_trk = current_track_;
     }
 
-    // Also trace errors
+    // Report disk errors
     if (result != 0) {
-        std::cout << "[DISK ERROR] trk=" << current_track_
+        std::cerr << "[DISK ERROR] read trk=" << current_track_
                   << " sec=" << current_sector_
                   << " result=" << result << std::endl;
     }
@@ -516,6 +544,15 @@ void XIOS::do_selmemory() {
     // descriptor: base(1), size(1), attrib(1), bank(1)
     uint16_t desc_addr = cpu_->regs.BC.get_pair16();
     uint8_t bank = mem_->fetch_mem(desc_addr + 3);  // Get bank byte
+
+    // Debug: trace bank switches
+    static int switch_count = 0;
+    if (switch_count++ < 20) {
+        std::cerr << "[SELMEMORY] desc=0x" << std::hex << desc_addr
+                  << " bank=" << std::dec << (int)bank
+                  << " PC=0x" << std::hex << cpu_->regs.PC.get_pair16()
+                  << " SP=0x" << cpu_->regs.SP.get_pair16() << std::dec << "\n";
+    }
 
     mem_->select_bank(bank);
     do_ret();
@@ -635,127 +672,21 @@ void XIOS::do_sysdat() {
     do_ret();
 }
 
-// xios_port.bin - Z80 code for port-based XIOS dispatch at FB00
-// Generated from asm/xios_port.bin - do not edit manually
-static const uint8_t xios_port_code[] = {
-    0xc3, 0x5c, 0xfb, 0xc3, 0x61, 0xfb, 0xc3, 0x66, 0xfb, 0xc3, 0x6b, 0xfb,
-    0xc3, 0x70, 0xfb, 0xc3, 0x75, 0xfb, 0xc3, 0x7a, 0xfb, 0xc3, 0x7f, 0xfb,
-    0xc3, 0x84, 0xfb, 0xc3, 0x89, 0xfb, 0xc3, 0x8e, 0xfb, 0xc3, 0x95, 0xfb,
-    0xc3, 0x9c, 0xfb, 0xc3, 0xa3, 0xfb, 0xc3, 0xa8, 0xfb, 0xc3, 0xad, 0xfb,
-    0xc3, 0xb2, 0xfb, 0xc3, 0xb9, 0xfb, 0xc3, 0xbe, 0xfb, 0xc3, 0xc3, 0xfb,
-    0xc3, 0xc8, 0xfb, 0xc3, 0xcd, 0xfb, 0xc3, 0xd2, 0xfb, 0xc3, 0xd7, 0xfb,
-    0xc3, 0xdc, 0xfb, 0xc3, 0xe1, 0xfb, 0xc3, 0xe6, 0xfb, 0xc3, 0xeb, 0xfb,
-    0xc3, 0xf0, 0xfb, 0xc3, 0xf5, 0xfb, 0x00, 0xff, 0x3e, 0x00, 0xd3, 0xe0,
-    0xc9, 0x3e, 0x03, 0xd3, 0xe0, 0xc9, 0x3e, 0x06, 0xd3, 0xe0, 0xc9, 0x3e,
-    0x09, 0xd3, 0xe0, 0xc9, 0x3e, 0x0c, 0xd3, 0xe0, 0xc9, 0x3e, 0x0f, 0xd3,
-    0xe0, 0xc9, 0x3e, 0x12, 0xd3, 0xe0, 0xc9, 0x3e, 0x15, 0xd3, 0xe0, 0xc9,
-    0x3e, 0x18, 0xd3, 0xe0, 0xc9, 0x3e, 0x1b, 0xd3, 0xe0, 0xc9, 0x60, 0x69,
-    0x3e, 0x1e, 0xd3, 0xe0, 0xc9, 0x60, 0x69, 0x3e, 0x21, 0xd3, 0xe0, 0xc9,
-    0x60, 0x69, 0x3e, 0x24, 0xd3, 0xe0, 0xc9, 0x3e, 0x27, 0xd3, 0xe0, 0xc9,
-    0x3e, 0x2a, 0xd3, 0xe0, 0xc9, 0x3e, 0x2d, 0xd3, 0xe0, 0xc9, 0x60, 0x69,
-    0x3e, 0x30, 0xd3, 0xe0, 0xc9, 0x3e, 0x33, 0xd3, 0xe0, 0xc9, 0x3e, 0x36,
-    0xd3, 0xe0, 0xc9, 0x3e, 0x39, 0xd3, 0xe0, 0xc9, 0x3e, 0x3c, 0xd3, 0xe0,
-    0xc9, 0x3e, 0x3f, 0xd3, 0xe0, 0xc9, 0x3e, 0x42, 0xd3, 0xe0, 0xc9, 0x3e,
-    0x45, 0xd3, 0xe0, 0xc9, 0x3e, 0x48, 0xd3, 0xe0, 0xc9, 0x3e, 0x4b, 0xd3,
-    0xe0, 0xc9, 0x3e, 0x4e, 0xd3, 0xe0, 0xc9, 0x3e, 0x51, 0xd3, 0xe0, 0xc9,
-    0x3e, 0x54, 0xd3, 0xe0, 0xc9, 0x3e, 0x57, 0xd3, 0xe0, 0xc9, 0x00, 0x3c,
-    0x00
-};
-static const size_t xios_port_code_len = sizeof(xios_port_code);
-
-void XIOS::patch_bnkxios(uint16_t explicit_bnkxios_addr) {
-    // Install port-dispatch XIOS at FB00 where XIOSJMP TBL is located
-    // MPMLDR creates XIOSJMP TBL at FB00H, so we install our dispatcher there
-    // The dispatcher forwards XIOS calls to the emulator via port I/O
-
-    static bool xios_installed = false;
-    if (xios_installed) return;
-
-    std::cerr << "[patch_bnkxios] Installing port-dispatch XIOS at FB00H" << std::endl;
-
-    // Install xios_port code at FB00 (XIOSJMP TBL location)
-    for (size_t i = 0; i < xios_port_code_len; i++) {
-        mem_->store_mem(0xFB00 + i, xios_port_code[i]);
-    }
-
-    // Determine BNKXIOS address - use explicit if provided, else try 0xFF0D
-    uint16_t bnkxios_addr = explicit_bnkxios_addr;
-    if (bnkxios_addr == 0) {
-        // Try to read from 0xFF0D (page number stored by loader)
-        uint8_t bnkxios_page = mem_->fetch_mem(0xFF0D);
-        bnkxios_addr = static_cast<uint16_t>(bnkxios_page) << 8;
-        std::cerr << "[patch_bnkxios] 0xFF0D=" << std::hex << (int)bnkxios_page
-                  << "H -> BNKXIOS addr=" << bnkxios_addr << "H" << std::dec << std::endl;
-    } else {
-        std::cerr << "[patch_bnkxios] Using explicit BNKXIOS addr=" << std::hex
-                  << bnkxios_addr << "H" << std::dec << std::endl;
-    }
-
-    if (bnkxios_addr != 0 && bnkxios_addr != 0xFB00) {
-        std::cerr << "[patch_bnkxios] Patching BNKXIOS at " << std::hex << bnkxios_addr
-                  << "H to forward to FB00H" << std::dec << std::endl;
-
-        // Dump what's there before patching
-        std::cerr << "[patch_bnkxios] BNKXIOS before: ";
-        for (int i = 0; i < 12; i++) {
-            std::cerr << std::hex << (int)mem_->fetch_mem(bnkxios_addr + i) << " ";
-        }
-        std::cerr << std::dec << std::endl;
-
-        // Patch each jump table entry (30 entries for standard XIOS + extended)
-        // Each entry is 3 bytes: JP xxxx -> JP FB00+offset
-        // Standard BIOS: 17 entries (0x00-0x30), MP/M extensions: 13 more (0x33-0x57)
-        for (int entry = 0; entry <= 30; entry++) {
-            uint16_t offset = entry * 3;
-            uint16_t target = 0xFB00 + offset;
-
-            // Write JP target (C3 lo hi)
-            mem_->store_mem(bnkxios_addr + offset, 0xC3);        // JP
-            mem_->store_mem(bnkxios_addr + offset + 1, target & 0xFF);  // low byte
-            mem_->store_mem(bnkxios_addr + offset + 2, target >> 8);    // high byte
-        }
-
-        // Dump after patching
-        std::cerr << "[patch_bnkxios] BNKXIOS after:  ";
-        for (int i = 0; i < 12; i++) {
-            std::cerr << std::hex << (int)mem_->fetch_mem(bnkxios_addr + i) << " ";
-        }
-        std::cerr << std::dec << std::endl;
-    }
-
-    // Cache the BNKXIOS address for use by do_boot()
-    bnkxios_addr_ = bnkxios_addr;
-
-    xios_installed = true;
-
-    // Verify FB00 installation
-    std::cerr << "[patch_bnkxios] Installed " << xios_port_code_len
-              << " bytes at FB00H, first bytes: "
-              << std::hex << (int)mem_->fetch_mem(0xFB00) << " "
-              << (int)mem_->fetch_mem(0xFB01) << " "
-              << (int)mem_->fetch_mem(0xFB02) << std::dec << std::endl;
-}
-
 void XIOS::do_boot() {
     // For MP/M II, COLDBOOT (offset 0) returns HL = address of commonbase
-    // The commonbase structure is inside BNKXIOS at offset 0x4E (SWTUSER), etc.
+    // The commonbase structure is in XIOSJMP (at FC00H)
+    // NOTE: Memory at 0xFF0C gets corrupted, so use hardcoded FC00
 
-    // Ensure BNKXIOS is patched
-    patch_bnkxios();
+    uint16_t xiosjmp_addr = 0xFC00;  // Hardcoded - memory at FF0C is corrupted
 
-    // Get BNKXIOS address from cached value (set by patch_bnkxios)
-    uint16_t bnkxios_addr = bnkxios_addr_;
-    if (bnkxios_addr == 0) {
-        // Fallback to reading from 0xFF0D
-        uint8_t bnkxios_page = mem_->fetch_mem(0xFF0D);
-        bnkxios_addr = static_cast<uint16_t>(bnkxios_page) << 8;
+    // Commonbase structure starts at offset 0x4B in XIOSJMP
+    uint16_t commonbase = xiosjmp_addr + XIOS_COMMONBASE;  // FC00+4B = FC4B
+
+    static int boot_trace = 0;
+    if (boot_trace++ < 5) {
+        std::cerr << "[do_boot] XIOSJMP=" << std::hex << xiosjmp_addr
+                  << "H commonbase=" << commonbase << "H" << std::dec << std::endl;
     }
-
-    // Commonbase structure starts at SWTUSER offset within BNKXIOS
-    uint16_t commonbase = bnkxios_addr + XIOS_SWTUSER;  // e.g., CD00+4E = CD4E
-
-    std::cerr << "[do_boot] BNKXIOS=" << std::hex << bnkxios_addr
-              << "H commonbase=" << commonbase << "H" << std::dec << std::endl;
 
     cpu_->regs.HL.set_pair16(commonbase);
     do_ret();

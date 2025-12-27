@@ -67,13 +67,47 @@ void SSHSession::thread_func() {
         return;
     }
 
+    // Wait for channel to be ready by processing worker until we can send
+    // wolfSSH needs to process channel open requests before stream I/O works
+    int ret;
+    int attempts = 0;
+    while (attempts++ < 100) {
+        ret = wolfSSH_worker(ssh_, nullptr);
+        int err = wolfSSH_get_error(ssh_);
+        if (ret == WS_SUCCESS || ret == WS_CHAN_RXD || ret > 0) {
+            break;
+        }
+        if (err == WS_EOF) {
+            running_.store(false);
+            return;
+        }
+        if (err != WS_WANT_READ && err != WS_WANT_WRITE &&
+            err != WS_CHAN_RXD && err != WS_SUCCESS && err != 0) {
+            running_.store(false);
+            return;
+        }
+        // Small delay to avoid busy loop
+        struct timeval tv = {0, 10000};
+        fd_set rfds;
+        FD_ZERO(&rfds);
+        FD_SET(fd_, &rfds);
+        select(fd_ + 1, &rfds, nullptr, nullptr, &tv);
+    }
+
     con->set_connected(true);
+
+    // Debug: show queue status
+    std::cerr << "[SSH " << console_id_ << "] Connected, output queue has "
+              << con->output_queue().available() << " bytes\n";
 
     // Send banner
     char banner[128];
     snprintf(banner, sizeof(banner),
              "\r\nMP/M II Console %d\r\n\r\n", console_id_);
-    wolfSSH_stream_send(ssh_, reinterpret_cast<byte*>(banner), strlen(banner));
+    int send_ret = wolfSSH_stream_send(ssh_, reinterpret_cast<byte*>(banner), strlen(banner));
+    if (send_ret < 0) {
+        std::cerr << "[SSH] Banner send failed: " << wolfSSH_get_error(ssh_) << "\n";
+    }
 
     uint8_t buf[256];
 
@@ -93,8 +127,8 @@ void SSHSession::thread_func() {
         tv.tv_sec = 0;
         tv.tv_usec = 10000;  // 10ms timeout
 
-        int ret = select(fd_ + 1, &rfds, &wfds, nullptr, &tv);
-        if (ret < 0) break;
+        int sel_ret = select(fd_ + 1, &rfds, &wfds, nullptr, &tv);
+        if (sel_ret < 0) break;
 
         // Read from SSH -> input queue
         if (FD_ISSET(fd_, &rfds)) {
@@ -123,7 +157,11 @@ void SSHSession::thread_func() {
         if (FD_ISSET(fd_, &wfds)) {
             size_t count = con->output_queue().read_some(buf, sizeof(buf));
             if (count > 0) {
-                wolfSSH_stream_send(ssh_, buf, count);
+                int sent = wolfSSH_stream_send(ssh_, buf, count);
+                static int send_debug = 0;
+                if (send_debug++ < 10) {
+                    std::cerr << "[SSH " << console_id_ << "] Sent " << count << " bytes, ret=" << sent << "\n";
+                }
             }
         }
     }
@@ -336,34 +374,16 @@ void SSHServer::cleanup_sessions() {
 }
 
 int SSHServer::user_auth_callback(byte auth_type, WS_UserAuthData* auth_data, void* ctx) {
-    (void)ctx;  // Unused for now
+    (void)ctx;
+    (void)auth_data;
 
-    std::cerr << "[SSH AUTH] auth_type=" << (int)auth_type;
-    if (auth_data) {
-        std::cerr << " user=" << std::string(reinterpret_cast<const char*>(auth_data->username),
-                                              auth_data->usernameSz);
-    }
-    std::cerr << "\n";
-
-    // Accept public key authentication
-    if (auth_type == WOLFSSH_USERAUTH_PUBLICKEY) {
-        std::cerr << "[SSH AUTH] Accepting public key auth\n";
+    // Accept public key, password, or none authentication
+    if (auth_type == WOLFSSH_USERAUTH_PUBLICKEY ||
+        auth_type == WOLFSSH_USERAUTH_PASSWORD ||
+        auth_type == WOLFSSH_USERAUTH_NONE) {
         return WOLFSSH_USERAUTH_SUCCESS;
     }
 
-    // Accept password authentication - any password is accepted
-    if (auth_type == WOLFSSH_USERAUTH_PASSWORD) {
-        std::cerr << "[SSH AUTH] Accepting password auth\n";
-        return WOLFSSH_USERAUTH_SUCCESS;
-    }
-
-    // Accept none auth type for simple access
-    if (auth_type == WOLFSSH_USERAUTH_NONE) {
-        std::cerr << "[SSH AUTH] Accepting none auth\n";
-        return WOLFSSH_USERAUTH_SUCCESS;
-    }
-
-    std::cerr << "[SSH AUTH] Invalid auth type\n";
     return WOLFSSH_USERAUTH_INVALID_AUTHTYPE;
 }
 

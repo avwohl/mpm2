@@ -12,7 +12,7 @@
 ;
 ; Assemble with: z80asm -o xios_port.bin xios_port.asm
 
-        ORG     0FB00H          ; XIOS load address in common memory (XIOSJMP TBL)
+        ORG     0FC00H          ; XIOS load address in common memory (XIOSJMP TBL)
 
 ; I/O Ports
 XIOS_DISPATCH:  EQU     0E0H    ; XIOS dispatch (B = function)

@@ -1,17 +1,37 @@
 #!/bin/bash
-# gensys.sh - Generate MPM.SYS using cpmemu and GENSYS.COM
+# gensys.sh - Generate MP/M II system using GENSYS
 # Part of MP/M II Emulator
 # SPDX-License-Identifier: GPL-3.0-or-later
+#
+# This script automates the GENSYS process:
+# 1. Creates a BNKXIOS.SPR with the specified number of consoles
+# 2. Runs GENSYS under cpmemu with default settings
+# 3. Patches MPMLDR.COM serial number to match
+# 4. Creates boot image and disk
+#
+# Default configuration (GENSYS defaults):
+# - 4 consoles
+# - Common base at C000 (48KB user memory per bank)
+# - 3 user memory banks
+# - Top of memory at FF00
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+BUILD_DIR="$PROJECT_DIR/build"
 ASM_DIR="$PROJECT_DIR/asm"
 DISKS_DIR="$PROJECT_DIR/disks"
-DIST_DIR="$PROJECT_DIR/mpm2_external/mpm2dist"
-BUILD_DIR="$PROJECT_DIR/build"
-CPMEMU="${CPMEMU:-/home/wohl/src/cpmemu/src/cpmemu}"
+CPMEMU="${CPMEMU:-/Users/wohl/src/cpmemu/src/cpmemu}"
+WORK_DIR="/tmp/gensys_work"
+
+# Number of consoles (default 4)
+NUM_CONSOLES=${1:-4}
+
+echo "MP/M II System Generation"
+echo "========================="
+echo "Consoles: $NUM_CONSOLES"
+echo ""
 
 # Check prerequisites
 if [ ! -x "$CPMEMU" ]; then
@@ -20,145 +40,92 @@ if [ ! -x "$CPMEMU" ]; then
     exit 1
 fi
 
-if [ ! -f "$DIST_DIR/GENSYS.COM" ]; then
-    echo "Error: GENSYS.COM not found in $DIST_DIR"
+if [ ! -f "$DISKS_DIR/mpm2_hd1k.img" ]; then
+    echo "Error: mpm2_hd1k.img not found. Run scripts/build_hd1k.sh first"
     exit 1
 fi
 
-# Build BNKXIOS.SPR if needed (using z80asm + mkspr)
-if [ ! -f "$DISKS_DIR/BNKXIOS.SPR" ] || [ "$ASM_DIR/bnkxios_stub.asm" -nt "$DISKS_DIR/BNKXIOS.SPR" ]; then
-    echo "Building BNKXIOS.SPR..."
-    cd "$ASM_DIR"
-    z80asm -v bnkxios_stub.asm -o bnkxios_stub.bin
-    # Use --no-reloc because BNKXIOS contains absolute addresses (jumps to FC00 XIOS)
-    "$BUILD_DIR/mkspr" bnkxios_stub.bin "$DISKS_DIR/BNKXIOS.SPR" --no-reloc
-    cp "$DISKS_DIR/BNKXIOS.SPR" "$DISKS_DIR/RESXIOS.SPR"
-    rm -f bnkxios_stub.bin
-fi
+# Create work directory
+mkdir -p "$WORK_DIR"
+cd "$WORK_DIR"
 
-# Create a working directory with all needed files
-WORKDIR=$(mktemp -d)
-trap "rm -rf $WORKDIR" EXIT
-
-echo "Generating MPM.SYS..."
-echo "Working directory: $WORKDIR"
-echo ""
-
-# Copy required files to work directory
-cp "$DIST_DIR/GENSYS.COM" "$WORKDIR/"
-cp "$DIST_DIR/RESBDOS.SPR" "$WORKDIR/"
-cp "$DIST_DIR/XDOS.SPR" "$WORKDIR/"
-cp "$DIST_DIR/BNKBDOS.SPR" "$WORKDIR/"
-cp "$DIST_DIR/BNKXDOS.SPR" "$WORKDIR/"
-cp "$DIST_DIR/TMP.SPR" "$WORKDIR/"
-
-# Copy our XIOS SPR files
-cp "$DISKS_DIR/RESXIOS.SPR" "$WORKDIR/"
-cp "$DISKS_DIR/BNKXIOS.SPR" "$WORKDIR/"
-
-# Copy RSP files (optional)
-for f in "$DIST_DIR"/*.RSP; do
-    [ -f "$f" ] && cp "$f" "$WORKDIR/"
+# Extract required SPR files from distribution disk
+echo "Extracting SPR files from distribution..."
+for file in resbdos.spr bnkbdos.spr xdos.spr bnkxdos.spr tmp.spr gensys.com; do
+    cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm2_hd1k.img" "0:$file" .
 done
 
-# Change to work directory
-cd "$WORKDIR"
+# Create BNKXIOS.SPR with specified console count
+echo "Creating BNKXIOS.SPR with $NUM_CONSOLES consoles..."
+cp "$ASM_DIR/BNKXIOS_port.SPR" bnkxios.spr
+# Patch the MAXCONSOLE value in BNKXIOS_port.SPR
+# MAXCON is: 3E 08 C9 (LD A,8 / RET) at SPR file offset 0x1E4
+# Patch the 08 byte at offset 0x1E5 (485)
+printf "\\x$(printf '%02x' $NUM_CONSOLES)" | dd of=bnkxios.spr bs=1 seek=485 conv=notrunc 2>/dev/null
 
-echo "Running GENSYS.COM..."
-echo ""
-echo "IMPORTANT: For this emulator, use these settings:"
-echo "  Top page of operating system: FF"
-echo "  Number of consoles: 4"
-echo "  Number of printers: 1"
-echo "  Breakpoint RST: 6"
-echo "  Add system call user stacks: Y"
-echo "  Z80 CPU: Y"
-echo "  Number of ticks/second: 60"
-echo "  Bank switched memory: N (emulator handles this)"
-echo "  Number of memory segments: 1"
-echo ""
+# Run GENSYS under cpmemu (uses defaults: C0 common base, 3 banks, etc.)
+# First answer is 'N' to skip SYSTEM.DAT, rest are empty for defaults
+echo "Running GENSYS (using defaults)..."
+echo -e "N\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n" | "$CPMEMU" gensys.com > gensys.log 2>&1 || true
 
-# Create input file for GENSYS
-# Non-bank-switched configuration (simpler, emulator handles banking)
-# Prompts sequence:
-# 1. Top page (ff)
-# 2. Number of consoles (4)
-# 3. Number of printers (1)
-# 4. Breakpoint RST (6)
-# 5. Compatibility attributes (n)
-# 6. System call user stacks (y)
-# 7. Z80 CPU (y)
-# 8-14. Defaults (7 blanks): ticks, sys drive, temp drive, max locked, total locked, max open, total open
-# 15. Bank switched memory (y)
-# 16. Common base page (80 for 8000H)
-# 17. Bank select mask and pattern (blank = hardware handles)
-# 18. Number of memory segments (1)
-# 19. Dayfile logging (blank for Y)
-# 20. Accept system data page entries (blank for Y)
-# 21-24. RSP selections (4 n's for no RSPs)
-# 25. Memory segment base,size,attrib (blank for default)
-# 26. Accept memory segment table (blank for Y)
-cat > gensys_input.txt << 'EOF'
-ff
-4
-1
-6
-n
-y
-y
-
-
-
-
-
-
-
-y
-1
-80
-
-
-n
-n
-n
-n
-
-
-
-
-
-
-EOF
-
-echo "Running GENSYS.COM with automated input..."
-"$CPMEMU" --z80 GENSYS.COM < gensys_input.txt
-
-# Check if MPM.SYS was created (cpmemu creates lowercase)
-if [ -f "$WORKDIR/mpm.sys" ]; then
-    mv "$WORKDIR/mpm.sys" "$WORKDIR/MPM.SYS"
-fi
-if [ -f "$WORKDIR/MPM.SYS" ]; then
-    mkdir -p "$DISKS_DIR"
-    cp "$WORKDIR/MPM.SYS" "$DISKS_DIR/"
-    echo ""
-    echo "MPM.SYS created: $DISKS_DIR/MPM.SYS"
-    ls -l "$DISKS_DIR/MPM.SYS"
-
-    # Also copy SYSTEM.DAT if created
-    if [ -f "$WORKDIR/system.dat" ]; then
-        mv "$WORKDIR/system.dat" "$WORKDIR/SYSTEM.DAT"
-    fi
-    if [ -f "$WORKDIR/SYSTEM.DAT" ]; then
-        cp "$WORKDIR/SYSTEM.DAT" "$DISKS_DIR/"
-        echo "SYSTEM.DAT created: $DISKS_DIR/SYSTEM.DAT"
-    fi
-
-    echo ""
-    echo "Now rebuild the system disk with:"
-    echo "  ./scripts/build_system.sh"
-else
-    echo ""
-    echo "Error: MPM.SYS was not created"
-    echo "Check GENSYS output for errors"
+# Check if MPM.SYS was created
+if [ ! -f "mpm.sys" ]; then
+    echo "Error: GENSYS failed to create mpm.sys"
+    cat gensys.log
     exit 1
 fi
+
+echo "MPM.SYS created ($(wc -c < mpm.sys | tr -d ' ') bytes)"
+
+# Get serial number from RESBDOS.SPR and patch MPMLDR.COM
+echo "Patching MPMLDR.COM serial number..."
+cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm2_hd1k.img" "0:mpmldr.com" mpmldr.com
+
+# Extract serial from RESBDOS.SPR
+# The serial is 6 bytes after "RESEARCH " at offset 0x1F9-0x1FE: 00 14 01 00 05 68
+# MPMLDR has matching bytes at offset 129-134, but bytes 5-6 (offset 133-134) need patching
+# MPMLDR 133-134 must match RESBDOS 509-510 (bytes 5-6 of the 6-byte serial)
+SERIAL_B5=$(dd if=resbdos.spr bs=1 skip=509 count=1 2>/dev/null | xxd -p)
+SERIAL_B6=$(dd if=resbdos.spr bs=1 skip=510 count=1 2>/dev/null | xxd -p)
+# Patch MPMLDR at offset 133-134 with RESBDOS bytes 509-510
+printf "\\x$SERIAL_B5" | dd of=mpmldr.com bs=1 seek=133 conv=notrunc 2>/dev/null
+printf "\\x$SERIAL_B6" | dd of=mpmldr.com bs=1 seek=134 conv=notrunc 2>/dev/null
+
+# Create boot image
+echo "Creating boot image..."
+"$BUILD_DIR/mkboot" \
+    -l "$ASM_DIR/ldrbios_hd1k.bin" \
+    -b bnkxios.spr \
+    -m mpmldr.com \
+    -o boot.bin
+
+# Copy files to project
+echo "Saving files to project..."
+cp mpm.sys "$DISKS_DIR/mpm_${NUM_CONSOLES}con.sys"
+cp mpmldr.com "$DISKS_DIR/mpmldr_${NUM_CONSOLES}con.com"
+cp boot.bin "$DISKS_DIR/boot_hd1k_${NUM_CONSOLES}con.bin"
+cp bnkxios.spr "$ASM_DIR/BNKXIOS_${NUM_CONSOLES}con.spr"
+
+# Create system disk
+echo "Creating system disk..."
+cp "$DISKS_DIR/mpm2_hd1k.img" "$DISKS_DIR/mpm_system_${NUM_CONSOLES}con.img"
+cpmrm -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NUM_CONSOLES}con.img" "0:mpm.sys" 2>/dev/null || true
+cpmrm -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NUM_CONSOLES}con.img" "0:mpmldr.com" 2>/dev/null || true
+cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NUM_CONSOLES}con.img" mpm.sys 0:
+cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NUM_CONSOLES}con.img" mpmldr.com 0:mpmldr.com
+
+echo ""
+echo "Generation complete!"
+echo ""
+echo "Files created:"
+echo "  Boot image:  $DISKS_DIR/boot_hd1k_${NUM_CONSOLES}con.bin"
+echo "  MPM.SYS:     $DISKS_DIR/mpm_${NUM_CONSOLES}con.sys"
+echo "  System disk: $DISKS_DIR/mpm_system_${NUM_CONSOLES}con.img"
+echo ""
+echo "To run:"
+echo "  $BUILD_DIR/mpm2_emu -b $DISKS_DIR/boot_hd1k_${NUM_CONSOLES}con.bin -d A:$DISKS_DIR/mpm_system_${NUM_CONSOLES}con.img"
+echo ""
+echo "Configuration:"
+echo "  - $NUM_CONSOLES consoles"
+echo "  - Common base at C000 (16KB common, 48KB user per bank)"
+echo "  - 3 user memory banks"

@@ -4,10 +4,11 @@
 //
 // Creates a boot image with components at their correct addresses:
 //   0x0100 - MPMLDR.COM (CP/M loader)
-//   0xF000 - LDRBIOS (loader BIOS)
-//   0xFC00 - XIOS (extended I/O system)
+//   0x1700 - LDRBIOS (loader BIOS for boot phase)
+//   0xBA00 - BNKXIOS (banked XIOS for runtime, optional)
+//   0xFB00 - XIOS (extended I/O system jump table)
 //
-// Usage: mkboot -l ldrbios.bin -x xios.bin -m mpmldr.com -o boot.img
+// Usage: mkboot -l ldrbios.bin -x xios.bin -b bnkxios.bin -m mpmldr.com -o boot.img
 
 #include <iostream>
 #include <fstream>
@@ -20,8 +21,9 @@ void print_usage(const char* prog) {
     std::cerr << "Usage: " << prog << " [options]\n"
               << "\n"
               << "Options:\n"
-              << "  -l, --ldrbios FILE   LDRBIOS binary (loaded at 0xF000)\n"
-              << "  -x, --xios FILE      XIOS binary (loaded at 0xFC00)\n"
+              << "  -l, --ldrbios FILE   LDRBIOS binary (loaded at 0x1700)\n"
+              << "  -x, --xios FILE      XIOS binary (loaded at 0xFB00)\n"
+              << "  -b, --bnkxios FILE   BNKXIOS binary (loaded at 0xBA00)\n"
               << "  -m, --mpmldr FILE    MPMLDR.COM (loaded at 0x0100)\n"
               << "  -o, --output FILE    Output boot image\n"
               << "  -h, --help           Show this help\n"
@@ -48,12 +50,14 @@ bool load_file(const std::string& filename, std::vector<uint8_t>& data) {
 int main(int argc, char* argv[]) {
     std::string ldrbios_file;
     std::string xios_file;
+    std::string bnkxios_file;
     std::string mpmldr_file;
     std::string output_file;
 
     static struct option long_options[] = {
         {"ldrbios", required_argument, nullptr, 'l'},
         {"xios",    required_argument, nullptr, 'x'},
+        {"bnkxios", required_argument, nullptr, 'b'},
         {"mpmldr",  required_argument, nullptr, 'm'},
         {"output",  required_argument, nullptr, 'o'},
         {"help",    no_argument,       nullptr, 'h'},
@@ -61,10 +65,11 @@ int main(int argc, char* argv[]) {
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "l:x:m:o:h", long_options, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "l:x:b:m:o:h", long_options, nullptr)) != -1) {
         switch (opt) {
             case 'l': ldrbios_file = optarg; break;
             case 'x': xios_file = optarg; break;
+            case 'b': bnkxios_file = optarg; break;
             case 'm': mpmldr_file = optarg; break;
             case 'o': output_file = optarg; break;
             case 'h':

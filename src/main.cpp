@@ -28,6 +28,7 @@ void signal_handler(int sig) {
     g_shutdown_requested = 1;
 }
 
+
 // Terminal raw mode handling for local console
 static struct termios g_orig_termios;
 static bool g_termios_saved = false;
@@ -153,8 +154,6 @@ int main(int argc, char* argv[]) {
                 return 1;
         }
     }
-
-    std::cerr << "[DEBUG] boot_image='" << boot_image << "'" << std::endl;
 
     // Set up signal handlers
     std::signal(SIGINT, signal_handler);

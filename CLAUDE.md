@@ -64,13 +64,22 @@ make
 
 For SSH support, install wolfSSL and wolfSSH first:
 ```bash
-# wolfSSL
+# wolfSSL - must disable FORTIFY_SOURCE to avoid false positive buffer overflow detection in RSA
 git clone https://github.com/wolfSSL/wolfssl.git
-cd wolfssl && ./autogen.sh && ./configure --enable-ssh && make && sudo make install
+cd wolfssl && ./autogen.sh
+CFLAGS="-D_FORTIFY_SOURCE=0 -O2" ./configure --enable-ssh --prefix=$HOME/local
+make && make install
 
 # wolfSSH
 git clone https://github.com/wolfSSL/wolfssh.git
-cd wolfssh && ./autogen.sh && ./configure && make && sudo make install
+cd wolfssh && ./autogen.sh
+./configure --with-wolfssl=$HOME/local --prefix=$HOME/local
+make && make install
+
+# Build mpm2 with wolfSSH
+cd mpm2/build
+cmake -DCMAKE_PREFIX_PATH=$HOME/local ..
+make
 ```
 
 ### Generate SSH Host Key

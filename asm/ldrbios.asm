@@ -258,12 +258,12 @@ CURDMA: DW      0080H           ; Current DMA address
 ; =============================================================================
 
 DPH_TABLE:
-; DPH for drive A (8" SSSD for boot disk)
+; DPH for drive A (hd1k for boot disk - 8MB format)
 DPH_A:
         DW      0               ; XLT
         DW      0,0,0           ; Scratch
         DW      DIRBUF          ; DIRBUF
-        DW      DPB_SSSD        ; DPB for ibm-3740
+        DW      DPB_HD1K        ; DPB for hd1k (8MB)
         DW      0               ; CSV
         DW      ALV_A           ; ALV
 

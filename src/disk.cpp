@@ -279,11 +279,9 @@ int DiskSystem::read(BankedMemory* mem) {
     uint16_t phys_sector = translated_sector / records_per_phys;  // 0-based (disk image is 0-indexed)
     uint16_t offset_in_phys = (translated_sector % records_per_phys) * 128;
 
-    // Trace all disk reads, especially to E700 range
-    bool trace_this = (dma_addr_ >= 0xE700 && dma_addr_ < 0xE800);
-
-    // Trace directory sector 11 on track 2 which contains MPM.SYS (with skew)
-    bool trace_dir = (track == 2 && logical_sector == 11);
+    // Debug tracing for FC00 area
+    bool trace_this = (dma_addr_ >= 0xFC00 && dma_addr_ < 0xFD00);
+    bool trace_dir = false;
 
     // Temporarily set physical sector for reading
     disk->set_sector(phys_sector);

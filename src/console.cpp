@@ -41,15 +41,15 @@ void Console::write_char(uint8_t ch) {
         return;
     }
 
-    if (connected_.load()) {
-        // Connected - queue for SSH transmission
-        output_queue_.try_write(ch);
-    } else if (id_ == 0) {
-        // Console 0 not connected - output to stdout for boot messages
+    // Always queue output for SSH transmission (even before connect)
+    // This allows boot messages to be read when SSH connects
+    output_queue_.try_write(ch);
+
+    // Console 0: also echo to stdout for boot messages
+    if (id_ == 0 && !connected_.load()) {
         std::cout.put(static_cast<char>(ch));
         std::cout.flush();
     }
-    // Other consoles not connected - drop output
 }
 
 void Console::reset() {
@@ -86,9 +86,10 @@ Console* ConsoleManager::get(int id) {
 }
 
 Console* ConsoleManager::find_free() {
-    for (auto& con : consoles_) {
-        if (con && !con->is_connected()) {
-            return con.get();
+    // Skip console 0 (system console) - user SSH sessions use consoles 1+
+    for (int i = 1; i < MAX_CONSOLES; i++) {
+        if (consoles_[i] && !consoles_[i]->is_connected()) {
+            return consoles_[i].get();
         }
     }
     return nullptr;

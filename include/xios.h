@@ -84,10 +84,6 @@ public:
     // Called when Z80 executes OUT (0xE0), A with B=function
     void handle_port_dispatch(uint8_t func);
 
-    // Patch BNKXIOS with forwarding stubs to emulator XIOS
-    // Should be called after MPM.SYS is loaded but before XDOS starts
-    // bnkxios_addr: Address of BNKXIOS jump table (e.g., CD00 or BA00)
-    void patch_bnkxios(uint16_t bnkxios_addr = 0);
 
     // Timer tick - called from interrupt handler
     void tick();
@@ -164,8 +160,6 @@ private:
     // Skip RET flag for I/O port dispatch
     bool skip_ret_ = false;
 
-    // Cached BNKXIOS address (set by patch_bnkxios)
-    uint16_t bnkxios_addr_ = 0;
 };
 
 #endif // XIOS_H
