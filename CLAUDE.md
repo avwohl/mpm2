@@ -127,17 +127,31 @@ The **hd1k** format (from RomWBW) is recommended for MP/M II due to its larger s
 
 ### Working with hd1k Images
 
-Use cpmtools with the RomWBW diskdefs:
+A script is provided to create hd1k disk images with all MP/M II files:
+
+```bash
+# Create disk with all MP/M II distribution files
+./scripts/build_hd1k.sh
+
+# Create with custom output path
+./scripts/build_hd1k.sh -o disks/my_mpm2.img
+
+# Create empty formatted disk
+./scripts/build_hd1k.sh --empty -o disks/blank.img
+```
+
+Or use cpmtools directly with the RomWBW diskdefs:
 ```bash
 export DISKDEFS="$HOME/esrc/RomWBW-v3.5.1/Tools/cpmtools/diskdefs"
 
+# On macOS, add -T raw flag to cpmls/cpmcp commands
 # Create blank 8MB image
 dd if=/dev/zero bs=1024 count=8192 of=mydisk.img
 mkfs.cpm -f wbw_hd1k mydisk.img
 
-# Copy files
-cpmcp -f wbw_hd1k mydisk.img myfile.com 0:
-cpmls -f wbw_hd1k mydisk.img
+# Copy files (use -T raw on macOS)
+cpmcp -T raw -f wbw_hd1k mydisk.img myfile.com 0:
+cpmls -T raw -f wbw_hd1k mydisk.img
 ```
 
 ## Building the XIOS
@@ -182,6 +196,10 @@ mpm2/
 │   ├── xios.cpp
 │   ├── z80_thread.cpp
 │   └── qkz80*.{h,cc} -> symlinks to cpmemu
+├── scripts/
+│   └── build_hd1k.sh   # Create hd1k disk images
+├── disks/
+│   └── mpm2_hd1k.img   # Generated 8MB disk with MP/M II files
 └── keys/
     └── ssh_host_rsa_key (generated)
 ```
