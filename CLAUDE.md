@@ -56,6 +56,12 @@ The XIOS (Extended I/O System) provides MP/M II's hardware abstraction. Entry po
 
 ### Build Commands
 
+Full build (assembles Z80 code, builds C++, creates disk, generates MPM.SYS):
+```bash
+./scripts/build_all.sh
+```
+
+Or manual steps:
 ```bash
 mkdir build && cd build
 cmake ..
@@ -165,16 +171,23 @@ cpmls -T raw -f wbw_hd1k mydisk.img
 
 ## Building the XIOS
 
-The XIOS and LDRBIOS are written in Z80 assembly:
+The XIOS and LDRBIOS are written in Z80 assembly and built using um80/ul80:
 
 ```bash
-cd asm
-make
+# Full build including assembly
+./scripts/build_all.sh
+
+# Or just assembly step
+./scripts/build_asm.sh
 ```
 
+The build uses:
+- **um80** - MACRO-80 compatible assembler (`.asm` -> `.rel`)
+- **ul80** - LINK-80 compatible linker (`.rel` -> `.bin` or `.spr`)
+
 This produces:
-- `xios.bin` - Full XIOS for MP/M II (loads at 0xFC00)
-- `ldrbios.bin` - Loader BIOS for boot (loads at 0xF000)
+- `asm/ldrbios_hd1k.bin` - Loader BIOS for hd1k disks (loads at 0x1700)
+- `asm/BNKXIOS_port.SPR` - Banked XIOS as relocatable SPR file
 
 ## File Organization
 
@@ -182,12 +195,11 @@ This produces:
 mpm2/
 ├── CMakeLists.txt
 ├── CLAUDE.md
+├── README.md
 ├── asm/
-│   ├── Makefile
-│   ├── xios.asm         # MP/M II XIOS (Extended I/O System)
-│   ├── ldrbios.asm      # Loader BIOS for boot
-│   ├── xios.bin         # Assembled XIOS
-│   └── ldrbios.bin      # Assembled LDRBIOS
+│   ├── ldrbios_hd1k.asm  # Loader BIOS for hd1k disks
+│   ├── bnkxios_port.asm  # Banked XIOS (I/O port dispatch)
+│   └── *.bin, *.SPR      # Generated (in .gitignore)
 ├── include/
 │   ├── banked_mem.h
 │   ├── console.h
@@ -206,9 +218,13 @@ mpm2/
 │   ├── z80_thread.cpp
 │   └── qkz80*.{h,cc} -> symlinks to cpmemu
 ├── scripts/
-│   └── build_hd1k.sh   # Create hd1k disk images
-├── disks/
-│   └── mpm2_hd1k.img   # Generated 8MB disk with MP/M II files
+│   ├── build_all.sh    # Master build (runs all steps)
+│   ├── build_asm.sh    # Assemble Z80, build C++
+│   ├── build_hd1k.sh   # Create hd1k disk images
+│   └── gensys.sh       # Run GENSYS to create MPM.SYS
+├── disks/              # Generated disk/boot images (in .gitignore)
+├── build/              # CMake build directory
+├── mpm2_external/      # MP/M II distribution (not in git)
 └── keys/
     └── ssh_host_rsa_key (generated)
 ```
@@ -216,6 +232,8 @@ mpm2/
 ## External Dependencies
 
 - **qkz80**: Z80 CPU emulator (symlinked from ../cpmemu/src/)
+- **um80/ul80**: MACRO-80 compatible assembler/linker (from ../um80_and_friends/)
+- **cpmtools**: CP/M disk image utilities (with RomWBW diskdefs for hd1k format)
 - **wolfSSH**: SSH server library (optional)
 - **mpm2_external/**: MP/M II distribution and documentation
 
