@@ -1,0 +1,21 @@
+We have been debugging getting mp/m 2 os to boot
+
+Instructions to follow in:
+mpm2_external/docs/eMPM_II_System_Implementors_Guide_Aug82.txt
+
+Scripts we made in:
+scripts/*.sh
+
+I don't think we are creating the right files for MPMPLDR to read.
+I found the sources for MPMLDR read th
+~/src/mpm2/mpm2_external/mpm2src/MPMLDR/MPMLDR.PLM
+
+Document what it does:
+ - files used
+ - order of operations
+ - we know it reads MPM.SYS
+ - does it just load it into memory and start it?
+ - where does it load it? how does it know where?
+ - does it relocate (use the .prl bits) or does MPM.SYS relocate itself
+ - what memory banks are used none?
+ 
