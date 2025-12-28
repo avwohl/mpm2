@@ -124,47 +124,15 @@ echo ""
 echo "Step 2: Assembling LDRBIOS for $DISK_FORMAT..."
 cd "$ASM_DIR"
 
+rm -f *.rel *.spr *.SPR 
+
 # Only one LDRBIOS - the SSSD floppy version
 # The emulator's port dispatch handles actual disk I/O regardless of format
-LDRBIOS_SRC="ldrbios.asm"
-LDRBIOS_BIN="ldrbios.bin"
+LDRBIOS="ldrbios"
+um80 -o "${LDRBIOS}.rel" "${LDRBIOS}.asm"
+ul80 -o "${LDRBIOS}.bin" "${LDRBIOS}.rel" 
 
-# Use um80/ul80 (native M80/L80 compatible tools)
-echo "  Using um80/ul80..."
-LDRBIOS_REL="${LDRBIOS_SRC%.asm}.rel"
-LDRBIOS_HEX="${LDRBIOS_SRC%.asm}.hex"
-
-# Assemble to .REL
-um80 -o "$LDRBIOS_REL" "$LDRBIOS_SRC"
-
-# Link to Intel HEX format (LDRBIOS must be at 0x1700)
-ul80 --hex -p 1700 -o "$LDRBIOS_HEX" "$LDRBIOS_REL"
-
-# Convert Intel HEX to binary
-python3 -c "
-import sys
-data = {}
-with open('$LDRBIOS_HEX', 'r') as f:
-    for line in f:
-        if not line.startswith(':'): continue
-        count = int(line[1:3], 16)
-        addr = int(line[3:7], 16)
-        rtype = int(line[7:9], 16)
-        if rtype != 0: continue
-        for i in range(count):
-            data[addr + i] = int(line[9 + i*2:11 + i*2], 16)
-if data:
-    min_addr = min(data.keys())
-    max_addr = max(data.keys())
-    out = bytearray(max_addr - min_addr + 1)
-    for addr, val in data.items():
-        out[addr - min_addr] = val
-    with open('$LDRBIOS_BIN', 'wb') as f:
-        f.write(out)
-"
-
-echo "  Output: $ASM_DIR/$LDRBIOS_BIN"
-echo "  LDRBIOS uses SSSD floppy DPB (SPT=26)"
+echo "  Output: $ASM_DIR/${LDRBIOS}.bin"
 echo "  Emulator handles actual disk format via port dispatch"
 echo ""
 
@@ -174,20 +142,11 @@ echo ""
 echo "Step 3: Assembling BNKXIOS..."
 cd "$ASM_DIR"
 
-BNKXIOS_SRC="bnkxios.asm"
-BNKXIOS_SPR="BNKXIOS.SPR"
+BNKXIOS="bnkxios"
+um80 -o "${BNKXIOS}.rel" "${BNKXIOS}.asm"
+ul80 --prl -o "${BNKXIOS}.spr" "${BNKXIOS}.rel"
 
-# Use um80/ul80 (native M80/L80 compatible tools)
-echo "  Using um80/ul80..."
-BNKXIOS_REL="${BNKXIOS_SRC%.asm}.rel"
-
-# Assemble to .REL
-um80 -o "$BNKXIOS_REL" "$BNKXIOS_SRC"
-
-# Link to PRL format (SPR files use PRL format)
-ul80 --prl -o "$BNKXIOS_SPR" "$BNKXIOS_REL"
-
-echo "  Output: $ASM_DIR/$BNKXIOS_SPR"
+echo "  Output: $ASM_DIR/${BNKXIOS}.spr"
 echo ""
 
 # ------------------------------------------------------------------------------
@@ -215,7 +174,7 @@ fi
 BOOT_IMAGE="$DISKS_DIR/mpm2boot_${DISK_FORMAT}.bin"
 
 "$BUILD_DIR/mkboot" \
-    -l "$ASM_DIR/$LDRBIOS_BIN" \
+    -l "$ASM_DIR/${LDRBIOS}.bin" \
     -m "$MPMLDR" \
     -o "$BOOT_IMAGE"
 
@@ -241,8 +200,8 @@ echo "Assembly Build Complete"
 echo "=============================================="
 echo ""
 echo "Files created:"
-echo "  LDRBIOS:     $ASM_DIR/$LDRBIOS_BIN"
-echo "  BNKXIOS:     $ASM_DIR/$BNKXIOS_SPR"
+echo "  LDRBIOS:     $ASM_DIR/${LDRBIOS}.bin"
+echo "  BNKXIOS:     $ASM_DIR/${BNKXIOS}.spr"
 echo "  Boot image:  $BOOT_IMAGE"
 echo ""
 echo "Next steps (or run build_all.sh to do all):"
