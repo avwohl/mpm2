@@ -26,11 +26,13 @@ CPMEMU="${CPMEMU:-/Users/wohl/src/cpmemu/src/cpmemu}"
 WORK_DIR="/tmp/gensys_work"
 
 # Number of consoles (default 4)
-NUM_CONSOLES=${1:-4}
+# must match asm/bnkxio.asm
+;NMBCNS:         EQU     4       ; consoles for SSH users
+NMBCNS=${1:-4}
 
 echo "MP/M II System Generation"
 echo "========================="
-echo "Consoles: $NUM_CONSOLES"
+echo "Consoles: $NMBCNS"
 echo ""
 
 # Check prerequisites
@@ -59,14 +61,6 @@ echo "Extracting SPR files from distribution..."
 for file in resbdos.spr bnkbdos.spr xdos.spr bnkxdos.spr tmp.spr gensys.com; do
     cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm2_hd1k.img" "0:$file" .
 done
-
-# Create BNKXIOS.SPR with specified console count
-echo "Creating BNKXIOS.SPR with $NUM_CONSOLES consoles..."
-cp "$ASM_DIR/BNKXIOS_port.SPR" bnkxios.spr
-# Patch the MAXCONSOLE value in BNKXIOS_port.SPR
-# MAXCON is: 3E 08 C9 (LD A,8 / RET) at SPR file offset 0x1E4
-# Patch the 08 byte at offset 0x1E5 (485)
-printf "\\x$(printf '%02x' $NUM_CONSOLES)" | dd of=bnkxios.spr bs=1 seek=485 conv=notrunc 2>/dev/null
 
 # Run GENSYS under cpmemu
 # GENSYS prompts (see MP/M II System Implementor's Guide):
@@ -114,31 +108,31 @@ echo "Creating boot image..."
 
 # Copy files to project
 echo "Saving files to project..."
-cp mpm.sys "$DISKS_DIR/mpm_${NUM_CONSOLES}con.sys"
-cp mpmldr.com "$DISKS_DIR/mpmldr_${NUM_CONSOLES}con.com"
-cp boot.bin "$DISKS_DIR/boot_hd1k_${NUM_CONSOLES}con.bin"
-cp bnkxios.spr "$ASM_DIR/BNKXIOS_${NUM_CONSOLES}con.spr"
+cp mpm.sys "$DISKS_DIR/mpm_${NMBCNS}con.sys"
+cp mpmldr.com "$DISKS_DIR/mpmldr_${NMBCNS}con.com"
+cp boot.bin "$DISKS_DIR/boot_hd1k_${NMBCNS}con.bin"
+cp bnkxios.spr "$ASM_DIR/BNKXIOS_${NMBCNS}con.spr"
 
 # Create system disk
 echo "Creating system disk..."
-cp "$DISKS_DIR/mpm2_hd1k.img" "$DISKS_DIR/mpm_system_${NUM_CONSOLES}con.img"
-cpmrm -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NUM_CONSOLES}con.img" "0:mpm.sys" 2>/dev/null || true
-cpmrm -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NUM_CONSOLES}con.img" "0:mpmldr.com" 2>/dev/null || true
-cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NUM_CONSOLES}con.img" mpm.sys 0:
-cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NUM_CONSOLES}con.img" mpmldr.com 0:mpmldr.com
+cp "$DISKS_DIR/mpm2_hd1k.img" "$DISKS_DIR/mpm_system_${NMBCNS}con.img"
+cpmrm -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NMBCNS}con.img" "0:mpm.sys" 2>/dev/null || true
+cpmrm -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NMBCNS}con.img" "0:mpmldr.com" 2>/dev/null || true
+cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NMBCNS}con.img" mpm.sys 0:
+cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NMBCNS}con.img" mpmldr.com 0:mpmldr.com
 
 echo ""
 echo "Generation complete!"
 echo ""
 echo "Files created:"
-echo "  Boot image:  $DISKS_DIR/boot_hd1k_${NUM_CONSOLES}con.bin"
-echo "  MPM.SYS:     $DISKS_DIR/mpm_${NUM_CONSOLES}con.sys"
-echo "  System disk: $DISKS_DIR/mpm_system_${NUM_CONSOLES}con.img"
+echo "  Boot image:  $DISKS_DIR/boot_hd1k_${NMBCNS}con.bin"
+echo "  MPM.SYS:     $DISKS_DIR/mpm_${NMBCNS}con.sys"
+echo "  System disk: $DISKS_DIR/mpm_system_${NMBCNS}con.img"
 echo ""
 echo "To run:"
-echo "  $BUILD_DIR/mpm2_emu -b $DISKS_DIR/boot_hd1k_${NUM_CONSOLES}con.bin -d A:$DISKS_DIR/mpm_system_${NUM_CONSOLES}con.img"
+echo "  $BUILD_DIR/mpm2_emu -b $DISKS_DIR/boot_hd1k_${NMBCNS}con.bin -d A:$DISKS_DIR/mpm_system_${NMBCNS}con.img"
 echo ""
 echo "Configuration:"
-echo "  - $NUM_CONSOLES consoles"
+echo "  - $NMBCNS consoles"
 echo "  - Common base at C000 (16KB common, 48KB user per bank)"
 echo "  - 4 user memory banks"

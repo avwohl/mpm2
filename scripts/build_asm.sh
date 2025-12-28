@@ -22,7 +22,7 @@
 #   - Used by: MP/M II kernel after boot
 #   - Purpose: All disk/console I/O during normal operation
 #   - Format: SPR file (relocatable)
-#   - File: BNKXIOS_port.SPR
+#   - File: BNKXIOS.SPR
 #   - Built into MPM.SYS by GENSYS
 #
 # Layer 3: RESXIOS (Resident XIOS)
@@ -75,11 +75,11 @@
 # Source files (asm/):
 #   ldrbios.asm        - LDRBIOS for 8" SSSD floppy (ibm-3740 format)
 #                        NOTE: Only one LDRBIOS - used for all disk formats
-#   bnkxios_port.asm   - BNKXIOS using I/O port traps to emulator
+#   bnkxios.asm   - BNKXIOS using I/O port traps to emulator
 #
 # Binary outputs (asm/):
 #   ldrbios.bin        - Assembled LDRBIOS (loads at 0x1700)
-#   BNKXIOS_port.SPR   - BNKXIOS as relocatable SPR file
+#   BNKXIOS.SPR   - BNKXIOS as relocatable SPR file
 #
 # Boot images (disks/):
 #   mpm2boot_<format>.bin - Boot image (LDRBIOS + MPMLDR)
@@ -174,8 +174,8 @@ echo ""
 echo "Step 3: Assembling BNKXIOS..."
 cd "$ASM_DIR"
 
-BNKXIOS_SRC="bnkxios_port.asm"
-BNKXIOS_SPR="BNKXIOS_port.SPR"
+BNKXIOS_SRC="bnkxios.asm"
+BNKXIOS_SPR="BNKXIOS.SPR"
 
 # Use um80/ul80 (native M80/L80 compatible tools)
 echo "  Using um80/ul80..."

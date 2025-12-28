@@ -57,7 +57,7 @@ FLAGWAIT:       EQU     132     ; XDOS flag wait
 FLAGSET:        EQU     133     ; XDOS flag set
 
 ; Number of consoles
-NMBCNS:         EQU     8       ; 8 consoles for SSH users
+NMBCNS:         EQU     4       ; 4 consoles for SSH users
 
 ; =============================================================================
 ; BNKXIOS Jump Vector
