@@ -86,8 +86,8 @@ Console* ConsoleManager::get(int id) {
 }
 
 Console* ConsoleManager::find_free() {
-    // Skip console 0 (system console) - user SSH sessions use consoles 1+
-    for (int i = 1; i < MAX_CONSOLES; i++) {
+    // Assign consoles starting from 0 (MP/M II uses all consoles for users)
+    for (int i = 0; i < MAX_CONSOLES; i++) {
         if (consoles_[i] && !consoles_[i]->is_connected()) {
             return consoles_[i].get();
         }

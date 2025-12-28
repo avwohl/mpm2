@@ -62,6 +62,19 @@ for file in resbdos.spr bnkbdos.spr xdos.spr bnkxdos.spr tmp.spr gensys.com; do
     cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm2_hd1k.img" "0:$file" .
 done
 
+# Copy our custom BNKXIOS.SPR (port-based I/O for emulator)
+if [ -f "$ASM_DIR/bnkxios.spr" ]; then
+    echo "Using custom BNKXIOS.SPR from $ASM_DIR"
+    cp "$ASM_DIR/bnkxios.spr" bnkxios.spr
+else
+    echo "Error: Custom BNKXIOS.SPR not found at $ASM_DIR/bnkxios.spr"
+    echo "Run scripts/build_asm.sh first"
+    exit 1
+fi
+
+# Copy GENSYS config (forces binary mode for SPR/SYS files)
+cp "$SCRIPT_DIR/gensys.cfg" gensys.cfg
+
 # Run GENSYS under cpmemu using expect for readable prompt/response
 echo "Running GENSYS ($NMBCNS consoles, 4 banks, C0 common base)..."
 
@@ -75,7 +88,7 @@ fi
 cat > gensys_expect.exp << EXPECT_SCRIPT
 set timeout 10
 log_user 0
-spawn $CPMEMU gensys.com
+spawn $CPMEMU gensys.cfg
 
 # System configuration prompts
 expect "Use SYSTEM.DAT"           { send "N\r" }

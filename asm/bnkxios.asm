@@ -12,7 +12,9 @@
 ;                ul80 --prl -o BNKXIOS_port.SPR bnkxios_port.rel
 
         .Z80                    ; Use Z80 mnemonics
-        ; No ORG - this is a relocatable SPR/PRL file
+
+        ; PRL/SPR format: code assembled at 0x0100 (page 1), relocatable
+        ; GENSYS handles relocation correctly - addresses adjusted by base page
 
 ; I/O Ports
 XIOS_DISPATCH:  EQU     0E0H    ; XIOS dispatch (A = function)
@@ -229,10 +231,11 @@ DO_SECTRAN:
         RET
 
 DO_SELMEM:
-        ; Select memory bank - C = bank number
-        ; Use dedicated bank select port for efficiency
-        LD      A, C
-        OUT     (BANK_SELECT), A
+        ; Select memory bank - BC = memory descriptor address
+        ; Descriptor format: base(1), size(1), attrib(1), bank(1)
+        ; Dispatch to emulator which reads bank from descriptor+3
+        LD      A, FUNC_SELMEM
+        OUT     (XIOS_DISPATCH), A
         RET
 
 DO_POLLDEV:

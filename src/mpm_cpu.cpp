@@ -14,10 +14,14 @@ MpmCpu::MpmCpu(qkz80_cpu_mem* memory)
 }
 
 void MpmCpu::port_out(qkz80_uint8 port, qkz80_uint8 value) {
-    // Debug: unconditional trace at entry
+    // Debug: trace all port outputs
     static int entry_count = 0;
-    if (entry_count++ < 5) {
-        std::cerr << "*** MpmCpu::port_out CALLED *** port=0x" << std::hex << (int)port << std::dec << "\n";
+    entry_count++;
+    if (entry_count <= 50) {
+        std::cerr << "*** PORT_OUT #" << entry_count << " port=0x" << std::hex << (int)port
+                  << " val=0x" << (int)value << " PC=0x" << regs.PC.get_pair16()
+                  << std::dec << " ***\n";
+        std::cerr.flush();
     }
 
     switch (port) {
@@ -89,6 +93,14 @@ void MpmCpu::handle_xios_dispatch() {
         std::cerr << "[XIOS KEY] func=0x" << std::hex << (int)func
                   << " PC=0x" << regs.PC.get_pair16()
                   << " C=" << (int)regs.BC.get_low()
+                  << std::dec << std::endl;
+    }
+
+    // Log all XIOS calls for first 200 calls
+    static int xios_log_count = 0;
+    if (xios_log_count++ < 200) {
+        std::cerr << "[XIOS #" << xios_log_count << "] func=0x" << std::hex << (int)func
+                  << " PC=0x" << regs.PC.get_pair16()
                   << std::dec << std::endl;
     }
 

@@ -251,6 +251,16 @@ bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
             break;
         }
 
+        // Debug: trace loading of BNKXIOS area (C700-C900)
+        if (load_addr >= 0xC700 && load_addr < 0xC900) {
+            std::cerr << "[LOAD] rec=" << rec << " addr=0x" << std::hex << load_addr
+                      << " first4: " << std::setw(2) << std::setfill('0') << (int)record[0]
+                      << " " << std::setw(2) << (int)record[1]
+                      << " " << std::setw(2) << (int)record[2]
+                      << " " << std::setw(2) << (int)record[3]
+                      << std::dec << std::setfill(' ') << "\n";
+        }
+
         // Load into bank 0 (system bank) - addresses >= COMMON_BASE go to common area
         memory_->load(0, load_addr, record, 128);
         records_loaded++;
@@ -276,6 +286,116 @@ bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
     std::cout << "Entry point: " << std::hex << std::uppercase
               << std::setw(4) << std::setfill('0') << entry_point << "H\n"
               << std::dec << std::setfill(' ');
+
+    // Debug: dump key memory areas (all in common memory >= C000H)
+    std::cerr << "\n[DEBUG] Memory dump after loading:\n";
+
+    // XIOSJMP table at FC00
+    std::cerr << "XIOSJMP (FC00): ";
+    for (int i = 0; i < 24; i++) {
+        std::cerr << std::hex << std::setw(2) << std::setfill('0')
+                  << (int)memory_->read_common(0xFC00 + i) << " ";
+    }
+    std::cerr << "\n";
+
+    // BNKXIOS at C700
+    std::cerr << "BNKXIOS (C700): ";
+    for (int i = 0; i < 24; i++) {
+        std::cerr << std::hex << std::setw(2) << std::setfill('0')
+                  << (int)memory_->read_common(0xC700 + i) << " ";
+    }
+    std::cerr << "\n";
+
+    // Entry point (XDOS at CE00)
+    std::cerr << "XDOS entry (CE00): ";
+    for (int i = 0; i < 24; i++) {
+        std::cerr << std::hex << std::setw(2) << std::setfill('0')
+                  << (int)memory_->read_common(0xCE00 + i) << " ";
+    }
+    std::cerr << "\n";
+
+    // C749 - patched jump target (should be 2nd jump table after patch)
+    std::cerr << "C749 (after patch target): ";
+    for (int i = 0; i < 32; i++) {
+        std::cerr << std::hex << std::setw(2) << std::setfill('0')
+                  << (int)memory_->read_common(0xC749 + i) << " ";
+    }
+    std::cerr << "\n";
+
+    // C85A - where port dispatch should be (based on SPR file)
+    std::cerr << "C85A (dispatch): ";
+    for (int i = 0; i < 16; i++) {
+        std::cerr << std::hex << std::setw(2) << std::setfill('0')
+                  << (int)memory_->read_common(0xC85A + i) << " ";
+    }
+    std::cerr << "\n";
+
+    // More BNKXIOS area
+    std::cerr << "C880-C8A0: ";
+    for (int i = 0; i < 32; i++) {
+        std::cerr << std::hex << std::setw(2) << std::setfill('0')
+                  << (int)memory_->read_common(0xC880 + i) << " ";
+    }
+    std::cerr << std::dec << std::setfill(' ') << "\n\n";
+
+    // Patch BNKXIOS and XIOSJMP tables: PRL relocation adds base+1 to addresses,
+    // but code is at base+0. Fix by subtracting 0x100 from all address references.
+    uint16_t xios_base = bnkxios_base * 256;
+    uint16_t xiosjmp_base = xios_jmp_tbl_base * 256;
+    std::cerr << "[PATCH] Fixing address references (BNKXIOS=0x" << std::hex << xios_base
+              << " XIOSJMP=0x" << xiosjmp_base << ")\n";
+
+    // Patch any 16-bit address reference that points to BNKXIOS+N where N > 0
+    // This includes JP, CALL, LD rr,nn instructions
+    // PRL relocation shifted all addresses by 0x100, so C8xx should be C7xx, etc.
+    int patched = 0;
+    auto patch_addr = [&](uint16_t addr, const char* name, const char* instr) {
+        uint8_t lo = memory_->read_common(addr);
+        uint8_t hi = memory_->read_common(addr + 1);
+        // Patch if high byte is > bnkxios_base (i.e., C8, C9, CA, etc.)
+        // These are addresses in the BNKXIOS area that are off by 0x100
+        if (hi > bnkxios_base && hi <= bnkxios_base + 0x10) {  // Up to 16 pages above
+            uint8_t new_hi = hi - 1;  // Subtract 0x100
+            memory_->write_common(addr + 1, new_hi);
+            if (patched < 10) {
+                std::cerr << "  " << name << " " << instr << " at 0x" << std::hex
+                          << (addr - 1) << ": " << (int)hi << std::setw(2) << (int)lo
+                          << " -> " << (int)new_hi << std::setw(2) << (int)lo << "\n";
+            }
+            patched++;
+        }
+    };
+
+    auto patch_area = [&](uint16_t start, uint16_t len, const char* name) {
+        for (uint16_t addr = start; addr < start + len - 2; addr++) {
+            uint8_t opcode = memory_->read_common(addr);
+
+            // Check for instructions with 16-bit immediate addresses
+            // JP nn = C3 nn nn
+            // CALL nn = CD nn nn
+            // LD HL,nn = 21 nn nn
+            // LD DE,nn = 11 nn nn
+            // LD BC,nn = 01 nn nn
+            // LD SP,nn = 31 nn nn
+            // LD (nn),HL = 22 nn nn
+            // LD HL,(nn) = 2A nn nn
+            // etc.
+
+            if (opcode == 0xC3 || opcode == 0xCD) {  // JP, CALL
+                patch_addr(addr + 1, name, opcode == 0xC3 ? "JP" : "CALL");
+            } else if (opcode == 0x21 || opcode == 0x11 || opcode == 0x01 || opcode == 0x31) {
+                // LD rr, nn
+                patch_addr(addr + 1, name, "LD rr,");
+            } else if (opcode == 0x22 || opcode == 0x2A || opcode == 0x32 || opcode == 0x3A) {
+                // LD (nn),HL / LD HL,(nn) / LD (nn),A / LD A,(nn)
+                patch_addr(addr + 1, name, "LD mem");
+            }
+        }
+    };
+
+    patch_area(xiosjmp_base, 0x100, "XIOSJMP");  // Patch FC00 first
+    patch_area(xios_base, 0x300, "BNKXIOS");     // Patch BNKXIOS and a bit beyond
+    std::cerr << "  Total: " << std::dec << patched << " addresses patched\n\n";
 
     return true;
 }
@@ -356,8 +476,18 @@ void Z80Thread::thread_func() {
         if (now >= next_tick_) {
             next_tick_ += TICK_INTERVAL;
 
+            // Debug: trace tick delivery
+            static int tick_check_count = 0;
+            bool clock_on = xios_->clock_enabled();
+            bool iff_on = cpu_->regs.IFF1;
+            if (tick_check_count++ < 20 || (clock_on && tick_check_count < 50)) {
+                std::cerr << "[TICK #" << tick_check_count << "] clock=" << clock_on
+                          << " IFF1=" << (int)iff_on << " PC=0x" << std::hex
+                          << cpu_->regs.PC.get_pair16() << std::dec << "\n";
+            }
+
             // Deliver tick interrupt if clock is enabled
-            if (xios_->clock_enabled() && cpu_->regs.IFF1) {
+            if (clock_on && iff_on) {
                 deliver_tick_interrupt();
             }
 
@@ -368,30 +498,8 @@ void Z80Thread::thread_func() {
             }
         }
 
-        // Check for XIOS trap before executing
-        uint16_t pc = cpu_->regs.PC.get_pair16();
-
-        // XIOSJMP interception: redirect FC00-FC5A to emulator's XIOS handler
-        if (pc >= 0xFC00 && pc < 0xFC5D) {
-            uint16_t offset = pc - 0xFC00;
-            // Valid XIOS entry points are at 3-byte intervals
-            if (offset % 3 == 0) {
-                // Call emulator's XIOS handler via port dispatch mechanism
-                xios_->handle_port_dispatch(offset);
-                // Pop return address from stack and return
-                uint16_t sp = cpu_->regs.SP.get_pair16();
-                uint8_t lo = memory_->fetch_mem(sp);
-                uint8_t hi = memory_->fetch_mem(sp + 1);
-                uint16_t ret_addr = (hi << 8) | lo;
-                cpu_->regs.SP.set_pair16(sp + 2);
-                cpu_->regs.PC.set_pair16(ret_addr);
-
-                instruction_count_++;
-                continue;  // Skip normal instruction execution
-            }
-        }
-
         // Check for HALT instruction (0x76) - handle specially for MP/M
+        uint16_t pc = cpu_->regs.PC.get_pair16();
         uint8_t opcode = memory_->fetch_mem(pc);
         // qkz80 library calls exit() on HALT, but MP/M uses HALT in idle loop
         if (opcode == 0x76) {
@@ -434,13 +542,33 @@ void Z80Thread::thread_func() {
         cpu_->execute();
         instruction_count_++;
 
-        // TODO: Check for I/O instructions (IN/OUT) and handle them
+        // Debug: sample PC every N instructions
+        if ((instruction_count_ % 10000000) == 0) {
+            std::cerr << "[CPU] " << instruction_count_.load() << " instr, PC=0x"
+                      << std::hex << cpu_->regs.PC.get_pair16()
+                      << " bank=" << std::dec << (int)memory_->current_bank() << "\n";
+        }
+        // Debug: trace first 20 instructions
+        static int trace_count = 0;
+        if (trace_count < 20) {
+            trace_count++;
+            uint16_t tpc = cpu_->regs.PC.get_pair16();
+            uint8_t op = memory_->fetch_mem(tpc);
+            std::cerr << "[TRACE] #" << trace_count << " PC=0x" << std::hex << tpc
+                      << " op=0x" << (int)op << std::dec << "\n";
+        }
     }
 }
 
 void Z80Thread::deliver_tick_interrupt() {
     // MP/M uses RST 7 (or configurable) for timer interrupt
     // Push PC, jump to interrupt vector
+
+    static int tick_debug_count = 0;
+    if (tick_debug_count++ < 10) {
+        std::cerr << "[TICK] Delivering interrupt, PC=0x" << std::hex
+                  << cpu_->regs.PC.get_pair16() << " IFF=" << (int)cpu_->regs.IFF1 << std::dec << "\n";
+    }
 
     // Save current PC on stack
     uint16_t sp = cpu_->regs.SP.get_pair16();

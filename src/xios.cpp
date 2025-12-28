@@ -99,9 +99,9 @@ void XIOS::do_ret() {
     }
 }
 
-// Console I/O - B register contains console number (MP/M II convention)
+// Console I/O - D register contains console number (MP/M II XIOS convention)
 void XIOS::do_const() {
-    uint8_t console = cpu_->regs.BC.get_high();  // B = console number
+    uint8_t console = cpu_->regs.DE.get_high();  // D = console number
     Console* con = ConsoleManager::instance().get(console);
 
     uint8_t status = 0x00;
@@ -119,7 +119,7 @@ void XIOS::do_const() {
 }
 
 void XIOS::do_conin() {
-    uint8_t console = cpu_->regs.BC.get_high();  // B = console number
+    uint8_t console = cpu_->regs.DE.get_high();  // D = console number
     Console* con = ConsoleManager::instance().get(console);
 
     uint8_t ch = 0x1A;  // EOF default
@@ -134,17 +134,15 @@ void XIOS::do_conin() {
 }
 
 void XIOS::do_conout() {
-    // B = console number (MP/M II), C = character
-    // For boot phase (LDRBIOS/MPMLDR at PC < 0x8000), always use console 0
-    // because B register contains garbage during boot
-    // Once MP/M II is running (code at 0x8000+), use B register
-    uint16_t pc = cpu_->regs.PC.get_pair16();
-    uint8_t console = (pc < 0x8000) ? 0 : cpu_->regs.BC.get_high();
-    uint8_t ch = cpu_->regs.BC.get_low();
+    // D = console number (MP/M II XIOS convention), C = character
+    // Use D register (high byte of DE) for console number
+    uint8_t console = cpu_->regs.DE.get_high();  // D = console number
+    uint8_t ch = cpu_->regs.BC.get_low();        // C = character
 
     // Debug: show first few CONOUT calls to verify
     static int debug_count = 0;
     if (debug_count++ < 20) {
+        uint16_t pc = cpu_->regs.PC.get_pair16();
         std::cerr << "[do_conout] skip_ret=" << skip_ret_ << " pc=0x" << std::hex << pc
                   << " console=" << std::dec << (int)console << " ch=0x" << std::hex << (int)ch << std::dec << "\n";
     }
@@ -398,6 +396,11 @@ void XIOS::do_polldevice() {
     // Device 1-4 = console output 0-3
     // Device 5-8 = console input 0-3
 
+    static int poll_debug_count = 0;
+    if (poll_debug_count++ < 20) {
+        std::cerr << "[POLLDEVICE] device=" << (int)device << "\n";
+    }
+
     uint8_t result = 0x00;
 
     if (device == 0) {
@@ -449,9 +452,38 @@ void XIOS::do_systeminit() {
     // DE = breakpoint handler address
     // HL = XIOS direct jump table address
 
-    // TODO: Set up interrupt vectors in each bank
-    // For now, just initialize consoles
+    // Initialize consoles
     ConsoleManager::instance().init();
+
+    // Copy interrupt vector from current bank to all other banks
+    // The Z80 code wrote JP INTHND to 0x0038-0x003A, but only in the current bank.
+    // We need to replicate this to all banks so interrupts work regardless of bank.
+    uint8_t current_bank = mem_->current_bank();
+    uint8_t vec_0038 = mem_->fetch_mem(0x0038);
+    uint8_t vec_0039 = mem_->fetch_mem(0x0039);
+    uint8_t vec_003A = mem_->fetch_mem(0x003A);
+
+    std::cerr << "[SYSINIT] Replicating interrupt vector to all banks: "
+              << std::hex << (int)vec_0038 << " " << (int)vec_0039 << " " << (int)vec_003A
+              << std::dec << "\n";
+
+    for (int bank = 0; bank < 8; bank++) {  // Assume max 8 banks
+        if (bank != current_bank) {
+            mem_->write_bank(bank, 0x0038, vec_0038);
+            mem_->write_bank(bank, 0x0039, vec_0039);
+            mem_->write_bank(bank, 0x003A, vec_003A);
+        }
+    }
+
+    // Auto-start the clock - MP/M II expects timer interrupts for scheduling
+    tick_enabled_.store(true);
+
+    // Force-enable interrupts - the Z80 EI instruction was executed before OUT,
+    // but EI's effect is delayed until after the next instruction.
+    cpu_->regs.IFF1 = 1;
+    cpu_->regs.IFF2 = 1;
+
+    std::cerr << "[SYSINIT] Enabled timer + interrupts, IFF1=" << (int)cpu_->regs.IFF1 << "\n";
 
     do_ret();
 }
@@ -484,9 +516,11 @@ void XIOS::do_swtsys() {
 }
 
 void XIOS::do_pdisp() {
-    // Process dispatcher entry point
-    // This is called when no processes are ready
-    // For our emulator, just return (the Z80 thread will continue polling)
+    // Process dispatcher entry point - called at end of interrupt handler
+    // The Z80 code does EI then JP PDISP, but EI's effect is delayed
+    // Re-enable interrupts here to ensure they stay enabled
+    cpu_->regs.IFF1 = 1;
+    cpu_->regs.IFF2 = 1;
     do_ret();
 }
 
