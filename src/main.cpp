@@ -76,12 +76,14 @@ void print_usage(const char* prog) {
               << "  -b, --boot FILE       Boot image file (MPMLDR + MPM.SYS)\n"
               << "  -x, --xios ADDR       XIOS base address in hex (default: FC00)\n"
               << "  -l, --local           Enable local console (output to stdout)\n"
+              << "  -t, --timeout SECS    Timeout in seconds for debugging (0 = no timeout)\n"
               << "  -h, --help            Show this help\n"
               << "\n"
               << "Examples:\n"
               << "  " << prog << " -d A:system.dsk -d B:work.dsk\n"
               << "  " << prog << " -p 2222 -k mykey.pem -d A:mpm2.dsk\n"
               << "  " << prog << " -l -b boot.img -d A:system.dsk\n"
+              << "  " << prog << " -t 5 -l -b boot.img -d A:system.dsk  # 5 second timeout\n"
               << "\n";
 }
 
@@ -92,22 +94,24 @@ int main(int argc, char* argv[]) {
     std::string boot_image;
     uint16_t xios_base = 0x8800;
     bool local_console = false;
+    int timeout_seconds = 0;
     std::vector<std::pair<int, std::string>> disk_mounts;
 
     // Parse command line options
     static struct option long_options[] = {
-        {"port",  required_argument, nullptr, 'p'},
-        {"key",   required_argument, nullptr, 'k'},
-        {"disk",  required_argument, nullptr, 'd'},
-        {"boot",  required_argument, nullptr, 'b'},
-        {"xios",  required_argument, nullptr, 'x'},
-        {"local", no_argument,       nullptr, 'l'},
-        {"help",  no_argument,       nullptr, 'h'},
-        {nullptr, 0,                 nullptr, 0}
+        {"port",    required_argument, nullptr, 'p'},
+        {"key",     required_argument, nullptr, 'k'},
+        {"disk",    required_argument, nullptr, 'd'},
+        {"boot",    required_argument, nullptr, 'b'},
+        {"xios",    required_argument, nullptr, 'x'},
+        {"local",   no_argument,       nullptr, 'l'},
+        {"timeout", required_argument, nullptr, 't'},
+        {"help",    no_argument,       nullptr, 'h'},
+        {nullptr,   0,                 nullptr, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "p:k:d:b:x:lh", long_options, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "p:k:d:b:x:lt:h", long_options, nullptr)) != -1) {
         switch (opt) {
             case 'p':
                 ssh_port = std::atoi(optarg);
@@ -145,6 +149,9 @@ int main(int argc, char* argv[]) {
                 break;
             case 'l':
                 local_console = true;
+                break;
+            case 't':
+                timeout_seconds = std::atoi(optarg);
                 break;
             case 'h':
                 print_usage(argv[0]);
@@ -248,6 +255,10 @@ int main(int argc, char* argv[]) {
 
     // Start Z80 thread
     if (!boot_image.empty()) {
+        if (timeout_seconds > 0) {
+            std::cout << "Setting boot timeout: " << timeout_seconds << " seconds\n";
+            z80.set_timeout(timeout_seconds);
+        }
         std::cout << "Starting Z80 CPU...\n";
         z80.start();
     } else {
@@ -265,7 +276,7 @@ int main(int argc, char* argv[]) {
     } else {
         // Local console mode - read from stdin and broadcast to all local consoles
         if (setup_raw_terminal()) {
-            while (!g_shutdown_requested) {
+            while (!g_shutdown_requested && !z80.timed_out()) {
                 // Poll stdin for input
                 char ch;
                 ssize_t n = read(STDIN_FILENO, &ch, 1);
@@ -290,10 +301,10 @@ int main(int argc, char* argv[]) {
             restore_terminal();
         } else {
             // Not a TTY - just wait for shutdown signal
-            while (!g_shutdown_requested) {
+            while (!g_shutdown_requested && !z80.timed_out()) {
                 struct timeval tv;
-                tv.tv_sec = 1;
-                tv.tv_usec = 0;
+                tv.tv_sec = 0;
+                tv.tv_usec = 100000;  // 100ms for faster timeout detection
                 select(0, nullptr, nullptr, nullptr, &tv);
             }
         }
@@ -301,7 +312,7 @@ int main(int argc, char* argv[]) {
 #else
     // Local console mode - read from stdin and broadcast to all local consoles
     if (setup_raw_terminal()) {
-        while (!g_shutdown_requested) {
+        while (!g_shutdown_requested && !z80.timed_out()) {
             // Poll stdin for input
             char ch;
             ssize_t n = read(STDIN_FILENO, &ch, 1);
@@ -326,16 +337,20 @@ int main(int argc, char* argv[]) {
         restore_terminal();
     } else {
         // Not a TTY - just wait for shutdown signal
-        while (!g_shutdown_requested) {
+        while (!g_shutdown_requested && !z80.timed_out()) {
             struct timeval tv;
-            tv.tv_sec = 1;
-            tv.tv_usec = 0;
+            tv.tv_sec = 0;
+            tv.tv_usec = 100000;  // 100ms for faster timeout detection
             select(0, nullptr, nullptr, nullptr, &tv);
         }
     }
 #endif
 
-    std::cout << "\nShutting down...\n";
+    if (z80.timed_out()) {
+        std::cout << "\nBoot timeout - shutting down...\n";
+    } else {
+        std::cout << "\nShutting down...\n";
+    }
 
     // Stop Z80
     z80.stop();

@@ -74,8 +74,10 @@ void Z80Thread::start() {
     if (running_.load()) return;
 
     stop_requested_.store(false);
+    timed_out_.store(false);
     running_.store(true);
-    next_tick_ = std::chrono::steady_clock::now();
+    start_time_ = std::chrono::steady_clock::now();
+    next_tick_ = start_time_;
     tick_count_ = 0;
     instruction_count_.store(0);
 
@@ -111,8 +113,23 @@ uint64_t Z80Thread::cycles() const {
 
 void Z80Thread::thread_func() {
     while (!stop_requested_.load()) {
-        // Check for timer interrupt
+        // Check for timeout
         auto now = std::chrono::steady_clock::now();
+        if (timeout_seconds_ > 0) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time_).count();
+            if (elapsed >= timeout_seconds_) {
+                std::cerr << "\n[TIMEOUT] Boot timed out after " << elapsed << " seconds\n";
+                std::cerr << "[TIMEOUT] PC=0x" << std::hex << cpu_->regs.PC.get_pair16()
+                          << " SP=0x" << cpu_->regs.SP.get_pair16()
+                          << " bank=" << std::dec << (int)memory_->current_bank()
+                          << " instructions=" << instruction_count_.load() << "\n";
+                timed_out_.store(true);
+                stop_requested_.store(true);
+                break;
+            }
+        }
+
+        // Check for timer interrupt
         if (now >= next_tick_) {
             next_tick_ += TICK_INTERVAL;
 
@@ -240,9 +257,24 @@ void Z80Thread::thread_func() {
             cpu_->regs.PC.set_pair16(pc + 1);
             instruction_count_++;
 
-            // Wait for timer interrupt or stop request
+            // Wait for timer interrupt or stop request or timeout
             while (!stop_requested_.load() && !xios_->clock_enabled()) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                // Check timeout while waiting
+                if (timeout_seconds_ > 0) {
+                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::steady_clock::now() - start_time_).count();
+                    if (elapsed >= timeout_seconds_) {
+                        std::cerr << "\n[TIMEOUT] Timed out while HALTed after " << elapsed << " seconds\n";
+                        std::cerr << "[TIMEOUT] PC=0x" << std::hex << pc
+                                  << " SP=0x" << cpu_->regs.SP.get_pair16()
+                                  << " bank=" << std::dec << (int)memory_->current_bank()
+                                  << " instructions=" << instruction_count_.load() << "\n";
+                        timed_out_.store(true);
+                        stop_requested_.store(true);
+                        break;
+                    }
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
 
             // If interrupts are enabled and clock is running, wait for tick

@@ -279,9 +279,9 @@ int DiskSystem::read(BankedMemory* mem) {
     uint16_t phys_sector = translated_sector / records_per_phys;  // 0-based (disk image is 0-indexed)
     uint16_t offset_in_phys = (translated_sector % records_per_phys) * 128;
 
-    // Debug tracing for FC00 area
+    // Debug tracing for directory reads (track 2 is directory for hd1k with OFF=2)
     bool trace_this = (dma_addr_ >= 0xFC00 && dma_addr_ < 0xFD00);
-    bool trace_dir = false;
+    bool trace_dir = (track == 2);  // Trace all directory reads
 
     // Temporarily set physical sector for reading
     disk->set_sector(phys_sector);

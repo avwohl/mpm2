@@ -48,9 +48,19 @@ wolfssh-*/
 *.temp
 /tmp/
 
-# Assembled binaries (regenerate with z80asm)
+# Assembled binaries and intermediate files (regenerate with um80/ul80)
 asm/*.bin
+asm/*.hex
 asm/*.lst
+asm/*.prn
+asm/*.rel
+asm/*.SPR
+asm/*.spr
+
+# Generated boot images and system files
+disks/*.bin
+disks/*.sys
+disks/*.com
 
 # External MP/M II source/binaries
 # Digital Research materials - now freely available for non-commercial use

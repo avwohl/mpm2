@@ -46,6 +46,10 @@ public:
     uint64_t cycles() const;
     uint64_t instructions() const { return instruction_count_.load(); }
 
+    // Timeout for debugging
+    void set_timeout(int seconds) { timeout_seconds_ = seconds; }
+    bool timed_out() const { return timed_out_.load(); }
+
 private:
     void thread_func();
 
@@ -67,6 +71,11 @@ private:
     // Counters
     std::atomic<uint64_t> instruction_count_;
     int tick_count_;  // Counts to 60 for one-second flag
+
+    // Timeout
+    int timeout_seconds_ = 0;  // 0 = no timeout
+    std::chrono::steady_clock::time_point start_time_;
+    std::atomic<bool> timed_out_{false};
 };
 
 #endif // Z80_THREAD_H
