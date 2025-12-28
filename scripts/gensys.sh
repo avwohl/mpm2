@@ -26,8 +26,8 @@ CPMEMU="${CPMEMU:-/Users/wohl/src/cpmemu/src/cpmemu}"
 WORK_DIR="/tmp/gensys_work"
 
 # Number of consoles (default 4)
-# must match asm/bnkxio.asm
-;NMBCNS:         EQU     4       ; consoles for SSH users
+# must match asm/bnkxio.asm:
+# NMBCNS:         EQU     4       ; consoles for SSH users
 NMBCNS=${1:-4}
 
 echo "MP/M II System Generation"
