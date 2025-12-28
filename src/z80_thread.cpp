@@ -70,6 +70,216 @@ bool Z80Thread::init(const std::string& boot_image) {
     return true;
 }
 
+bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
+    // Direct MPM.SYS loader - bypasses MPMLDR
+    // See docs/mpmldr_analysis.md for details on MPM.SYS format
+
+    std::ifstream file(mpm_sys_path, std::ios::binary);
+    if (!file) {
+        std::cerr << "Cannot open MPM.SYS: " << mpm_sys_path << "\n";
+        return false;
+    }
+
+    // Get file size
+    file.seekg(0, std::ios::end);
+    size_t file_size = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    // Read first 256 bytes (SYSTEM.DAT - 2 records of 128 bytes)
+    uint8_t sysdat[256];
+    file.read(reinterpret_cast<char*>(sysdat), 256);
+    if (!file) {
+        std::cerr << "Failed to read SYSTEM.DAT from MPM.SYS\n";
+        return false;
+    }
+
+    // Extract key fields from SYSTEM.DAT (see docs/mpmldr_analysis.md)
+    uint8_t mem_top = sysdat[0];           // Top page of memory
+    uint8_t nmb_cns = sysdat[1];           // Number of consoles
+    uint8_t brkpt_rst = sysdat[2];         // Breakpoint RST number
+    uint8_t bank_switched = sysdat[4];     // Bank switched system
+    uint8_t z80_cpu = sysdat[5];           // Z80 CPU flag
+    uint8_t xios_jmp_tbl_base = sysdat[7]; // XIOS jump table page
+    uint8_t resbdos_base = sysdat[8];      // Resident BDOS page
+    uint8_t xdos_base = sysdat[11];        // XDOS base page = entry point
+    uint8_t rsp_base = sysdat[12];         // RSP base page
+    uint8_t bnkxios_base = sysdat[13];     // BNKXIOS base page
+    uint8_t bnkbdos_base = sysdat[14];     // BNKBDOS base page
+    uint8_t nmb_mem_seg = sysdat[15];      // Number of memory segments
+    uint16_t nmb_records = sysdat[120] | (sysdat[121] << 8);
+    uint8_t ticks_per_sec = sysdat[122];   // Ticks per second
+    uint8_t system_drive = sysdat[123];    // System drive (1=A)
+    uint8_t common_base = sysdat[124];     // Common memory base page
+    uint8_t nmb_rsps = sysdat[125];        // Number of RSPs
+    uint8_t bnkxdos_base = sysdat[242];    // Banked XDOS page
+    uint8_t tmp_base = sysdat[247];        // TMP base page
+
+    // Print MPMLDR-style signon
+    std::cout << "\n\nMP/M II V2.1 Loader (Emulator Direct Load)\n";
+    std::cout << "Copyright (C) 1981, Digital Research\n\n";
+
+    // Print system configuration (like MPMLDR)
+    std::cout << "Nmb of consoles     =  " << (int)nmb_cns << "\n";
+    std::cout << "Breakpoint RST #    =  " << (int)brkpt_rst << "\n";
+    if (z80_cpu) {
+        std::cout << "Z80 Alternate register set saved/restored by dispatcher\n";
+    }
+    if (bank_switched) {
+        std::cout << "Common base addr    =  " << std::hex << std::uppercase
+                  << std::setw(4) << std::setfill('0') << (common_base * 256)
+                  << "H\n" << std::dec;
+    }
+    std::cout << "Banked BDOS file manager\n";
+    std::cout << "Nmb of ticks/second =  " << (int)ticks_per_sec << "\n";
+    if (system_drive >= 1 && system_drive <= 16) {
+        std::cout << "System drive        =  " << (char)('A' + system_drive - 1) << ":\n";
+    } else {
+        std::cout << "System drive        =  A: (default)\n";
+    }
+
+    // Print Memory Segment Table header
+    std::cout << "Memory Segment Table:\n";
+
+    // Helper lambda to print segment info (MPMLDR format: NAME BASE SIZE)
+    auto print_segment = [](const char* name, uint16_t base, uint16_t size) {
+        std::cout << std::setfill(' ') << std::left << std::setw(12) << name
+                  << "  " << std::hex << std::uppercase << std::right
+                  << std::setfill('0') << std::setw(4) << base << "H"
+                  << "  " << std::setw(4) << size << "H"
+                  << std::dec << std::setfill(' ') << "\n";
+    };
+
+    // Calculate and print segments (similar to MPMLDR display_OS)
+    uint16_t sysdat_addr = mem_top * 256;
+    print_segment("SYSTEM DAT", sysdat_addr, 0x0100);
+
+    // TMPD size = ((nmb_cns-1)/4+1)*256
+    uint16_t tmpd_size = ((nmb_cns - 1) / 4 + 1) * 256;
+    uint16_t tmpd_addr = sysdat_addr - tmpd_size;
+    print_segment("TMPD    DAT", tmpd_addr, tmpd_size);
+
+    // XIOS jump table
+    print_segment("XIOSJMP TBL", xios_jmp_tbl_base * 256, 0x0100);
+
+    // RESBDOS
+    print_segment("RESBDOS SPR", resbdos_base * 256,
+                  (xios_jmp_tbl_base - resbdos_base) * 256);
+
+    // XDOS
+    print_segment("XDOS    SPR", xdos_base * 256,
+                  (resbdos_base - xdos_base) * 256);
+
+    // BNKXIOS
+    print_segment("BNKXIOS SPR", bnkxios_base * 256,
+                  (rsp_base - bnkxios_base) * 256);
+
+    // BNKBDOS
+    print_segment("BNKBDOS SPR", bnkbdos_base * 256,
+                  (bnkxios_base - bnkbdos_base) * 256);
+
+    // BNKXDOS
+    print_segment("BNKXDOS SPR", bnkxdos_base * 256,
+                  (bnkbdos_base - bnkxdos_base) * 256);
+
+    // TMP
+    print_segment("TMP     SPR", tmp_base * 256,
+                  (bnkxdos_base - tmp_base) * 256);
+
+    // Print memory map separator
+    std::cout << "-------------------------\n";
+
+    // Print memory segment entries (mem_seg_tbl at offset 16-47)
+    std::cout << "MP/M II Sys";
+    std::cout << "  " << std::hex << std::uppercase << std::right
+              << std::setw(4) << std::setfill('0') << 0 << "H";
+    std::cout << "  " << std::setw(4) << std::setfill('0')
+              << (common_base * 256) << "H";
+    if (bank_switched) {
+        std::cout << "  Bank 0";
+    }
+    std::cout << std::dec << std::setfill(' ') << "\n";
+
+    // User memory segments from mem_seg_tbl (8 entries, 4 bytes each at offset 16)
+    for (int i = 0; i < nmb_mem_seg && i < 8; i++) {
+        uint8_t seg_base = sysdat[16 + i * 4];
+        uint8_t seg_size = sysdat[16 + i * 4 + 1];
+        uint8_t seg_attr = sysdat[16 + i * 4 + 2];
+        uint8_t seg_bank = sysdat[16 + i * 4 + 3];
+
+        if (seg_size > 0) {
+            std::cout << "Memseg  Usr";
+            std::cout << "  " << std::hex << std::uppercase << std::right
+                      << std::setw(4) << std::setfill('0') << (seg_base * 256) << "H";
+            std::cout << "  " << std::setw(4) << std::setfill('0')
+                      << (seg_size * 256) << "H";
+            if (bank_switched) {
+                std::cout << "  Bank " << std::dec << (int)seg_bank;
+            }
+            std::cout << std::dec << std::setfill(' ') << "\n";
+        }
+    }
+
+    std::cout << "\n";
+
+    // Validate file size (allow for CP/M record padding tolerance)
+    if (nmb_records < 3) {
+        std::cerr << "Invalid nmb_records: " << nmb_records << "\n";
+        return false;
+    }
+    size_t expected_size = nmb_records * 128;
+    // Allow up to 128 bytes short (CP/M doesn't always pad the last record)
+    if (file_size + 128 < expected_size) {
+        std::cerr << "MPM.SYS too small: " << file_size << " bytes, expected ~"
+                  << expected_size << "\n";
+        return false;
+    }
+
+    // Load remaining records (2 through nmb_records-1) DOWNWARD from mem_top
+    uint16_t load_addr = mem_top * 256;
+    uint16_t records_loaded = 0;
+
+    for (uint16_t rec = 2; rec < nmb_records; rec++) {
+        load_addr -= 128;
+
+        uint8_t record[128] = {0};  // Zero-fill in case of partial read
+        file.read(reinterpret_cast<char*>(record), 128);
+        size_t bytes_read = file.gcount();
+
+        if (bytes_read == 0 && rec < nmb_records - 1) {
+            // Unexpected EOF before last record
+            std::cerr << "Warning: EOF at record " << rec << " (expected " << nmb_records << ")\n";
+            break;
+        }
+
+        // Load into bank 0 (system bank) - addresses >= COMMON_BASE go to common area
+        memory_->load(0, load_addr, record, 128);
+        records_loaded++;
+
+        if (file.eof()) break;
+    }
+
+    // Copy SYSTEM.DAT to mem_top * 256 (where MP/M expects it)
+    memory_->load(0, sysdat_addr, sysdat, 256);
+
+    // Set entry point: xdos_base * 256
+    uint16_t entry_point = xdos_base * 256;
+    cpu_->regs.PC.set_pair16(entry_point);
+
+    // Set stack pointer - MPMLDR sets it to just below the entry point data
+    cpu_->regs.SP.set_pair16(sysdat_addr);
+
+    // Update XIOS base to match BNKXIOS location
+    xios_->set_base(bnkxios_base * 256);
+
+    std::cout << "Loaded " << records_loaded << " records ("
+              << (records_loaded * 128) << " bytes)\n";
+    std::cout << "Entry point: " << std::hex << std::uppercase
+              << std::setw(4) << std::setfill('0') << entry_point << "H\n"
+              << std::dec << std::setfill(' ');
+
+    return true;
+}
+
 void Z80Thread::start() {
     if (running_.load()) return;
 
@@ -112,19 +322,18 @@ uint64_t Z80Thread::cycles() const {
 }
 
 void Z80Thread::thread_func() {
-    std::cerr << "[Z80 THREAD] Starting execution, PC=0x" << std::hex
+    std::cerr << "[Z80] Starting at PC=0x" << std::hex
               << cpu_->regs.PC.get_pair16() << std::dec << std::endl;
-    std::cerr.flush();
 
-    uint64_t trace_interval = 100000;
+    // Trace disabled by default - set to non-zero to enable periodic traces
+    uint64_t trace_interval = 0;  // Was 100000
     uint64_t next_trace = trace_interval;
 
     while (!stop_requested_.load()) {
-        // Periodic instruction trace
-        if (instruction_count_.load() >= next_trace) {
+        // Periodic instruction trace (disabled when trace_interval == 0)
+        if (trace_interval > 0 && instruction_count_.load() >= next_trace) {
             std::cerr << "[Z80 TRACE] " << instruction_count_.load() << " instructions, PC=0x"
                       << std::hex << cpu_->regs.PC.get_pair16() << std::dec << std::endl;
-            std::cerr.flush();
             next_trace += trace_interval;
         }
         // Check for timeout
@@ -162,72 +371,11 @@ void Z80Thread::thread_func() {
         // Check for XIOS trap before executing
         uint16_t pc = cpu_->regs.PC.get_pair16();
 
-        // Monitor SP near FC00
-        static uint16_t last_sp = 0;
-        uint16_t cur_sp = cpu_->regs.SP.get_pair16();
-        static int sp_fc_trace = 0;
-        static int sp_at_fc00_count = 0;
-        if (cur_sp != last_sp && cur_sp >= 0xFC00 && cur_sp <= 0xFD10 && sp_fc_trace++ < 5) {
-            std::cerr << "[SP CHANGE] was 0x" << std::hex << last_sp
-                      << " now 0x" << cur_sp << " PC=0x" << pc << std::dec << "\n";
-        }
-        // Trace next 10 instructions after SP becomes FC00
-        if (cur_sp == 0xFC00 && last_sp != 0xFC00) {
-            sp_at_fc00_count = 10;
-            std::cerr << "[SP=FC00 START] PC=0x" << std::hex << pc << std::dec << "\n";
-        }
-        if (sp_at_fc00_count > 0) {
-            uint8_t b0 = memory_->fetch_mem(pc);
-            uint8_t b1 = memory_->fetch_mem(pc+1);
-            uint8_t b2 = memory_->fetch_mem(pc+2);
-            std::cerr << "[SP=FC00 TRACE] PC=0x" << std::hex << pc
-                      << " instr=" << (int)b0 << " " << (int)b1 << " " << (int)b2
-                      << " SP=0x" << cur_sp
-                      << std::dec << "\n";
-            sp_at_fc00_count--;
-        }
-        last_sp = cur_sp;
-
-        // Monitor FC00 byte for changes
-        static uint8_t last_fc00 = 0;
-        static int fc00_changes = 0;
-        uint8_t cur_fc00 = memory_->fetch_mem(0xFC00);
-        if (cur_fc00 != last_fc00 && fc00_changes++ < 10) {
-            std::cerr << "[FC00 CHANGE] was 0x" << std::hex << (int)last_fc00
-                      << " now 0x" << (int)cur_fc00
-                      << " PC=0x" << pc;
-            // Dump instruction at PC
-            uint8_t b0 = memory_->fetch_mem(pc);
-            uint8_t b1 = memory_->fetch_mem(pc+1);
-            uint8_t b2 = memory_->fetch_mem(pc+2);
-            std::cerr << " instr=" << (int)b0 << " " << (int)b1 << " " << (int)b2;
-            // Show regs
-            std::cerr << " HL=" << cpu_->regs.HL.get_pair16()
-                      << " DE=" << cpu_->regs.DE.get_pair16()
-                      << " BC=" << cpu_->regs.BC.get_pair16()
-                      << " SP=" << cpu_->regs.SP.get_pair16()
-                      << std::dec << "\n";
-            // Dump FC00-FC0F
-            std::cerr << "  FC00: ";
-            for (int i = 0; i < 16; i++) {
-                std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                          << (int)memory_->fetch_mem(0xFC00 + i) << " ";
-            }
-            std::cerr << std::dec << "\n";
-            last_fc00 = cur_fc00;
-        }
-
         // XIOSJMP interception: redirect FC00-FC5A to emulator's XIOS handler
-        // Both XIOSJMP (FC00) and BNKXIOS (CC00/CD00) get corrupted during MP/M II init.
-        // Handle XIOS calls directly via the emulator.
         if (pc >= 0xFC00 && pc < 0xFC5D) {
             uint16_t offset = pc - 0xFC00;
             // Valid XIOS entry points are at 3-byte intervals
             if (offset % 3 == 0) {
-                static int xios_intercept_count = 0;
-                if (xios_intercept_count++ < 30) {
-                    std::cerr << "[XIOSJMP->EMU] offset=0x" << std::hex << offset << std::dec << "\n";
-                }
                 // Call emulator's XIOS handler via port dispatch mechanism
                 xios_->handle_port_dispatch(offset);
                 // Pop return address from stack and return
@@ -238,18 +386,6 @@ void Z80Thread::thread_func() {
                 cpu_->regs.SP.set_pair16(sp + 2);
                 cpu_->regs.PC.set_pair16(ret_addr);
 
-                // Debug: show return address for BOOT calls
-                if (offset == 0 && xios_intercept_count < 35) {
-                    uint8_t b0 = memory_->fetch_mem(ret_addr);
-                    uint8_t b1 = memory_->fetch_mem(ret_addr + 1);
-                    uint8_t b2 = memory_->fetch_mem(ret_addr + 2);
-                    std::cerr << "[BOOT RET] bank=" << (int)memory_->current_bank()
-                              << " sp=" << std::hex << sp
-                              << " ret_addr=" << ret_addr
-                              << " bytes=" << (int)b0 << " " << (int)b1 << " " << (int)b2
-                              << std::dec << "\n";
-                }
-
                 instruction_count_++;
                 continue;  // Skip normal instruction execution
             }
@@ -259,14 +395,6 @@ void Z80Thread::thread_func() {
         uint8_t opcode = memory_->fetch_mem(pc);
         // qkz80 library calls exit() on HALT, but MP/M uses HALT in idle loop
         if (opcode == 0x76) {
-            // HALT - wait for interrupt
-            static int halt_count = 0;
-            if (halt_count++ < 5) {
-                std::cerr << "[Z80] HALT at PC=0x" << std::hex << pc
-                          << " clock_enabled=" << xios_->clock_enabled()
-                          << " IFF1=" << (int)cpu_->regs.IFF1 << std::dec << "\n";
-            }
-
             // Advance PC past HALT
             cpu_->regs.PC.set_pair16(pc + 1);
             instruction_count_++;

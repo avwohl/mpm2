@@ -27,25 +27,6 @@ void XIOS::handle_port_dispatch(uint8_t func) {
     // Port-based dispatch: function offset written to port E0
     // The A register contains the XIOS function offset (0, 3, 6, 9, etc.)
 
-    // Debug: trace calls, especially BOOT and after patch
-    static int total_calls = 0;
-    static bool patch_happened = false;
-    total_calls++;
-
-    // Always trace BOOT calls
-    if (func == XIOS_BOOT) {
-        std::cerr << "[PORT DISPATCH] BOOT called! (call #" << total_calls << ")\n";
-        patch_happened = true;
-    }
-
-    // Trace first 30 calls, or first 30 after patch
-    static int post_patch_count = 0;
-    if (total_calls <= 30 || (patch_happened && post_patch_count++ < 30)) {
-        std::cerr << "[PORT DISPATCH] func=0x" << std::hex << (int)func
-                  << " (call #" << std::dec << total_calls << ")"
-                  << (patch_happened ? " [post-patch]" : "") << "\n";
-    }
-
     // Temporarily set skip_ret flag so handlers don't do RET
     skip_ret_ = true;
 
@@ -439,6 +420,7 @@ void XIOS::do_polldevice() {
 }
 
 void XIOS::do_startclock() {
+    std::cerr << "[STARTCLOCK] Enabling tick interrupts\n";
     tick_enabled_.store(true);
     do_ret();
 }
@@ -525,26 +507,10 @@ void XIOS::do_sysdat() {
 void XIOS::do_boot() {
     // For MP/M II, COLDBOOT (offset 0) returns HL = address of commonbase
     // The commonbase structure is in XIOSJMP (at FC00H)
-    // NOTE: Memory at 0xFF0C gets corrupted, so use hardcoded FC00
-
-    uint16_t xiosjmp_addr = 0xFC00;  // Hardcoded - memory at FF0C is corrupted
+    uint16_t xiosjmp_addr = 0xFC00;
 
     // Commonbase structure starts at offset 0x4B in XIOSJMP
     uint16_t commonbase = xiosjmp_addr + XIOS_COMMONBASE;  // FC00+4B = FC4B
-
-    // Debug: trace the return address (who's calling BOOT?)
-    static int boot_count = 0;
-    uint16_t sp = cpu_->regs.SP.get_pair16();
-    uint8_t lo = mem_->fetch_mem(sp);
-    uint8_t hi = mem_->fetch_mem(sp + 1);
-    uint16_t caller = (hi << 8) | lo;
-    boot_count++;
-
-    // Trace every 100th call, or first 5, or calls 2390-2400
-    if (boot_count <= 5 || (boot_count % 100 == 0) || (boot_count >= 2390 && boot_count <= 2400)) {
-        std::cerr << "[do_boot #" << std::dec << boot_count << "] caller=" << std::hex << caller
-                  << "H SP=" << sp << "H" << std::dec << std::endl;
-    }
 
     cpu_->regs.HL.set_pair16(commonbase);
     do_ret();

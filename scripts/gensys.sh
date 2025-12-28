@@ -62,18 +62,58 @@ for file in resbdos.spr bnkbdos.spr xdos.spr bnkxdos.spr tmp.spr gensys.com; do
     cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm2_hd1k.img" "0:$file" .
 done
 
-# Run GENSYS under cpmemu
-# GENSYS prompts (see MP/M II System Implementor's Guide):
-#   1. "Use SYSTEM.DAT?" -> N (don't use saved config)
-#   2. "Number of memory segments (1-8)?" -> 4 (for 4 banks)
-#   3. For each segment: base address (usually 0000 for each)
-#   4. "Common base?" -> C0 (for C000H, giving 48KB user + 16KB common)
-#   5. "Number of consoles?" -> 4
-#   6. Various RSP/BRS includes
-#   ... etc
-# Here we provide: N, 4 segments, 0000 for each base, C0 common, defaults for rest
-echo "Running GENSYS (4 banks, C0 common base)..."
-echo -e "N\n4\n0000\n0000\n0000\n0000\nC0\n4\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n" | "$CPMEMU" gensys.com > gensys.log 2>&1 || true
+# Run GENSYS under cpmemu using expect for readable prompt/response
+echo "Running GENSYS ($NMBCNS consoles, 4 banks, C0 common base)..."
+
+# Check for expect
+if ! command -v expect &> /dev/null; then
+    echo "Error: 'expect' not found. Install with: brew install expect"
+    exit 1
+fi
+
+# Create expect script with clear prompt/response pairs
+cat > gensys_expect.exp << EXPECT_SCRIPT
+set timeout 10
+log_user 0
+spawn $CPMEMU gensys.com
+
+# System configuration prompts
+expect "Use SYSTEM.DAT"           { send "N\r" }
+expect "Top page"                 { send "\r" }
+expect "Number of TMPs"           { send "$NMBCNS\r" }
+expect "Number of Printers"       { send "\r" }
+expect "Breakpoint RST"           { send "\r" }
+expect "Compatibility Attributes" { send "\r" }
+expect "system call user stacks"  { send "\r" }
+expect "Z80 CPU"                  { send "\r" }
+expect "ticks/second"             { send "\r" }
+expect "System Drive"             { send "\r" }
+expect "Temporary file drive"     { send "\r" }
+expect "locked records/process"   { send "\r" }
+expect "locked records/system"    { send "\r" }
+expect "open files/process"       { send "\r" }
+expect "open files/system"        { send "\r" }
+
+# Memory configuration
+expect "Bank switched"            { send "\r" }
+expect "memory segments"          { send "4\r" }
+expect "Common memory base"       { send "C0\r" }
+expect "Dayfile logging"          { send "\r" }
+
+# Accept generated tables
+expect "Accept new system data"   { send "\r" }
+# Memory segment table: bank 0 (common) + 4 user banks = 5 entries
+expect "Base,size,attrib,bank"    { send "\r" }
+expect "Base,size,attrib,bank"    { send "\r" }
+expect "Base,size,attrib,bank"    { send "\r" }
+expect "Base,size,attrib,bank"    { send "\r" }
+expect "Base,size,attrib,bank"    { send "\r" }
+expect "Accept new memory segment" { send "\r" }
+
+expect eof
+EXPECT_SCRIPT
+
+expect gensys_expect.exp > gensys.log 2>&1 || true
 
 # Check if MPM.SYS was created
 if [ ! -f "mpm.sys" ]; then

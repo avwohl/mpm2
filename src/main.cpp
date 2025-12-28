@@ -74,6 +74,7 @@ void print_usage(const char* prog) {
               << "  -k, --key FILE        Host key file in DER format (default: keys/ssh_host_rsa_key.der)\n"
               << "  -d, --disk A:FILE     Mount disk image on drive A-P\n"
               << "  -b, --boot FILE       Boot image file (MPMLDR + MPM.SYS)\n"
+              << "  -s, --sys FILE        Load MPM.SYS directly (bypass MPMLDR)\n"
               << "  -x, --xios ADDR       XIOS base address in hex (default: FC00)\n"
               << "  -l, --local           Enable local console (output to stdout)\n"
               << "  -t, --timeout SECS    Timeout in seconds for debugging (0 = no timeout)\n"
@@ -83,6 +84,7 @@ void print_usage(const char* prog) {
               << "  " << prog << " -d A:system.dsk -d B:work.dsk\n"
               << "  " << prog << " -p 2222 -k mykey.pem -d A:mpm2.dsk\n"
               << "  " << prog << " -l -b boot.img -d A:system.dsk\n"
+              << "  " << prog << " -l -s MPM.SYS -d A:system.dsk  # Direct load\n"
               << "  " << prog << " -t 5 -l -b boot.img -d A:system.dsk  # 5 second timeout\n"
               << "\n";
 }
@@ -92,6 +94,7 @@ int main(int argc, char* argv[]) {
     int ssh_port = 2222;
     std::string host_key = "keys/ssh_host_rsa_key.der";
     std::string boot_image;
+    std::string mpm_sys_file;  // Direct MPM.SYS loading (bypasses MPMLDR)
     uint16_t xios_base = 0x8800;
     bool local_console = false;
     int timeout_seconds = 0;
@@ -103,6 +106,7 @@ int main(int argc, char* argv[]) {
         {"key",     required_argument, nullptr, 'k'},
         {"disk",    required_argument, nullptr, 'd'},
         {"boot",    required_argument, nullptr, 'b'},
+        {"sys",     required_argument, nullptr, 's'},
         {"xios",    required_argument, nullptr, 'x'},
         {"local",   no_argument,       nullptr, 'l'},
         {"timeout", required_argument, nullptr, 't'},
@@ -111,7 +115,7 @@ int main(int argc, char* argv[]) {
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "p:k:d:b:x:lt:h", long_options, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "p:k:d:b:s:x:lt:h", long_options, nullptr)) != -1) {
         switch (opt) {
             case 'p':
                 ssh_port = std::atoi(optarg);
@@ -143,6 +147,9 @@ int main(int argc, char* argv[]) {
             }
             case 'b':
                 boot_image = optarg;
+                break;
+            case 's':
+                mpm_sys_file = optarg;
                 break;
             case 'x':
                 xios_base = std::strtoul(optarg, nullptr, 16);
@@ -213,16 +220,36 @@ int main(int argc, char* argv[]) {
 
     // Initialize Z80 thread
     Z80Thread z80;
-    if (!z80.init(boot_image)) {
-        std::cerr << "Failed to initialize Z80 emulator\n";
-        if (!boot_image.empty()) {
-            std::cerr << "Could not load boot image: " << boot_image << "\n";
-        }
+
+    // Check for conflicting options
+    if (!boot_image.empty() && !mpm_sys_file.empty()) {
+        std::cerr << "Cannot specify both -b (boot image) and -s (MPM.SYS)\n";
         return 1;
     }
 
-    z80.set_xios_base(xios_base);
-    std::cout << "XIOS base: 0x" << std::hex << xios_base << std::dec << "\n";
+    if (!mpm_sys_file.empty()) {
+        // Direct MPM.SYS loading - bypass MPMLDR
+        if (!z80.init("")) {  // Initialize without boot image
+            std::cerr << "Failed to initialize Z80 emulator\n";
+            return 1;
+        }
+        if (!z80.load_mpm_sys(mpm_sys_file)) {
+            std::cerr << "Failed to load MPM.SYS: " << mpm_sys_file << "\n";
+            return 1;
+        }
+        // XIOS base is set by load_mpm_sys based on SYSTEM.DAT
+    } else {
+        // Traditional boot via MPMLDR
+        if (!z80.init(boot_image)) {
+            std::cerr << "Failed to initialize Z80 emulator\n";
+            if (!boot_image.empty()) {
+                std::cerr << "Could not load boot image: " << boot_image << "\n";
+            }
+            return 1;
+        }
+        z80.set_xios_base(xios_base);
+        std::cout << "XIOS base: 0x" << std::hex << xios_base << std::dec << "\n";
+    }
 
 #ifdef HAVE_WOLFSSH
     // Initialize SSH server (skip if only using local console)
@@ -255,7 +282,7 @@ int main(int argc, char* argv[]) {
 #endif
 
     // Start Z80 thread
-    if (!boot_image.empty()) {
+    if (!boot_image.empty() || !mpm_sys_file.empty()) {
         if (timeout_seconds > 0) {
             std::cout << "Setting boot timeout: " << timeout_seconds << " seconds\n";
             z80.set_timeout(timeout_seconds);
@@ -264,7 +291,7 @@ int main(int argc, char* argv[]) {
         z80.start();
     } else {
         std::cout << "No boot image specified - CPU not started\n";
-        std::cout << "Use -b option to specify boot image\n";
+        std::cout << "Use -b option for boot image or -s for direct MPM.SYS loading\n";
     }
 
     // Main loop

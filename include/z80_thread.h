@@ -24,6 +24,10 @@ public:
     // Initialize with memory and load boot code
     bool init(const std::string& boot_image);
 
+    // Load MPM.SYS directly (bypasses MPMLDR)
+    // Returns true on success, sets entry_point to xdos_base*256
+    bool load_mpm_sys(const std::string& mpm_sys_path);
+
     // Start/stop the CPU thread
     void start();
     void stop();
