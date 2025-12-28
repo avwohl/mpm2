@@ -112,7 +112,21 @@ uint64_t Z80Thread::cycles() const {
 }
 
 void Z80Thread::thread_func() {
+    std::cerr << "[Z80 THREAD] Starting execution, PC=0x" << std::hex
+              << cpu_->regs.PC.get_pair16() << std::dec << std::endl;
+    std::cerr.flush();
+
+    uint64_t trace_interval = 100000;
+    uint64_t next_trace = trace_interval;
+
     while (!stop_requested_.load()) {
+        // Periodic instruction trace
+        if (instruction_count_.load() >= next_trace) {
+            std::cerr << "[Z80 TRACE] " << instruction_count_.load() << " instructions, PC=0x"
+                      << std::hex << cpu_->regs.PC.get_pair16() << std::dec << std::endl;
+            std::cerr.flush();
+            next_trace += trace_interval;
+        }
         // Check for timeout
         auto now = std::chrono::steady_clock::now();
         if (timeout_seconds_ > 0) {

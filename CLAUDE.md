@@ -184,13 +184,69 @@ Connect via SSH:
 ssh -p 2222 user@localhost
 ```
 
-## Boot Process
+## Boot Process - The Four Layers
 
-1. Load boot image (MPMLDR + MPM.SYS) into memory
-2. Initialize XIOS jump table at configured base address
-3. Start Z80 execution at 0x0100 (or configured entry point)
-4. MPMLDR loads MPM.SYS and transfers control
-5. MP/M II initializes and presents login prompt on consoles
+MP/M II boot involves four distinct software layers. **Each layer uses different BIOS code.**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Layer 1: Cold Start Loader (sectors 0-1 of boot disk)          │
+│          - Loaded by hardware/ROM into memory                  │
+│          - Loads MPMLDR from system tracks into 0x0100         │
+│          - Very small (~128 bytes)                             │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Layer 2: MPMLDR (0x0100-0x16FF)                                 │
+│          - Contains LDRBDOS (loader BDOS)                       │
+│          - Prints: "MP/M II V2.1 Loader"                        │
+│          - Searches directory for MPM.SYS                       │
+│          - Loads MPM.SYS into high memory                       │
+│          - Uses LDRBIOS for all disk/console I/O                │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Layer 3: LDRBIOS (0x1700+)                                      │
+│          - CP/M 2-compatible BIOS for the loader phase          │
+│          - Provides: SELDSK, SETTRK, SETSEC, SETDMA, READ       │
+│          - Provides: CONOUT for loader messages                 │
+│          - Has its own DPB matching the boot disk format        │
+│          - Files: ldrbios.asm (SSSD), ldrbios_hd1k.asm (hd1k)   │
+│          - ONLY used during boot, then discarded                │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│ Layer 4: MPM.SYS / BNKXIOS (loaded by MPMLDR)                   │
+│          - Full MP/M II operating system                        │
+│          - BNKXIOS provides runtime XIOS (extended BIOS)        │
+│          - LDRBIOS is NO LONGER USED after this point           │
+│          - Handles multiple consoles, bank switching, etc.      │
+│          - File: bnkxios_port.asm → BNKXIOS.SPR                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Key Points
+
+1. **LDRBIOS ≠ BNKXIOS**: The loader BIOS and the runtime XIOS are completely separate code. LDRBIOS is a minimal CP/M 2 BIOS; BNKXIOS is the full MP/M II extended I/O system.
+
+2. **First LDRBIOS call is SELDSK**: MPMLDR's first call to LDRBIOS is SELDSK (select disk). Put any initialization code in SELDSK.
+
+3. **LDRBIOS must match disk format**: The DPB embedded in LDRBIOS must match the format of the boot disk image. Mismatch = boot failure.
+
+4. **LDRBIOS address limit**: Must not extend above the base of MPM.SYS being loaded. For floppy boot, upper limit is 0x1A00.
+
+5. **MPMLDR searches for MPM.SYS**: If MPMLDR prints "MPM SYS ?" error, the file is not on the disk or the directory read failed.
+
+### Boot Sequence Detail
+
+1. Emulator loads boot image into memory (contains MPMLDR + LDRBIOS)
+2. Z80 starts executing at 0x0100 (MPMLDR entry)
+3. MPMLDR calls LDRBIOS SELDSK to select drive A:
+4. MPMLDR reads directory (track 2+) looking for MPM.SYS
+5. MPMLDR loads MPM.SYS records into high memory
+6. MPMLDR jumps to MPM.SYS execution address
+7. MP/M II initializes BNKXIOS and presents console prompts
+8. **LDRBIOS is never called again** - all I/O now goes through BNKXIOS
 
 ## Disk Image Formats
 

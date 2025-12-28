@@ -49,6 +49,11 @@ fi
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
 
+# Copy diskdefs to work directory (cpmtools looks for local diskdefs first)
+if [ -f "$PROJECT_DIR/diskdefs" ]; then
+    cp "$PROJECT_DIR/diskdefs" diskdefs
+fi
+
 # Extract required SPR files from distribution disk
 echo "Extracting SPR files from distribution..."
 for file in resbdos.spr bnkbdos.spr xdos.spr bnkxdos.spr tmp.spr gensys.com; do
@@ -102,7 +107,7 @@ printf "\\x$SERIAL_B6" | dd of=mpmldr.com bs=1 seek=134 conv=notrunc 2>/dev/null
 # Create boot image
 echo "Creating boot image..."
 "$BUILD_DIR/mkboot" \
-    -l "$ASM_DIR/ldrbios_hd1k.bin" \
+    -l "$ASM_DIR/ldrbios.bin" \
     -b bnkxios.spr \
     -m mpmldr.com \
     -o boot.bin
