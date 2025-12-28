@@ -17,8 +17,8 @@ This emulator runs MP/M II, Digital Research's multi-user, multi-tasking operati
 ### Memory Model
 
 MP/M II uses bank-switched memory:
-- **Lower 32KB (0x0000-0x7FFF)**: Banked memory, switchable per process
-- **Upper 32KB (0x8000-0xFFFF)**: Common memory, shared by all processes
+- **Lower 48KB (0x0000-0xBFFF)**: Banked memory, switchable per process
+- **Upper 16KB (0xC000-0xFFFF)**: Common memory, shared by all processes
 
 ### Key Components
 
@@ -59,6 +59,8 @@ Manual byte poking leads to subtle errors. Use the tested DISKDEF.LIB macros fro
 
 ### Disk Formats
 
+**IMPORTANT: Use scripts/*.sh scripts to build disks **
+
 **IMPORTANT: Use the project's custom `diskdefs` file, NOT RomWBW or standard cpmtools diskdefs.**
 
 The emulator uses disk images with **NO SECTOR SKEW** for simplicity. Standard formats like ibm-3740 have skew factor 6, which complicates sector translation. Our custom diskdefs create images with skew=0.
@@ -94,14 +96,10 @@ Both formats have:
 
 **DO NOT** use standard ibm-3740 or wbw_hd1k diskdefs - they have sector skew that the emulator doesn't handle.
 
-### LDRBIOS Variants
+### LDRBIOS
 
-There are multiple LDRBIOS files for different disk formats:
-
-| File | Format | DPB | Use Case |
 |------|--------|-----|----------|
 | ldrbios.asm | 8" SSSD | SPT=26, BSH=3, EXM=0 | Floppy boot |
-| ldrbios_hd1k.asm | hd1k 8MB | SPT=64, BSH=5, EXM=1 | Hard disk boot |
 
 The build script (`build_asm.sh`) selects the correct LDRBIOS based on the target format.
 
@@ -316,8 +314,7 @@ mpm2/
 ├── diskdefs              # Custom cpmtools diskdefs (NO SKEW)
 ├── asm/
 │   ├── ldrbios.asm       # Loader BIOS for 8" SSSD (floppy)
-│   ├── ldrbios_hd1k.asm  # Loader BIOS for hd1k disks
-│   ├── bnkxios_port.asm  # Banked XIOS (I/O port dispatch)
+│   ├── bnkxios.asm  # Banked XIOS (I/O port dispatch)
 │   └── *.bin, *.SPR      # Generated (in .gitignore)
 ├── include/
 │   ├── banked_mem.h
