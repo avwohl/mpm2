@@ -9,10 +9,10 @@
 # 3. Patches MPMLDR.COM serial number to match
 # 4. Creates boot image and disk
 #
-# Default configuration (GENSYS defaults):
+# Default configuration:
 # - 4 consoles
 # - Common base at C000 (48KB user memory per bank)
-# - 3 user memory banks
+# - 4 user memory banks (one per console)
 # - Top of memory at FF00
 
 set -e
@@ -63,10 +63,18 @@ cp "$ASM_DIR/BNKXIOS_port.SPR" bnkxios.spr
 # Patch the 08 byte at offset 0x1E5 (485)
 printf "\\x$(printf '%02x' $NUM_CONSOLES)" | dd of=bnkxios.spr bs=1 seek=485 conv=notrunc 2>/dev/null
 
-# Run GENSYS under cpmemu (uses defaults: C0 common base, 3 banks, etc.)
-# First answer is 'N' to skip SYSTEM.DAT, rest are empty for defaults
-echo "Running GENSYS (using defaults)..."
-echo -e "N\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n" | "$CPMEMU" gensys.com > gensys.log 2>&1 || true
+# Run GENSYS under cpmemu
+# GENSYS prompts (see MP/M II System Implementor's Guide):
+#   1. "Use SYSTEM.DAT?" -> N (don't use saved config)
+#   2. "Number of memory segments (1-8)?" -> 4 (for 4 banks)
+#   3. For each segment: base address (usually 0000 for each)
+#   4. "Common base?" -> C0 (for C000H, giving 48KB user + 16KB common)
+#   5. "Number of consoles?" -> 4
+#   6. Various RSP/BRS includes
+#   ... etc
+# Here we provide: N, 4 segments, 0000 for each base, C0 common, defaults for rest
+echo "Running GENSYS (4 banks, C0 common base)..."
+echo -e "N\n4\n0000\n0000\n0000\n0000\nC0\n4\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n" | "$CPMEMU" gensys.com > gensys.log 2>&1 || true
 
 # Check if MPM.SYS was created
 if [ ! -f "mpm.sys" ]; then
@@ -128,4 +136,4 @@ echo ""
 echo "Configuration:"
 echo "  - $NUM_CONSOLES consoles"
 echo "  - Common base at C000 (16KB common, 48KB user per bank)"
-echo "  - 3 user memory banks"
+echo "  - 4 user memory banks"

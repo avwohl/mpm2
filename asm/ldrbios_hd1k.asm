@@ -5,8 +5,9 @@
 ; Loader BIOS for the boot phase. Uses I/O port traps like xios_port.asm.
 ; This replaces PC-based interception with: LD B, function; OUT (0xE0), A; RET
 ;
-; Assemble with: z80asm -o ldrbios_port.bin ldrbios_port.asm
+; Assemble with: um80 -o ldrbios_hd1k.rel ldrbios_hd1k.asm
 
+        .Z80                    ; Use Z80 mnemonics
         ORG     01700H          ; LDRBIOS location (matches MP/M II LDRBDOS expectation)
 
 ; I/O Ports (same as xios_port.asm)

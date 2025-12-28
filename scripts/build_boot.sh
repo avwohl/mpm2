@@ -15,12 +15,62 @@ EXTERNAL_DIR="$PROJECT_DIR/mpm2_external"
 echo "Building MP/M II boot image..."
 echo "==============================="
 
-# Build assembly files
+# Build assembly files using um80/ul80
 echo ""
-echo "Assembling LDRBIOS and XIOS..."
+echo "Assembling LDRBIOS..."
 cd "$ASM_DIR"
-make clean
-make
+
+# Assemble LDRBIOS
+um80 -o ldrbios.rel ldrbios.asm
+ul80 --hex -o ldrbios.hex ldrbios.rel
+
+# Convert Intel HEX to binary
+python3 -c "
+data = {}
+with open('ldrbios.hex', 'r') as f:
+    for line in f:
+        if not line.startswith(':'): continue
+        count = int(line[1:3], 16)
+        addr = int(line[3:7], 16)
+        rtype = int(line[7:9], 16)
+        if rtype != 0: continue
+        for i in range(count):
+            data[addr + i] = int(line[9 + i*2:11 + i*2], 16)
+if data:
+    min_addr = min(data.keys())
+    max_addr = max(data.keys())
+    out = bytearray(max_addr - min_addr + 1)
+    for addr, val in data.items():
+        out[addr - min_addr] = val
+    with open('ldrbios.bin', 'wb') as f:
+        f.write(out)
+"
+
+# Assemble XIOS
+um80 -o xios_port.rel xios_port.asm
+ul80 --hex -o xios_port.hex xios_port.rel
+
+# Convert to binary
+python3 -c "
+data = {}
+with open('xios_port.hex', 'r') as f:
+    for line in f:
+        if not line.startswith(':'): continue
+        count = int(line[1:3], 16)
+        addr = int(line[3:7], 16)
+        rtype = int(line[7:9], 16)
+        if rtype != 0: continue
+        for i in range(count):
+            data[addr + i] = int(line[9 + i*2:11 + i*2], 16)
+if data:
+    min_addr = min(data.keys())
+    max_addr = max(data.keys())
+    out = bytearray(max_addr - min_addr + 1)
+    for addr, val in data.items():
+        out[addr - min_addr] = val
+    with open('xios.bin', 'wb') as f:
+        f.write(out)
+"
 
 # Build C++ code
 echo ""
