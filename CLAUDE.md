@@ -46,6 +46,70 @@ The XIOS (Extended I/O System) provides MP/M II's hardware abstraction. Entry po
 | 0x42 | MAXCONSOLE | Return max console number in A |
 | 0x45 | SYSTEMINIT | System initialization |
 
+## Development Guidelines
+
+### Loading Binary Data
+
+**Always load binary data from assembled files rather than manually constructing byte sequences in code.** This applies to:
+- Disk parameter blocks (DPB) - use DISKDEF.LIB macros in assembly
+- BIOS/XIOS jump tables - assemble from source
+- Boot images - use mkboot tool with assembled binaries
+
+Manual byte poking leads to subtle errors. Use the tested DISKDEF.LIB macros from the MP/M II distribution for disk parameters.
+
+### Disk Formats
+
+**IMPORTANT: Use the project's custom `diskdefs` file, NOT RomWBW or standard cpmtools diskdefs.**
+
+The emulator uses disk images with **NO SECTOR SKEW** for simplicity. Standard formats like ibm-3740 have skew factor 6, which complicates sector translation. Our custom diskdefs create images with skew=0.
+
+```bash
+# Always use the project diskdefs
+export DISKDEFS=$PWD/diskdefs
+
+# Create 8" SSSD image (for floppy boot)
+dd if=/dev/zero bs=128 count=2002 of=disks/mpm2_sssd.img
+mkfs.cpm -f mpm2-sssd disks/mpm2_sssd.img
+cpmcp -f mpm2-sssd disks/mpm2_sssd.img mpm2_external/mpm2dist/*.* 0:
+
+# Create hd1k image (8MB)
+dd if=/dev/zero bs=1024 count=8192 of=disks/mpm2_hd1k.img
+mkfs.cpm -f mpm2-hd1k disks/mpm2_hd1k.img
+cpmcp -f mpm2-hd1k disks/mpm2_hd1k.img mpm2_external/mpm2dist/*.* 0:
+```
+
+### Custom Diskdefs (diskdefs file)
+
+The project includes a `diskdefs` file with NO SKEW versions of standard formats:
+
+| Format | Description | Geometry |
+|--------|-------------|----------|
+| mpm2-sssd | 8" SSSD (ibm-3740 compatible) | 77 trk, 26 sec, 128 bytes, 1K blocks |
+| mpm2-hd1k | 8MB hard disk | 1024 trk, 16 sec, 512 bytes, 4K blocks |
+
+Both formats have:
+- `skew 0` - no sector interleave
+- `boottrk 2` - 2 reserved system tracks
+- Compatible DPB with LDRBIOS
+
+**DO NOT** use standard ibm-3740 or wbw_hd1k diskdefs - they have sector skew that the emulator doesn't handle.
+
+### LDRBIOS Variants
+
+There are multiple LDRBIOS files for different disk formats:
+
+| File | Format | DPB | Use Case |
+|------|--------|-----|----------|
+| ldrbios.asm | 8" SSSD | SPT=26, BSH=3, EXM=0 | Floppy boot |
+| ldrbios_hd1k.asm | hd1k 8MB | SPT=64, BSH=5, EXM=1 | Hard disk boot |
+
+The build script (`build_asm.sh`) selects the correct LDRBIOS based on the target format.
+
+**Critical**: The LDRBIOS DPH must match the diskdef used to create the image:
+- LDRBIOS has its own DPB embedded in the binary
+- MPMLDR reads this DPB to calculate sector/track for file reads
+- Mismatch = boot failure
+
 ## Building
 
 ### Dependencies
@@ -140,33 +204,30 @@ Disk format is auto-detected based on file size:
 
 The **hd1k** format (from RomWBW) is recommended for MP/M II due to its larger size and directory capacity.
 
-### Working with hd1k Images
+### Working with Disk Images
 
-A script is provided to create hd1k disk images with all MP/M II files:
+Use the project's `diskdefs` file (no skew) for all disk operations:
 
 ```bash
-# Create disk with all MP/M II distribution files
-./scripts/build_hd1k.sh
+export DISKDEFS=$PWD/diskdefs
 
-# Create with custom output path
-./scripts/build_hd1k.sh -o disks/my_mpm2.img
+# Create 8" SSSD boot disk with MP/M II files
+dd if=/dev/zero bs=128 count=2002 of=disks/mpm2_sssd.img
+mkfs.cpm -f mpm2-sssd disks/mpm2_sssd.img
+cpmcp -f mpm2-sssd disks/mpm2_sssd.img mpm2_external/mpm2dist/*.* 0:
 
-# Create empty formatted disk
-./scripts/build_hd1k.sh --empty -o disks/blank.img
+# List files (use -T raw on macOS)
+cpmls -f mpm2-sssd disks/mpm2_sssd.img
+
+# Copy a single file
+cpmcp -f mpm2-sssd disks/mpm2_sssd.img myfile.com 0:
 ```
 
-Or use cpmtools directly with the RomWBW diskdefs:
+For hd1k (8MB) images:
 ```bash
-export DISKDEFS="$HOME/esrc/RomWBW-v3.5.1/Tools/cpmtools/diskdefs"
-
-# On macOS, add -T raw flag to cpmls/cpmcp commands
-# Create blank 8MB image
-dd if=/dev/zero bs=1024 count=8192 of=mydisk.img
-mkfs.cpm -f wbw_hd1k mydisk.img
-
-# Copy files (use -T raw on macOS)
-cpmcp -T raw -f wbw_hd1k mydisk.img myfile.com 0:
-cpmls -T raw -f wbw_hd1k mydisk.img
+dd if=/dev/zero bs=1024 count=8192 of=disks/mpm2_hd1k.img
+mkfs.cpm -f mpm2-hd1k disks/mpm2_hd1k.img
+cpmcp -f mpm2-hd1k disks/mpm2_hd1k.img mpm2_external/mpm2dist/*.* 0:
 ```
 
 ## Building the XIOS
@@ -196,7 +257,9 @@ mpm2/
 ├── CMakeLists.txt
 ├── CLAUDE.md
 ├── README.md
+├── diskdefs              # Custom cpmtools diskdefs (NO SKEW)
 ├── asm/
+│   ├── ldrbios.asm       # Loader BIOS for 8" SSSD (floppy)
 │   ├── ldrbios_hd1k.asm  # Loader BIOS for hd1k disks
 │   ├── bnkxios_port.asm  # Banked XIOS (I/O port dispatch)
 │   └── *.bin, *.SPR      # Generated (in .gitignore)

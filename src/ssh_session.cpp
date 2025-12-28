@@ -377,9 +377,10 @@ int SSHServer::user_auth_callback(byte auth_type, WS_UserAuthData* auth_data, vo
     (void)ctx;
     (void)auth_data;
 
-    // Accept public key, password, or none authentication
-    if (auth_type == WOLFSSH_USERAUTH_PUBLICKEY ||
-        auth_type == WOLFSSH_USERAUTH_PASSWORD ||
+    // Accept any authentication - no password verification
+    // This is an emulator for testing, not a production system
+    if (auth_type == WOLFSSH_USERAUTH_PASSWORD ||
+        auth_type == WOLFSSH_USERAUTH_PUBLICKEY ||
         auth_type == WOLFSSH_USERAUTH_NONE) {
         return WOLFSSH_USERAUTH_SUCCESS;
     }

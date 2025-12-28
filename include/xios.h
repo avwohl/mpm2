@@ -65,20 +65,6 @@ public:
     void set_base(uint16_t base) { xios_base_ = base; }
     uint16_t base() const { return xios_base_; }
 
-    // Set LDRBIOS base address (used during boot)
-    void set_ldrbios_base(uint16_t base) { ldrbios_base_ = base; }
-    uint16_t ldrbios_base() const { return ldrbios_base_; }
-
-    // Set BDOS stub address (for boot phase)
-    void set_bdos_stub(uint16_t addr) { bdos_stub_ = addr; }
-
-    // Check if address is an XIOS, LDRBIOS, or BDOS entry point
-    bool is_xios_call(uint16_t pc) const;
-
-    // Handle XIOS call at current PC (legacy PC-based interception)
-    // Returns true if call was handled
-    bool handle_call(uint16_t pc);
-
     // Handle XIOS call via I/O port dispatch
     // func = function offset (matches jump table: 0x00=BOOT, 0x06=CONST, etc.)
     // Called when Z80 executes OUT (0xE0), A with B=function
@@ -144,8 +130,6 @@ private:
     qkz80* cpu_;
     BankedMemory* mem_;
     uint16_t xios_base_;
-    uint16_t ldrbios_base_;
-    uint16_t bdos_stub_;
 
     // Disk state
     uint8_t current_disk_;
@@ -160,6 +144,11 @@ private:
     // Skip RET flag for I/O port dispatch
     bool skip_ret_ = false;
 
+    // BDOS file state (for boot phase file I/O)
+    uint16_t bdos_dma_ = 0x0080;  // BDOS DMA address
+    uint16_t bdos_fcb_ = 0;       // Current FCB address
+    int bdos_file_offset_ = 0;    // Current file offset in bytes
+    bool bdos_file_open_ = false; // File is open
 };
 
 #endif // XIOS_H

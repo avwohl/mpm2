@@ -1,0 +1,28 @@
+# Custom diskdefs for MP/M II Emulator
+# These formats have NO SKEW for simpler emulation
+
+# 8" SSSD format (ibm-3740 compatible) - NO SKEW
+# 77 tracks, 26 sectors, 128 bytes/sector = 256256 bytes
+diskdef mpm2-sssd
+  seclen 128
+  tracks 77
+  sectrk 26
+  blocksize 1024
+  maxdir 64
+  skew 0
+  boottrk 2
+  os 2.2
+end
+
+# hd1k format (RomWBW compatible) - NO SKEW
+# 1024 tracks, 16 sectors, 512 bytes/sector = 8MB
+diskdef mpm2-hd1k
+  seclen 512
+  tracks 1024
+  sectrk 16
+  blocksize 4096
+  maxdir 1024
+  skew 0
+  boottrk 2
+  os 2.2
+end

@@ -94,7 +94,7 @@ void Disk::set_format(DiskFormat format) {
             dpb_.spt = 64;      // 16 sectors * 512 bytes = 8K per track, /128 = 64 logical sectors
             dpb_.bsh = 5;       // 4K blocks (2^5 * 128 = 4096)
             dpb_.blm = 31;
-            dpb_.exm = 1;
+            dpb_.exm = 1;       // Per DISKDEF.LIB: (BLS/1024-1) >> 1 when DSM>256
             dpb_.dsm = 2039;    // 2040 blocks (8MB - 2 tracks) / 4K
             dpb_.drm = 1023;    // 1024 directory entries
             dpb_.al0 = 0xFF;
@@ -374,37 +374,9 @@ int DiskSystem::write(BankedMemory* mem) {
     return result;
 }
 
-// Standard CP/M skew table for ibm-3740 (26 sectors, skew factor 6)
-// These tables map between logical sector numbers and physical positions in disk images.
-// Disk images created by cpmtools with "skew 6" store sectors in interleaved order.
-// When reading logical sector L, we read from physical position log_to_phys[L].
-
-// log_to_phys[logical] = physical position in disk image
-static const uint8_t skew_log_to_phys[26] = {
-    0, 6, 12, 18, 24, 4, 10, 16, 22, 2, 8, 14, 20, 1, 7, 13, 19, 25, 5, 11, 17, 23, 3, 9, 15, 21
-};
-
-// phys_to_log[physical] = logical sector (inverse of above)
-static const uint8_t skew_phys_to_log[26] = {
-    0, 13, 9, 22, 5, 18, 1, 14, 10, 23, 6, 19, 2, 15, 11, 24, 7, 20, 3, 16, 12, 25, 8, 21, 4, 17
-};
-
 uint16_t DiskSystem::translate(uint16_t logical_sector, uint16_t track) {
-    // Check disk format - skew only applies to ibm-3740 (SSSD_8)
-    Disk* disk = get(current_drive_);
-    if (!disk) return logical_sector;
-
-    // Only apply skew for ibm-3740 format
-    // The MPMII_1.img disk image stores sectors in PHYSICAL order with skew
-    if (disk->format() == DiskFormat::SSSD_8) {
-        // ibm-3740 uses skew factor 6
-        // log_to_phys[L] = physical position where logical sector L is stored
-        if (logical_sector < 26) {
-            return skew_log_to_phys[logical_sector];
-        }
-    }
-
+    // No sector translation - disk images are created without skew
+    // using a custom diskdef with skew 0
     (void)track;
-    (void)skew_phys_to_log;  // Kept for reference
     return logical_sector;
 }

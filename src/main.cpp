@@ -165,6 +165,7 @@ int main(int argc, char* argv[]) {
     // Set up signal handlers
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
+    std::signal(SIGPIPE, SIG_IGN);  // Ignore SIGPIPE from closed SSH connections
 
     // Force unbuffered output for non-TTY environments
     std::ios::sync_with_stdio(true);

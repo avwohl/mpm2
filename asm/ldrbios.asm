@@ -1,19 +1,13 @@
-; ldrbios.asm - MP/M II Loader BIOS for Emulator
+; ldrbios.asm - MP/M II Loader BIOS for 8" SSSD (floppy) disks
 ; Part of MP/M II Emulator
 ; SPDX-License-Identifier: GPL-3.0-or-later
 ;
-; The LDRBIOS is a minimal BIOS used only during the boot process.
-; It is loaded along with MPMLDR at the start of the boot sequence.
-; After MP/M loads, it's replaced by the full XIOS.
+; Loader BIOS for the boot phase. Uses I/O port traps.
+; For 8" SSSD (ibm-3740 compatible) format - no skew.
 ;
-; Memory map during boot:
-;   0000-00FF: Page zero (vectors, etc.)
-;   0100-xxxx: MPMLDR code
-;   yyyy-zzzz: LDRBIOS (this code)
-;   FC00-FFFF: Will become XIOS after boot
-;
-; Assemble with: z80asm -o ldrbios.bin ldrbios.asm
+; Assemble with: um80 -o ldrbios.rel ldrbios.asm
 
+        .Z80                    ; Use Z80 mnemonics
         ORG     01700H          ; LDRBIOS location (matches MP/M II LDRBDOS expectation)
 
 ; =============================================================================
@@ -66,10 +60,10 @@ FUNC_WRITE:     EQU     02AH
 BOOT:
         ; Cold boot - initialize and load system
         DI
-        LD      SP,0100H        ; Stack below TPA
+        LD      SP, 0100H        ; Stack below TPA
 
         ; Print boot message
-        LD      HL,BOOTMSG
+        LD      HL, BOOTMSG
         CALL    PRTSTR
 
         ; The loader will take over from here
@@ -83,24 +77,24 @@ CONST:
         ; Console status
         ; Returns A=0 if no char, A=FF if char ready
         ; Dispatch to emulator via I/O port
-        LD      A,FUNC_CONST
-        OUT     (DISPATCH_PORT),A
+        LD      A, FUNC_CONST
+        OUT     (DISPATCH_PORT), A
         RET
 
 CONIN:
         ; Console input
         ; Returns A=character
         ; Dispatch to emulator via I/O port
-        LD      A,FUNC_CONIN
-        OUT     (DISPATCH_PORT),A
+        LD      A, FUNC_CONIN
+        OUT     (DISPATCH_PORT), A
         RET
 
 CONOUT:
         ; Console output
         ; C=character to output
         ; Dispatch to emulator via I/O port
-        LD      A,FUNC_CONOUT
-        OUT     (DISPATCH_PORT),A
+        LD      A, FUNC_CONOUT
+        OUT     (DISPATCH_PORT), A
         RET
 
 LIST:
@@ -116,85 +110,85 @@ PUNCH:
 READER:
         ; Reader input
         ; Returns A=character (1AH=EOF)
-        LD      A,1AH           ; Return EOF
+        LD      A, 1AH           ; Return EOF
         RET
 
 HOME:
         ; Home disk to track 0
-        LD      BC,0
+        LD      BC, 0
         JP      SETTRK
 
 SELDSK:
         ; Select disk
         ; C=drive number (0=A, etc.)
         ; Returns HL=DPH address, or 0 if error
-        LD      A,C
+        LD      A, C
         CP      4               ; Only A-D supported
-        JR      NC,SELDSK_ERR
+        JR      NC, SELDSK_ERR
 
         ; Save current drive
-        LD      (CURDSK),A
+        LD      (CURDSK), A
 
         ; Notify emulator (it tracks current disk for READ/WRITE)
         PUSH    BC
-        LD      A,FUNC_SELDSK
-        OUT     (DISPATCH_PORT),A
+        LD      A, FUNC_SELDSK
+        OUT     (DISPATCH_PORT), A
         POP     BC
 
         ; Calculate DPH address (use LDRBIOS local DPH)
-        LD      H,0
-        LD      L,C
-        ADD     HL,HL           ; *2
-        ADD     HL,HL           ; *4
-        ADD     HL,HL           ; *8
-        ADD     HL,HL           ; *16 (DPH size)
-        LD      DE,DPH_TABLE
-        ADD     HL,DE
+        LD      H, 0
+        LD      L, C
+        ADD     HL, HL           ; *2
+        ADD     HL, HL           ; *4
+        ADD     HL, HL           ; *8
+        ADD     HL, HL           ; *16 (DPH size)
+        LD      DE, DPH_TABLE
+        ADD     HL, DE
         RET
 
 SELDSK_ERR:
-        LD      HL,0
+        LD      HL, 0
         RET
 
 SETTRK:
         ; Set track
         ; BC=track number
         ; Dispatch to emulator via I/O port (expects HL)
-        LD      (CURTRK),BC
-        LD      H,B
-        LD      L,C
-        LD      A,FUNC_SETTRK
-        OUT     (DISPATCH_PORT),A
+        LD      (CURTRK), BC
+        LD      H, B
+        LD      L, C
+        LD      A, FUNC_SETTRK
+        OUT     (DISPATCH_PORT), A
         RET
 
 SETSEC:
         ; Set sector
         ; BC=sector number
         ; Dispatch to emulator via I/O port (expects HL)
-        LD      (CURSEC),BC
-        LD      H,B
-        LD      L,C
-        LD      A,FUNC_SETSEC
-        OUT     (DISPATCH_PORT),A
+        LD      (CURSEC), BC
+        LD      H, B
+        LD      L, C
+        LD      A, FUNC_SETSEC
+        OUT     (DISPATCH_PORT), A
         RET
 
 SETDMA:
         ; Set DMA address
         ; BC=address
         ; Dispatch to emulator via I/O port (expects HL)
-        LD      (CURDMA),BC
-        LD      H,B
-        LD      L,C
-        LD      A,FUNC_SETDMA
-        OUT     (DISPATCH_PORT),A
+        LD      (CURDMA), BC
+        LD      H, B
+        LD      L, C
+        LD      A, FUNC_SETDMA
+        OUT     (DISPATCH_PORT), A
         RET
 
 READ:
         ; Read sector
         ; Dispatch to emulator via I/O port
         ; Returns A=0 success, A=1 error
-        LD      A,FUNC_READ
-        OUT     (DISPATCH_PORT),A
+        LD      A, FUNC_READ
+        OUT     (DISPATCH_PORT), A
         RET
 
 WRITE:
@@ -202,14 +196,14 @@ WRITE:
         ; C=write type
         ; Dispatch to emulator via I/O port
         ; Returns A=0 success, A=1 error
-        LD      A,FUNC_WRITE
-        OUT     (DISPATCH_PORT),A
+        LD      A, FUNC_WRITE
+        OUT     (DISPATCH_PORT), A
         RET
 
 LISTST:
         ; List status
         ; Returns A=0 not ready, A=FF ready
-        LD      A,0FFH          ; Always ready
+        LD      A, 0FFH          ; Always ready
         RET
 
 SECTRAN:
@@ -217,8 +211,8 @@ SECTRAN:
         ; BC=logical sector, DE=translation table
         ; Returns HL=physical sector
         ; For hd1k, no translation needed
-        LD      H,B
-        LD      L,C
+        LD      H, B
+        LD      L, C
         RET
 
 ; =============================================================================
@@ -228,10 +222,10 @@ SECTRAN:
 PRTSTR:
         ; Print null-terminated string
         ; HL=string address
-        LD      A,(HL)
+        LD      A, (HL)
         OR      A
         RET     Z
-        LD      C,A
+        LD      C, A
         PUSH    HL
         CALL    CONOUT
         POP     HL
@@ -243,8 +237,8 @@ PRTSTR:
 ; =============================================================================
 
 BOOTMSG:
-        DB      0DH,0AH
-        DB      'MP/M II Loader BIOS',0DH,0AH
+        DB      0DH, 0AH
+        DB      'MP/M II Loader BIOS', 0DH, 0AH
         DB      0
 
 ; Current disk parameters
@@ -258,40 +252,40 @@ CURDMA: DW      0080H           ; Current DMA address
 ; =============================================================================
 
 DPH_TABLE:
-; DPH for drive A (hd1k for boot disk - 8MB format)
+; DPH for drive A (8" SSSD - no skew)
 DPH_A:
-        DW      0               ; XLT
-        DW      0,0,0           ; Scratch
+        DW      0               ; XLT - no translation
+        DW      0, 0, 0         ; Scratch
         DW      DIRBUF          ; DIRBUF
-        DW      DPB_HD1K        ; DPB for hd1k (8MB)
-        DW      0               ; CSV
+        DW      DPB_SSSD        ; DPB for 8" SSSD
+        DW      CSV_A           ; CSV
         DW      ALV_A           ; ALV
 
 ; DPH for drive B
 DPH_B:
         DW      0
-        DW      0,0,0
+        DW      0, 0, 0
         DW      DIRBUF
-        DW      DPB_HD1K
-        DW      0
+        DW      DPB_SSSD
+        DW      CSV_B
         DW      ALV_B
 
 ; DPH for drive C
 DPH_C:
         DW      0
-        DW      0,0,0
+        DW      0, 0, 0
         DW      DIRBUF
-        DW      DPB_HD1K
-        DW      0
+        DW      DPB_SSSD
+        DW      CSV_C
         DW      ALV_C
 
 ; DPH for drive D
 DPH_D:
         DW      0
-        DW      0,0,0
+        DW      0, 0, 0
         DW      DIRBUF
-        DW      DPB_HD1K
-        DW      0
+        DW      DPB_SSSD
+        DW      CSV_D
         DW      ALV_D
 
 ; =============================================================================
@@ -311,32 +305,24 @@ DPB_SSSD:
         DW      2               ; OFF - reserved tracks
 
 ; =============================================================================
-; Disk Parameter Block for hd1k
-; =============================================================================
-
-DPB_HD1K:
-        DW      64              ; SPT - sectors per track
-        DB      5               ; BSH - block shift (4K blocks)
-        DB      31              ; BLM - block mask
-        DB      1               ; EXM - extent mask
-        DW      2039            ; DSM - disk size - 1
-        DW      1023            ; DRM - directory max - 1
-        DB      0FFH            ; AL0
-        DB      0FFH            ; AL1
-        DW      0               ; CKS - no checksum
-        DW      2               ; OFF - reserved tracks
-
-; =============================================================================
-; Buffers
+; Buffers for 8" SSSD format
+; DSM=242 -> ALV needs (242/8)+1 = 31 bytes
+; DRM=63  -> CSV needs (63+1)/4 = 16 bytes
 ; =============================================================================
 
 DIRBUF: DS      128             ; Directory buffer
 
-; Allocation vectors (256 bytes each for hd1k)
-ALV_A:  DS      256
-ALV_B:  DS      256
-ALV_C:  DS      256
-ALV_D:  DS      256
+; Allocation vectors (31 bytes each)
+ALV_A:  DS      31
+ALV_B:  DS      31
+ALV_C:  DS      31
+ALV_D:  DS      31
+
+; Checksum vectors (16 bytes each)
+CSV_A:  DS      16
+CSV_B:  DS      16
+CSV_C:  DS      16
+CSV_D:  DS      16
 
 ; =============================================================================
 ; End of LDRBIOS

@@ -120,6 +120,11 @@ SELDSK:
         LD      A, C
         OR      A               ; Check if disk 0
         JR      NZ, SELDSK_ERR
+        ; Notify emulator of disk selection (tracks current disk for READ/WRITE)
+        PUSH    BC
+        LD      A, FUNC_SELDSK
+        OUT     (XIOS_DISPATCH), A
+        POP     BC
         LD      HL, DPH_A       ; Return address of our DPH
         RET
 SELDSK_ERR:
@@ -181,15 +186,16 @@ DPH_A:
         DW      ALV_A           ; ALV
 
 ; DPB for hd1k (8MB format - 1024 tracks, 64 logical sectors, 4K blocks)
-; Matches RomWBW wbw_hd1k format
+; Matches RomWBW wbw_hd1k format exactly
+; See CP/M 2.2 Alteration Guide for DPB calculation
 DPB_HD1K:
         DW      64              ; SPT - logical sectors per track (16 * 512 / 128)
         DB      5               ; BSH - block shift (4K blocks = 2^5 * 128)
-        DB      31              ; BLM - block mask
-        DB      1               ; EXM - extent mask
+        DB      31              ; BLM - block mask (2^BSH - 1)
+        DB      1               ; EXM - extent mask: per DISKDEF.LIB, (BLS/1024-1)>>1 when DSM>256
         DW      2039            ; DSM - disk size - 1 in blocks
         DW      1023            ; DRM - directory max - 1 (1024 entries)
-        DB      0FFH            ; AL0 - 16 directory blocks
+        DB      0FFH            ; AL0 - directory blocks allocated
         DB      0FFH            ; AL1
         DW      0               ; CKS - no checksum (fixed disk)
         DW      2               ; OFF - reserved tracks

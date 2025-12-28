@@ -14,8 +14,6 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
     : cpu_(cpu)
     , mem_(mem)
     , xios_base_(0x8800)   // Default - below TMP (9100H) but in common memory
-    , ldrbios_base_(0x1700) // LDRBIOS for boot phase (matches ldrbios.asm)
-    , bdos_stub_(0x0D06)    // MPMLDR's internal BDOS entry
     , current_disk_(0)
     , current_track_(0)
     , current_sector_(0)
@@ -23,154 +21,6 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
     , tick_enabled_(false)
     , preempted_(false)
 {
-}
-
-// DEPRECATED: PC-based interception has been replaced by I/O port dispatch.
-// All XIOS calls now go through port 0xE0 with function code in A register.
-// Our port-dispatch code is installed at FC00H (XIOSJMP TBL location).
-// These functions are kept for reference but are no longer called.
-bool XIOS::is_xios_call(uint16_t pc) const {
-    // Check XIOS range (configurable via xios_base_)
-    if (pc >= xios_base_ && pc < xios_base_ + 0x100) {
-        uint16_t offset = pc - xios_base_;
-        // Valid entry point: standard XIOS (multiples of 3 up to IDLE)
-        // or commonbase entries (0x4B, 0x4E, 0x51, 0x54, 0x57)
-        if ((offset <= XIOS_IDLE) && (offset % 3 == 0)) return true;
-        if (offset >= XIOS_COMMONBASE && offset <= XIOS_SYSDAT &&
-            (offset - XIOS_COMMONBASE) % 3 == 0) return true;
-
-        // Debug: show what's in memory at non-entry-point XIOS addresses
-        static int fc_trace = 0;
-        if (offset == 0x80 && fc_trace++ < 3) {
-            uint8_t byte = mem_->fetch_mem(pc);
-            fprintf(stderr, "[DEBUG] PC=%04X contains 0x%02X\n", pc, byte);
-        }
-        return false;
-    }
-
-    // Note: CD00-CDFF interception disabled - using NUCLEUS layout with BNKXIOS at BA00
-    // which contains forwarding stubs that jump to FB00 (XIOS base)
-
-    // Check LDRBIOS range
-    if (pc >= ldrbios_base_ && pc < ldrbios_base_ + 0x100) {
-        uint16_t offset = pc - ldrbios_base_;
-        // LDRBIOS only has standard entries up to SECTRAN (0x30)
-        return (offset <= XIOS_SECTRAN) && (offset % 3 == 0);
-    }
-
-    return false;
-}
-
-bool XIOS::handle_call(uint16_t pc) {
-    if (!is_xios_call(pc)) return false;
-
-    // Compute offset - works for XIOS and LDRBIOS
-    // BNKXIOS calls now come via FB00 due to forwarding stub
-    uint16_t offset;
-    bool is_ldrbios = (pc >= ldrbios_base_ && pc < ldrbios_base_ + 0x100);
-
-    if (pc >= xios_base_ && pc < xios_base_ + 0x100) {
-        offset = pc - xios_base_;
-    } else {
-        offset = pc - ldrbios_base_;
-    }
-
-    // For LDRBIOS, don't intercept SELDSK or SECTRAN - let LDRBIOS handle these
-    // using its own DPH and translation tables. The emulator's do_seldsk() uses
-    // XIOS addresses which would corrupt memory during boot.
-    if (is_ldrbios && (offset == XIOS_SELDSK || offset == XIOS_SECTRAN)) {
-        return false;  // Let LDRBIOS code run
-    }
-
-    // Trace extended XIOS calls (after SECTRAN)
-    static const char* names[] = {
-        "BOOT", "WBOOT", "CONST", "CONIN", "CONOUT", "LIST", "PUNCH", "READER",
-        "HOME", "SELDSK", "SETTRK", "SETSEC", "SETDMA", "READ", "WRITE", "LISTST",
-        "SECTRAN", "SELMEM", "POLLDEV", "STARTCLK", "STOPCLK", "EXITRGN", "MAXCON", "SYSINIT", "IDLE"
-    };
-    int idx = offset / 3;
-    // Trace ALL calls (both XIOS and LDRBIOS) with registers
-    static int trace_count = 0;
-    // Trace all XIOS calls (including BNKXIOS)
-    if (trace_count++ < 200) {
-        uint16_t sp = cpu_->regs.SP.get_pair16();
-        uint16_t hl = cpu_->regs.HL.get_pair16();
-        uint16_t ret_lo = mem_->fetch_mem(sp);
-        uint16_t ret_hi = mem_->fetch_mem(sp + 1);
-        uint16_t ret_addr = ret_lo | (ret_hi << 8);
-        std::cout << (is_ldrbios ? "[LDRBIOS] " : "[XIOS] ")
-                  << (idx < 25 ? names[idx] : "???")
-                  << " @ 0x" << std::hex << pc
-                  << " SP=0x" << sp
-                  << " HL=0x" << hl
-                  << " stack[0]=0x" << ret_addr << std::dec << std::endl;
-
-        // Show what's at the call site (before the CALL instruction pushed to stack)
-        // CALL is at ret_addr - 3
-        if (trace_count < 10) {
-            uint16_t call_addr = ret_addr - 3;
-            uint8_t c0 = mem_->fetch_mem(call_addr);
-            uint8_t c1 = mem_->fetch_mem(call_addr + 1);
-            uint8_t c2 = mem_->fetch_mem(call_addr + 2);
-            fprintf(stderr, "[CALLSITE] at %04X: %02X %02X %02X (expect CD xx FC)\n",
-                    call_addr, c0, c1, c2);
-        }
-    }
-
-    // Dump memory at BF80-BFA0 before first BOOT call
-    static bool dumped_bf80 = false;
-    if (offset == XIOS_BOOT && !dumped_bf80) {
-        dumped_bf80 = true;
-        fprintf(stderr, "[BOOT] Memory dump at BF80-BFA0 BEFORE first BOOT:\n");
-        for (uint16_t addr = 0xBF80; addr < 0xBFA0; addr += 16) {
-            fprintf(stderr, "[BOOT] %04X: ", addr);
-            for (int i = 0; i < 16; i++) {
-                fprintf(stderr, "%02X ", mem_->fetch_mem(addr + i));
-            }
-            fprintf(stderr, "\n");
-        }
-    }
-
-    switch (offset) {
-        case XIOS_BOOT:      do_boot(); break;
-        case XIOS_WBOOT:     do_wboot(); break;
-        case XIOS_CONST:     do_const(); break;
-        case XIOS_CONIN:     do_conin(); break;
-        case XIOS_CONOUT:    do_conout(); break;
-        case XIOS_LIST:      do_list(); break;
-        case XIOS_PUNCH:     do_punch(); break;
-        case XIOS_READER:    do_reader(); break;
-        case XIOS_HOME:      do_home(); break;
-        case XIOS_SELDSK:    do_seldsk(); break;
-        case XIOS_SETTRK:    do_settrk(); break;
-        case XIOS_SETSEC:    do_setsec(); break;
-        case XIOS_SETDMA:    do_setdma(); break;
-        case XIOS_READ:      do_read(); break;
-        case XIOS_WRITE:     do_write(); break;
-        case XIOS_LISTST:    do_listst(); break;
-        case XIOS_SECTRAN:   do_sectran(); break;
-        case XIOS_SELMEMORY: do_selmemory(); break;
-        case XIOS_POLLDEVICE: do_polldevice(); break;
-        case XIOS_STARTCLOCK: do_startclock(); break;
-        case XIOS_STOPCLOCK:  do_stopclock(); break;
-        case XIOS_EXITREGION: do_exitregion(); break;
-        case XIOS_MAXCONSOLE: do_maxconsole(); break;
-        case XIOS_SYSTEMINIT: do_systeminit(); break;
-        case XIOS_IDLE:       do_idle(); break;
-
-        // Commonbase entries (patched by GENSYS, called by XDOS/BNKBDOS)
-        case XIOS_COMMONBASE: do_boot(); break;  // Returns commonbase address
-        case XIOS_SWTUSER:    do_swtuser(); break;  // Switch to user bank
-        case XIOS_SWTSYS:     do_swtsys(); break;   // Switch to system bank
-        case XIOS_PDISP:      do_pdisp(); break;    // Process dispatcher
-        case XIOS_XDOSENT:    do_xdosent(); break;  // XDOS entry
-        case XIOS_SYSDAT:     do_sysdat(); break;   // System data pointer
-
-        default:
-            return false;  // Unknown entry
-    }
-
-    return true;
 }
 
 void XIOS::handle_port_dispatch(uint8_t func) {
@@ -682,10 +532,18 @@ void XIOS::do_boot() {
     // Commonbase structure starts at offset 0x4B in XIOSJMP
     uint16_t commonbase = xiosjmp_addr + XIOS_COMMONBASE;  // FC00+4B = FC4B
 
-    static int boot_trace = 0;
-    if (boot_trace++ < 5) {
-        std::cerr << "[do_boot] XIOSJMP=" << std::hex << xiosjmp_addr
-                  << "H commonbase=" << commonbase << "H" << std::dec << std::endl;
+    // Debug: trace the return address (who's calling BOOT?)
+    static int boot_count = 0;
+    uint16_t sp = cpu_->regs.SP.get_pair16();
+    uint8_t lo = mem_->fetch_mem(sp);
+    uint8_t hi = mem_->fetch_mem(sp + 1);
+    uint16_t caller = (hi << 8) | lo;
+    boot_count++;
+
+    // Trace every 100th call, or first 5, or calls 2390-2400
+    if (boot_count <= 5 || (boot_count % 100 == 0) || (boot_count >= 2390 && boot_count <= 2400)) {
+        std::cerr << "[do_boot #" << std::dec << boot_count << "] caller=" << std::hex << caller
+                  << "H SP=" << sp << "H" << std::dec << std::endl;
     }
 
     cpu_->regs.HL.set_pair16(commonbase);
@@ -810,17 +668,171 @@ void XIOS::do_bdos() {
             break;
 
         case 15: // Open file
-            // TODO: Implement file operations for MPMLDR
-            cpu_->regs.AF.set_high(0xFF);  // Not found for now
+            // DE points to FCB, search directory for file
+            {
+                uint16_t fcb = de;
+                bdos_fcb_ = fcb;
+
+                // Get filename from FCB (bytes 1-8 = name, 9-11 = type)
+                char filename[13];
+                for (int i = 0; i < 8; i++) {
+                    filename[i] = mem_->fetch_mem(fcb + 1 + i) & 0x7F;
+                }
+                filename[8] = '.';
+                for (int i = 0; i < 3; i++) {
+                    filename[9 + i] = mem_->fetch_mem(fcb + 9 + i) & 0x7F;
+                }
+                filename[12] = '\0';
+
+                std::cerr << "[BDOS 15] Open file: " << filename << "\n";
+
+                // Search directory for file
+                // Directory is at track 2 (after system tracks) for hd1k
+                Disk* dsk = DiskSystem::instance().get(current_disk_);
+                if (!dsk) {
+                    cpu_->regs.AF.set_high(0xFF);
+                    break;
+                }
+
+                // Read directory sectors and search for file
+                uint8_t dirbuf[512];
+                bool found = false;
+
+                // Directory starts at track 2 (dpb.off), scan first 16 sectors
+                for (int sec = 0; sec < 16 && !found; sec++) {
+                    DiskSystem::instance().set_track(2);
+                    DiskSystem::instance().set_sector(sec);
+                    DiskSystem::instance().set_dma(0xF000);  // Temp buffer in high mem
+                    DiskSystem::instance().read(mem_);
+
+                    // Copy from memory to local buffer
+                    for (int i = 0; i < 512; i++) {
+                        dirbuf[i] = mem_->fetch_mem(0xF000 + i);
+                    }
+
+                    // Each sector has 16 directory entries (32 bytes each)
+                    for (int entry = 0; entry < 16 && !found; entry++) {
+                        uint8_t* ent = &dirbuf[entry * 32];
+
+                        // Skip deleted entries
+                        if (ent[0] == 0xE5) continue;
+                        // Stop at end of directory
+                        if (ent[0] == 0x00 && ent[1] == 0x00) break;
+
+                        // Compare filename (bytes 1-8) and type (bytes 9-11)
+                        bool match = true;
+                        for (int i = 1; i <= 11; i++) {
+                            uint8_t fcb_char = mem_->fetch_mem(fcb + i) & 0x7F;
+                            uint8_t dir_char = ent[i] & 0x7F;
+                            // Skip comparison if FCB has '?' wildcard
+                            if (fcb_char == '?') continue;
+                            if (fcb_char != dir_char) {
+                                match = false;
+                                break;
+                            }
+                        }
+
+                        if (match && ent[12] == 0) {  // Extent 0 only
+                            std::cerr << "[BDOS 15] Found file at sector " << sec
+                                      << " entry " << entry << "\n";
+
+                            // Copy directory entry to FCB
+                            for (int i = 0; i < 32; i++) {
+                                mem_->store_mem(fcb + i, ent[i]);
+                            }
+                            // Clear CR (current record)
+                            mem_->store_mem(fcb + 32, 0);
+
+                            bdos_file_offset_ = 0;
+                            bdos_file_open_ = true;
+                            found = true;
+                        }
+                    }
+                }
+
+                cpu_->regs.AF.set_high(found ? 0x00 : 0xFF);
+            }
             break;
 
         case 20: // Read sequential
-            // TODO: Implement for MPMLDR to read MPM.SYS
-            cpu_->regs.AF.set_high(1);  // EOF for now
+            // DE points to FCB, read 128 bytes to DMA
+            {
+                if (!bdos_file_open_) {
+                    cpu_->regs.AF.set_high(1);  // EOF
+                    break;
+                }
+
+                uint16_t fcb = de;
+                uint8_t cr = mem_->fetch_mem(fcb + 32);  // Current record
+                uint8_t rc = mem_->fetch_mem(fcb + 15);  // Record count in extent
+
+                if (cr >= rc) {
+                    // Need next extent - for now, just return EOF
+                    // TODO: Load next extent
+                    std::cerr << "[BDOS 20] EOF at CR=" << (int)cr << " RC=" << (int)rc << "\n";
+                    cpu_->regs.AF.set_high(1);  // EOF
+                    break;
+                }
+
+                // Calculate block and offset within block
+                // For hd1k: BSH=4 (16KB blocks), BLM=0x7F
+                // Each block has 128 records
+                int block_in_extent = cr / 128;  // Which block in allocation map
+                int record_in_block = cr % 128;  // Record offset within block
+
+                // Get block number from allocation map (FCB bytes 16-31)
+                // For hd1k (DSM>255), allocation is 2 bytes per entry
+                uint16_t alloc_lo = mem_->fetch_mem(fcb + 16 + block_in_extent * 2);
+                uint16_t alloc_hi = mem_->fetch_mem(fcb + 16 + block_in_extent * 2 + 1);
+                uint16_t block_num = alloc_lo | (alloc_hi << 8);
+
+                if (block_num == 0) {
+                    std::cerr << "[BDOS 20] No block allocated at index " << block_in_extent << "\n";
+                    cpu_->regs.AF.set_high(1);  // EOF
+                    break;
+                }
+
+                // Calculate track and sector for this record
+                // For hd1k: 16 sectors/track, 512 bytes/sector = 8KB/track
+                // Block size = 16KB = 2 tracks
+                // OFF=2 (reserved tracks)
+                int bytes_per_track = 16 * 512;
+                int block_offset = block_num * (16 * 1024);  // Block size = 16KB
+                int record_offset = record_in_block * 128;
+                int total_offset = block_offset + record_offset;
+
+                int track = 2 + (total_offset / bytes_per_track);  // +2 for reserved tracks
+                int sector = (total_offset % bytes_per_track) / 512;
+                int offset_in_sector = (total_offset % bytes_per_track) % 512;
+
+                static int read_trace = 0;
+                if (read_trace++ < 20) {
+                    std::cerr << "[BDOS 20] CR=" << (int)cr << " block=" << block_num
+                              << " trk=" << track << " sec=" << sector
+                              << " off=" << offset_in_sector << "\n";
+                }
+
+                // Read the sector
+                DiskSystem::instance().set_track(track);
+                DiskSystem::instance().set_sector(sector);
+                DiskSystem::instance().set_dma(0xF000);  // Temp buffer
+                DiskSystem::instance().read(mem_);
+
+                // Copy 128 bytes to DMA buffer
+                for (int i = 0; i < 128; i++) {
+                    uint8_t byte = mem_->fetch_mem(0xF000 + offset_in_sector + i);
+                    mem_->store_mem(bdos_dma_ + i, byte);
+                }
+
+                // Increment current record
+                mem_->store_mem(fcb + 32, cr + 1);
+
+                cpu_->regs.AF.set_high(0);  // Success
+            }
             break;
 
         case 26: // Set DMA address
-            dma_addr_ = de;
+            bdos_dma_ = de;
             break;
 
         default:
