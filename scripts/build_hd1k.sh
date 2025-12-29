@@ -8,6 +8,8 @@
 # - 1024 directory entries (vs 64 on old floppy formats)
 # - 512 bytes/sector, 16 sectors/track, 1024 tracks
 # - No sector skew needed (skew 0)
+#
+# Uses cpm_disk.py for all disk operations to properly set SYS attributes
 
 set -e
 
@@ -15,50 +17,16 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 MPM2_DISKS="$PROJECT_DIR/mpm2_external/mpm2disks"
+MPM2_DIST="$PROJECT_DIR/mpm2_external/mpm2dist"
 OUTPUT_DIR="$PROJECT_DIR/disks"
+CPM_DISK="${CPM_DISK:-$HOME/src/cpmemu/util/cpm_disk.py}"
 TEMP_DIR=""
-
-# On macOS, cpmtools needs -T raw for disk images without libdsk drivers
-# Detect platform and set appropriate flags
-if [[ "$(uname)" == "Darwin" ]]; then
-    CPMTOOLS_FLAGS="-T raw"
-else
-    CPMTOOLS_FLAGS=""
-fi
-
-# RomWBW diskdefs path - adjust this for your system
-if [ -z "$DISKDEFS" ]; then
-    for path in \
-        "$HOME/esrc/RomWBW-v3.5.1/Tools/cpmtools/diskdefs" \
-        "$HOME/src/RomWBW/Tools/cpmtools/diskdefs" \
-        "/usr/local/share/cpmtools/diskdefs" \
-        "/usr/share/cpmtools/diskdefs"
-    do
-        if [ -f "$path" ]; then
-            export DISKDEFS="$path"
-            break
-        fi
-    done
-fi
 
 # Check for required tools
 check_tools() {
-    local missing=0
-    for tool in dd mkfs.cpm cpmcp cpmls; do
-        if ! command -v "$tool" &>/dev/null; then
-            echo "Error: Required tool '$tool' not found"
-            missing=1
-        fi
-    done
-
-    if [ -z "$DISKDEFS" ] || [ ! -f "$DISKDEFS" ]; then
-        echo "Error: Cannot find RomWBW diskdefs file"
-        echo "Set DISKDEFS environment variable to the path of diskdefs"
-        echo "  export DISKDEFS=\$HOME/esrc/RomWBW-v3.5.1/Tools/cpmtools/diskdefs"
-        missing=1
-    fi
-
-    if [ $missing -eq 1 ]; then
+    if [ ! -f "$CPM_DISK" ]; then
+        echo "Error: cpm_disk.py not found at $CPM_DISK"
+        echo "Set CPM_DISK environment variable to cpm_disk.py path"
         exit 1
     fi
 }
@@ -69,7 +37,13 @@ setup_temp() {
     trap "rm -rf '$TEMP_DIR'" EXIT
 }
 
-# Extract files from an ibm-3740 disk image
+# Get list of files from SSSD disk image
+list_sssd_files() {
+    local image="$1"
+    python3 "$CPM_DISK" list "$image" 2>/dev/null | tail -n +3 | awk '{print $2}'
+}
+
+# Extract files from an SSSD (ibm-3740) disk image
 extract_files() {
     local image="$1"
     local dest="$2"
@@ -81,16 +55,50 @@ extract_files() {
 
     echo "Extracting files from $(basename "$image")..."
 
-    # Get list of files
-    local files=$(cpmls $CPMTOOLS_FLAGS -f ibm-3740 "$image" 2>/dev/null | grep -v '^[0-9]:$' || true)
+    # Get list of files and extract each one
+    local files=$(list_sssd_files "$image")
+    local count=0
 
     for file in $files; do
-        # cpmcp needs the user area prefix
-        cpmcp $CPMTOOLS_FLAGS -f ibm-3740 "$image" "0:$file" "$dest/" 2>/dev/null || {
+        python3 "$CPM_DISK" extract -o "$dest" "$image" "$file" 2>/dev/null && {
+            count=$((count + 1))
+        } || {
             echo "  Warning: Could not extract $file"
         }
     done
 
+    echo "  Extracted $count files"
+    return 0
+}
+
+# Copy files from mpm2dist directory (only files not already present)
+copy_dist_files() {
+    local src="$1"
+    local dest="$2"
+
+    if [ ! -d "$src" ]; then
+        echo "Warning: mpm2dist directory not found: $src"
+        return 1
+    fi
+
+    echo "Copying additional files from mpm2dist..."
+    local count=0
+    local skipped=0
+
+    for file in "$src"/*; do
+        if [ -f "$file" ]; then
+            local name=$(basename "$file")
+            # Skip if file already exists (from floppy images)
+            if [ -f "$dest/$name" ]; then
+                skipped=$((skipped + 1))
+            else
+                cp "$file" "$dest/"
+                count=$((count + 1))
+            fi
+        fi
+    done
+
+    echo "  Added $count new files (skipped $skipped already present)"
     return 0
 }
 
@@ -99,37 +107,49 @@ create_hd1k() {
     local output="$1"
 
     echo "Creating 8MB hd1k disk image: $output"
-
-    # Create blank 8MB image
-    dd if=/dev/zero bs=1024 count=8192 of="$output" 2>/dev/null
-
-    # Format as hd1k (mkfs.cpm doesn't need -T flag)
-    mkfs.cpm -f wbw_hd1k "$output"
-
-    echo "  Created $(stat -f%z "$output" 2>/dev/null || stat -c%s "$output") bytes"
+    python3 "$CPM_DISK" create -f "$output"
 }
 
-# Copy files to hd1k image
+# Copy files to hd1k image, setting SYS attribute on .PRL files
 copy_to_hd1k() {
     local image="$1"
     local src_dir="$2"
 
     echo "Copying files to hd1k image..."
 
-    # Copy all files to user area 0
-    local count=0
+    # Separate files into PRL (need SYS) and others
+    local prl_files=""
+    local other_files=""
+    local prl_count=0
+    local other_count=0
+
     for file in "$src_dir"/*; do
         if [ -f "$file" ]; then
             local name=$(basename "$file")
-            cpmcp $CPMTOOLS_FLAGS -f wbw_hd1k "$image" "$file" "0:" 2>/dev/null && {
-                count=$((count + 1))
-            } || {
-                echo "  Warning: Could not copy $name"
-            }
+            local ext="${name##*.}"
+            if [ "$ext" = "PRL" ] || [ "$ext" = "prl" ]; then
+                prl_files="$prl_files $file"
+                prl_count=$((prl_count + 1))
+            else
+                other_files="$other_files $file"
+                other_count=$((other_count + 1))
+            fi
         fi
     done
 
-    echo "  Copied $count files"
+    # Add PRL files with SYS attribute
+    if [ $prl_count -gt 0 ]; then
+        echo "  Adding $prl_count .PRL files with SYS attribute..."
+        python3 "$CPM_DISK" add --sys "$image" $prl_files
+    fi
+
+    # Add other files without SYS attribute
+    if [ $other_count -gt 0 ]; then
+        echo "  Adding $other_count other files..."
+        python3 "$CPM_DISK" add "$image" $other_files
+    fi
+
+    echo "  Copied $((prl_count + other_count)) files total"
 }
 
 # Show disk contents
@@ -138,8 +158,8 @@ show_contents() {
 
     echo ""
     echo "Disk contents:"
-    cpmls $CPMTOOLS_FLAGS -l -f wbw_hd1k "$image" | head -40
-    local total=$(cpmls $CPMTOOLS_FLAGS -f wbw_hd1k "$image" | wc -l)
+    python3 "$CPM_DISK" list "$image" | head -43
+    local total=$(python3 "$CPM_DISK" list "$image" | tail -n +3 | wc -l)
     if [ "$total" -gt 40 ]; then
         echo "  ... and $((total - 40)) more files"
     fi
@@ -153,6 +173,7 @@ usage() {
 Usage: $0 [options] [output.img]
 
 Create an hd1k (8MB) disk image with MP/M II files.
+Uses cpm_disk.py for proper SYS attribute handling on .PRL files.
 
 Options:
     -h, --help      Show this help message
@@ -160,6 +181,7 @@ Options:
     -o, --output    Output image path (default: disks/mpm2_hd1k.img)
     --no-disk1      Don't include files from MPMII_1.img
     --no-disk2      Don't include files from MPMII_2.img
+    --no-dist       Don't include additional files from mpm2dist directory
     --empty         Create empty formatted disk only
 
 The hd1k format provides:
@@ -169,8 +191,8 @@ The hd1k format provides:
     - No sector skew
 
 Environment:
-    DISKDEFS        Path to RomWBW diskdefs file for cpmtools
-                    Default: \$HOME/esrc/RomWBW-v3.5.1/Tools/cpmtools/diskdefs
+    CPM_DISK        Path to cpm_disk.py utility
+                    Default: \$HOME/src/cpmemu/util/cpm_disk.py
 
 Example:
     $0                          # Create default disk
@@ -185,6 +207,7 @@ EOF
 OUTPUT="$OUTPUT_DIR/mpm2_hd1k.img"
 INCLUDE_DISK1=1
 INCLUDE_DISK2=1
+INCLUDE_DIST=1
 EMPTY_ONLY=0
 
 while [ $# -gt 0 ]; do
@@ -206,6 +229,10 @@ while [ $# -gt 0 ]; do
             ;;
         --no-disk2)
             INCLUDE_DISK2=0
+            shift
+            ;;
+        --no-dist)
+            INCLUDE_DIST=0
             shift
             ;;
         --empty)
@@ -251,6 +278,11 @@ fi
 
 if [ $INCLUDE_DISK2 -eq 1 ]; then
     extract_files "$MPM2_DISKS/MPMII_2.img" "$TEMP_DIR"
+fi
+
+# Add files from mpm2dist directory (fills in missing files)
+if [ $INCLUDE_DIST -eq 1 ]; then
+    copy_dist_files "$MPM2_DIST" "$TEMP_DIR"
 fi
 
 # Copy all extracted files to hd1k

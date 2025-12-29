@@ -24,6 +24,7 @@ ASM_DIR="$PROJECT_DIR/asm"
 DISKS_DIR="$PROJECT_DIR/disks"
 CPMEMU="${CPMEMU:-$HOME/src/cpmemu/src/cpmemu}"
 WORK_DIR="/tmp/gensys_work"
+CPM_DISK="${CPM_DISK:-$HOME/src/cpmemu/util/cpm_disk.py}"
 
 # Number of consoles (default 4)
 # must match asm/bnkxio.asm:
@@ -42,6 +43,12 @@ if [ ! -x "$CPMEMU" ]; then
     exit 1
 fi
 
+if [ ! -f "$CPM_DISK" ]; then
+    echo "Error: cpm_disk.py not found at $CPM_DISK"
+    echo "Set CPM_DISK environment variable to cpm_disk.py path"
+    exit 1
+fi
+
 if [ ! -f "$DISKS_DIR/mpm2_hd1k.img" ]; then
     echo "Error: mpm2_hd1k.img not found. Run scripts/build_hd1k.sh first"
     exit 1
@@ -51,16 +58,10 @@ fi
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
 
-# Copy diskdefs to work directory (cpmtools looks for local diskdefs first)
-if [ -f "$PROJECT_DIR/diskdefs" ]; then
-    cp "$PROJECT_DIR/diskdefs" diskdefs
-fi
-
 # Extract required SPR files from distribution disk
 echo "Extracting SPR files from distribution..."
-for file in resbdos.spr bnkbdos.spr xdos.spr bnkxdos.spr tmp.spr gensys.com; do
-    cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm2_hd1k.img" "0:$file" .
-done
+python3 "$CPM_DISK" extract -o . "$DISKS_DIR/mpm2_hd1k.img" \
+    resbdos.spr bnkbdos.spr xdos.spr bnkxdos.spr tmp.spr gensys.com
 
 # Copy our custom BNKXIOS.SPR (port-based I/O for emulator)
 if [ -f "$ASM_DIR/bnkxios.spr" ]; then
@@ -139,7 +140,7 @@ echo "MPM.SYS created ($(wc -c < mpm.sys | tr -d ' ') bytes)"
 
 # Get serial number from RESBDOS.SPR and patch MPMLDR.COM
 echo "Patching MPMLDR.COM serial number..."
-cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm2_hd1k.img" "0:mpmldr.com" mpmldr.com
+python3 "$CPM_DISK" extract -o . "$DISKS_DIR/mpm2_hd1k.img" mpmldr.com
 
 # Extract serial from RESBDOS.SPR
 # The serial is 6 bytes after "RESEARCH " at offset 0x1F9-0x1FE: 00 14 01 00 05 68
@@ -161,57 +162,26 @@ echo "Creating boot image..."
 
 # Copy files to project
 echo "Saving files to project..."
-cp mpm.sys "$DISKS_DIR/mpm_${NMBCNS}con.sys"
-cp mpmldr.com "$DISKS_DIR/mpmldr_${NMBCNS}con.com"
-cp boot.bin "$DISKS_DIR/boot_hd1k_${NMBCNS}con.bin"
-cp bnkxios.spr "$ASM_DIR/BNKXIOS_${NMBCNS}con.spr"
+cp mpm.sys "$DISKS_DIR/mpm.sys"
+cp mpmldr.com "$DISKS_DIR/mpmldr.com"
+cp boot.bin "$DISKS_DIR/mpm2boot.bin"
 
 # Create system disk
 echo "Creating system disk..."
-cp "$DISKS_DIR/mpm2_hd1k.img" "$DISKS_DIR/mpm_system_${NMBCNS}con.img"
-cpmrm -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NMBCNS}con.img" "0:mpm.sys" 2>/dev/null || true
-cpmrm -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NMBCNS}con.img" "0:mpmldr.com" 2>/dev/null || true
-cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NMBCNS}con.img" mpm.sys 0:
-cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NMBCNS}con.img" mpmldr.com 0:mpmldr.com
-
-# Fix cpmtools extent bug for hd1k format
-# cpmtools incorrectly writes files >16KB with extent=1 instead of extent=0
-# We need to patch the directory entry for MPM.SYS
-echo "Fixing cpmtools extent issue for MPM.SYS..."
-# MPM.SYS is typically at directory offset 0x4400 after other files
-# Search for "MPM     SYS" and patch the extent byte
-DISK="$DISKS_DIR/mpm_system_${NMBCNS}con.img"
-DIR_START=16384  # 2 tracks * 16 sectors * 512 bytes
-
-# Find MPM.SYS entry (search first 32KB of directory)
-for offset in $(seq $DIR_START 32 $((DIR_START + 32768))); do
-    # Read filename at this offset (bytes 1-11)
-    fname=$(dd if="$DISK" bs=1 skip=$((offset + 1)) count=11 2>/dev/null)
-    if [ "$fname" = "MPM     SYS" ]; then
-        # Found it! Check extent byte (offset + 12)
-        extent=$(dd if="$DISK" bs=1 skip=$((offset + 12)) count=1 2>/dev/null | xxd -p)
-        if [ "$extent" = "01" ]; then
-            echo "  Found MPM.SYS at offset $offset with extent=1"
-            # Patch extent to 0
-            printf '\x00' | dd of="$DISK" bs=1 seek=$((offset + 12)) conv=notrunc 2>/dev/null
-            # Patch RC to cover full file (196 records for 25088 bytes)
-            printf '\xC4' | dd of="$DISK" bs=1 seek=$((offset + 15)) conv=notrunc 2>/dev/null
-            echo "  Patched: extent=0, RC=196"
-        fi
-        break
-    fi
-done
+cp "$DISKS_DIR/mpm2_hd1k.img" "$DISKS_DIR/mpm2_system.img"
+python3 "$CPM_DISK" delete "$DISKS_DIR/mpm2_system.img" mpm.sys mpmldr.com 2>/dev/null || true
+python3 "$CPM_DISK" add "$DISKS_DIR/mpm2_system.img" mpm.sys mpmldr.com
 
 echo ""
 echo "Generation complete!"
 echo ""
 echo "Files created:"
-echo "  Boot image:  $DISKS_DIR/boot_hd1k_${NMBCNS}con.bin"
-echo "  MPM.SYS:     $DISKS_DIR/mpm_${NMBCNS}con.sys"
-echo "  System disk: $DISKS_DIR/mpm_system_${NMBCNS}con.img"
+echo "  Boot image:  $DISKS_DIR/mpm2boot.bin"
+echo "  MPM.SYS:     $DISKS_DIR/mpm.sys"
+echo "  System disk: $DISKS_DIR/mpm2_system.img"
 echo ""
 echo "To run:"
-echo "  $BUILD_DIR/mpm2_emu -b $DISKS_DIR/boot_hd1k_${NMBCNS}con.bin -d A:$DISKS_DIR/mpm_system_${NMBCNS}con.img"
+echo "  $BUILD_DIR/mpm2_emu -b $DISKS_DIR/mpm2boot.bin -d A:$DISKS_DIR/mpm2_system.img"
 echo ""
 echo "Configuration:"
 echo "  - $NMBCNS consoles"

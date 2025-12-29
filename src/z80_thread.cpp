@@ -65,6 +65,7 @@ bool Z80Thread::init(const std::string& boot_image) {
 
         // Set up stack pointer in high memory (will be reset by MPMLDR)
         cpu_->regs.SP.set_pair16(0x0080);
+
     }
 
     return true;

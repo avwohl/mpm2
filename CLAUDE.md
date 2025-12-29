@@ -59,42 +59,13 @@ Manual byte poking leads to subtle errors. Use the tested DISKDEF.LIB macros fro
 
 ### Disk Formats
 
-**IMPORTANT: Use scripts/*.sh scripts to build disks **
+**IMPORTANT: Use scripts/*.sh scripts to build disks. They use cpm_disk.py which creates hd1k images with no sector skew.**
 
-**IMPORTANT: Use the project's custom `diskdefs` file, NOT RomWBW or standard cpmtools diskdefs.**
+The emulator uses disk images with **NO SECTOR SKEW** for simplicity. The hd1k format (8MB hard disk) is the primary supported format:
 
-The emulator uses disk images with **NO SECTOR SKEW** for simplicity. Standard formats like ibm-3740 have skew factor 6, which complicates sector translation. Our custom diskdefs create images with skew=0.
-
-```bash
-# Always use the project diskdefs
-export DISKDEFS=$PWD/diskdefs
-
-# Create 8" SSSD image (for floppy boot)
-dd if=/dev/zero bs=128 count=2002 of=disks/mpm2_sssd.img
-mkfs.cpm -f mpm2-sssd disks/mpm2_sssd.img
-cpmcp -f mpm2-sssd disks/mpm2_sssd.img mpm2_external/mpm2dist/*.* 0:
-
-# Create hd1k image (8MB)
-dd if=/dev/zero bs=1024 count=8192 of=disks/mpm2_hd1k.img
-mkfs.cpm -f mpm2-hd1k disks/mpm2_hd1k.img
-cpmcp -f mpm2-hd1k disks/mpm2_hd1k.img mpm2_external/mpm2dist/*.* 0:
-```
-
-### Custom Diskdefs (diskdefs file)
-
-The project includes a `diskdefs` file with NO SKEW versions of standard formats:
-
-| Format | Description | Geometry |
-|--------|-------------|----------|
-| mpm2-sssd | 8" SSSD (ibm-3740 compatible) | 77 trk, 26 sec, 128 bytes, 1K blocks |
-| mpm2-hd1k | 8MB hard disk | 1024 trk, 16 sec, 512 bytes, 4K blocks |
-
-Both formats have:
-- `skew 0` - no sector interleave
-- `boottrk 2` - 2 reserved system tracks
-- Compatible DPB with LDRBIOS
-
-**DO NOT** use standard ibm-3740 or wbw_hd1k diskdefs - they have sector skew that the emulator doesn't handle.
+| Format | Size | Geometry |
+|--------|------|----------|
+| hd1k | 8MB | 1024 trk, 16 sec, 512 bytes, 4K blocks |
 
 ### LDRBIOS
 
@@ -169,18 +140,20 @@ Options:
   -p, --port PORT       SSH listen port (default: 2222)
   -k, --key FILE        Host key file (default: keys/ssh_host_rsa_key)
   -d, --disk A:FILE     Mount disk image on drive A-P
-  -b, --boot FILE       Boot image file (MPMLDR + LDRBIOS)
-  -s, --sys FILE        Load MPM.SYS directly (recommended)
+  -b, --boot FILE       Boot image file (NOT WORKING - use -s instead)
+  -s, --sys FILE        Load MPM.SYS directly (recommended, only working method)
   -l, --local           Enable local console output
   -t, --timeout SECS    Boot timeout for debugging
 
 Examples:
-  # Standard boot (uses MPMLDR)
-  ./mpm2_emu -d A:system.dsk -d B:work.dsk -b mpm2boot.bin
+  # Direct MPM.SYS load (recommended - the only working boot method)
+  ./mpm2_emu -l -s disks/mpm.sys -d A:disks/mpm2_system.img
 
-  # Direct MPM.SYS load (bypasses MPMLDR)
-  ./mpm2_emu -l -s disks/MPM.SYS -d A:system.dsk
+  # With SSH support (no -l flag)
+  ./mpm2_emu -s disks/mpm.sys -d A:disks/mpm2_system.img
 ```
+
+**Note:** Boot via MPMLDR (`-b` option) is not currently working. The emulator cannot properly handle MPMLDR's boot sequence. Use direct MPM.SYS loading (`-s` option) instead.
 
 Connect via SSH:
 ```bash
@@ -188,6 +161,8 @@ ssh -p 2222 user@localhost
 ```
 
 ## Boot Process - The Four Layers
+
+**Note:** This section documents the theoretical boot process. The MPMLDR-based boot (`-b` option) is not currently working in the emulator. Use direct MPM.SYS loading (`-s` option) instead.
 
 MP/M II boot involves four distinct software layers. **Each layer uses different BIOS code.**
 
@@ -263,33 +238,7 @@ Disk format is auto-detected based on file size:
 
 The **hd1k** format (from RomWBW) is recommended for MP/M II due to its larger size and directory capacity.
 
-### Working with Disk Images
-
-Use the project's `diskdefs` file (no skew) for all disk operations:
-
-```bash
-export DISKDEFS=$PWD/diskdefs
-
-# Create 8" SSSD boot disk with MP/M II files
-dd if=/dev/zero bs=128 count=2002 of=disks/mpm2_sssd.img
-mkfs.cpm -f mpm2-sssd disks/mpm2_sssd.img
-cpmcp -f mpm2-sssd disks/mpm2_sssd.img mpm2_external/mpm2dist/*.* 0:
-
-# List files (use -T raw on macOS)
-cpmls -f mpm2-sssd disks/mpm2_sssd.img
-
-# Copy a single file
-cpmcp -f mpm2-sssd disks/mpm2_sssd.img myfile.com 0:
-```
-
-For hd1k (8MB) images:
-```bash
-dd if=/dev/zero bs=1024 count=8192 of=disks/mpm2_hd1k.img
-mkfs.cpm -f mpm2-hd1k disks/mpm2_hd1k.img
-cpmcp -f mpm2-hd1k disks/mpm2_hd1k.img mpm2_external/mpm2dist/*.* 0:
-```
-
-### Using cpm_disk.py (Recommended)
+### Working with Disk Images (cpm_disk.py)
 
 The upstream cpmemu project provides `cpm_disk.py` for disk management. It creates hd1k images without sector skew:
 
@@ -377,7 +326,6 @@ mpm2/
 ├── CMakeLists.txt
 ├── CLAUDE.md
 ├── README.md
-├── diskdefs              # Custom cpmtools diskdefs (NO SKEW)
 ├── asm/
 │   ├── ldrbios.asm       # Loader BIOS for 8" SSSD (floppy)
 │   ├── bnkxios.asm       # Banked XIOS (I/O port dispatch)
@@ -419,8 +367,8 @@ mpm2/
 ## External Dependencies
 
 - **qkz80**: Z80 CPU emulator (symlinked from ../cpmemu/src/)
+- **cpm_disk.py**: Disk image utility (from ../cpmemu/util/)
 - **um80/ul80**: MACRO-80 compatible assembler/linker (from ../um80_and_friends/)
-- **cpmtools**: CP/M disk image utilities (with RomWBW diskdefs for hd1k format)
 - **wolfSSH**: SSH server library (optional)
 - **mpm2_external/**: MP/M II distribution and documentation
 

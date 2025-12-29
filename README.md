@@ -7,9 +7,11 @@ A Z80-based MP/M II emulator with SSH terminal access. Multiple users can connec
 ```bash
 # After setting up dependencies (see below)
 ./scripts/build_all.sh
-./build/mpm2_emu -b disks/boot_hd1k_4con.bin -d A:disks/mpm_system_4con.img
 
-# Connect from another terminal
+# Run with direct MPM.SYS loading (recommended)
+./build/mpm2_emu -l -s disks/mpm.sys -d A:disks/mpm2_system.img
+
+# Connect from another terminal (if SSH enabled)
 ssh -p 2222 user@localhost
 ```
 
@@ -41,20 +43,6 @@ cd ..
 
 # MP/M II distribution files (required) - contact maintainer for access
 # Should be placed in mpm2/mpm2_external/
-```
-
-### RomWBW Disk Definitions
-
-The build scripts need RomWBW's diskdefs file for the hd1k disk format:
-
-```bash
-# Download RomWBW (only need the diskdefs file)
-cd ~/esrc  # or any location
-wget https://github.com/wwarthen/RomWBW/releases/download/v3.5.1/RomWBW-v3.5.1.zip
-unzip RomWBW-v3.5.1.zip
-
-# Set environment variable (add to ~/.bashrc or ~/.zshrc)
-export DISKDEFS="$HOME/esrc/RomWBW-v3.5.1/Tools/cpmtools/diskdefs"
 ```
 
 ### Optional: SSH Support
@@ -121,25 +109,21 @@ Options:
   -p, --port PORT       SSH listen port (default: 2222)
   -k, --key FILE        Host key file (default: keys/ssh_host_rsa_key)
   -d, --disk A:FILE     Mount disk image on drive A-P
-  -b, --boot FILE       Boot image file (MPMLDR + LDRBIOS)
+  -b, --boot FILE       Boot image file (NOT WORKING - use -s instead)
   -s, --sys FILE        Load MPM.SYS directly (recommended)
   -l, --local           Enable local console output
   -t, --timeout SECS    Boot timeout for debugging
   -h, --help            Show help
 
 Examples:
-  # Standard boot with SSH (uses MPMLDR)
-  ./build/mpm2_emu -b disks/boot_hd1k_4con.bin -d A:disks/mpm_system_4con.img
+  # Direct MPM.SYS load (recommended - the only working boot method)
+  ./build/mpm2_emu -l -s disks/mpm.sys -d A:disks/mpm2_system.img
 
-  # Direct MPM.SYS load (bypasses MPMLDR)
-  ./build/mpm2_emu -l -s disks/MPM.SYS -d A:disks/mpm_system_4con.img
-
-  # With local console output
-  ./build/mpm2_emu -l -b disks/boot_hd1k_4con.bin -d A:disks/mpm_system_4con.img
-
-  # Debug with 5 second timeout
-  ./build/mpm2_emu -t 5 -l -b disks/boot_hd1k_4con.bin -d A:disks/mpm_system_4con.img
+  # With SSH support (no -l flag)
+  ./build/mpm2_emu -s disks/mpm.sys -d A:disks/mpm2_system.img
 ```
+
+**Note:** Boot via MPMLDR (`-b` option) is not currently working. Use direct MPM.SYS loading (`-s` option) instead.
 
 Connect via SSH:
 ```bash
@@ -183,9 +167,6 @@ The disk needs a valid MPM.SYS matching the LDRBIOS disk format. Run `./scripts/
 
 ### Build fails with "um80 not found"
 Install um80/ul80: `pip install -e path/to/um80_and_friends`
-
-### Build fails with "diskdefs not found"
-Set `DISKDEFS` environment variable to RomWBW diskdefs path.
 
 ### SSH connection refused
 Ensure the emulator is running and check if port 2222 is available.

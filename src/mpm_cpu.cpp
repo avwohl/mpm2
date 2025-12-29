@@ -68,57 +68,7 @@ void MpmCpu::handle_xios_dispatch() {
     }
 
     // Function offset is in A register (from OUT (port), A instruction)
-    // For functions that don't use BC as a 16-bit value, B may also have the function.
-    // We prefer A since that's what OUT actually outputs.
-    uint8_t func = regs.AF.get_high();  // A register
-
-    // Trace BOOT function calls (disabled for cleaner output)
-    // if (func == 0x00) {
-    //     std::cerr << "[XIOS DISPATCH] BOOT called, PC=0x" << std::hex
-    //               << regs.PC.get_pair16() << std::dec << std::endl;
-    // }
-
-    // Trace key functions: SYSINIT(0x45), STRTCLK(0x39), PDISP(0x54), XDOS(0x57)
-    // (disabled for cleaner output)
-    // if (func == 0x39 || func == 0x45 || func == 0x54 || func == 0x57) {
-    //     std::cerr << "[XIOS KEY] func=0x" << std::hex << (int)func
-    //               << " PC=0x" << regs.PC.get_pair16()
-    //               << " C=" << (int)regs.BC.get_low()
-    //               << std::dec << std::endl;
-    // }
-
-    // Log all XIOS calls (disabled for cleaner output)
-    // static int xios_log_count = 0;
-    // if (xios_log_count++ < 200) {
-    //     std::cerr << "[XIOS #" << xios_log_count << "] func=0x" << std::hex << (int)func
-    //               << " PC=0x" << regs.PC.get_pair16()
-    //               << std::dec << std::endl;
-    // }
-
-
-    // Debug trace - trace dispatches with unknown functions
-    if (func != 0x00 && func != 0x03 && func != 0x06 && func != 0x09 &&
-        func != 0x0C && func != 0x0F && func != 0x12 && func != 0x15 &&
-        func != 0x18 && func != 0x1B && func != 0x1E && func != 0x21 &&
-        func != 0x24 && func != 0x27 && func != 0x2A && func != 0x2D &&
-        func != 0x30 && func != 0x33 && func != 0x36 && func != 0x39 &&
-        func != 0x3C && func != 0x3F && func != 0x42 && func != 0x45 &&
-        func != 0x48 && func != 0x4B && func != 0x4E && func != 0x51 &&
-        func != 0x54 && func != 0x57) {
-        std::cerr << "[XIOS DISPATCH] Unknown func=0x" << std::hex << (int)func
-                  << " BC=0x" << regs.BC.get_pair16()
-                  << " DE=0x" << regs.DE.get_pair16()
-                  << " HL=0x" << regs.HL.get_pair16()
-                  << " PC=0x" << regs.PC.get_pair16()
-                  << std::dec << std::endl;
-        // Dump FC00-FC30 to see if xios_port code is still there
-        std::cerr << "FC00: ";
-        for (int i = 0; i < 16; i++) std::cerr << std::hex << (int)mem->fetch_mem(0xFC00 + i) << " ";
-        std::cerr << std::endl;
-        std::cerr << "FC7F: ";
-        for (int i = 0; i < 16; i++) std::cerr << std::hex << (int)mem->fetch_mem(0xFC7F + i) << " ";
-        std::cerr << std::endl;
-    }
+    uint8_t func = regs.AF.get_high();
 
     // Dispatch to XIOS handler
     // The handler will set result registers (A, HL, etc.)

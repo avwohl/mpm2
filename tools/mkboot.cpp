@@ -103,16 +103,34 @@ int main(int argc, char* argv[]) {
     image[0x0004] = 0x00;
 
     // 0x0005: JP to BDOS entry
-    // MPMLDR has its own LDRBDOS at 0x0D00 - we don't need to redirect
-    // But we set a BDOS address for compatibility
+    // MPMLDR has its own LDRBDOS at 0x032E (found by searching for the
+    // BDOS dispatch pattern: LD HL,ret; PUSH HL; LD A,C; CP max; dispatch)
     image[0x0005] = 0xC3;  // JP
-    image[0x0006] = 0x06;
-    image[0x0007] = 0x0D;  // JP 0x0D06 (MPMLDR's internal BDOS)
+    image[0x0006] = 0x2E;
+    image[0x0007] = 0x03;  // JP 0x032E (MPMLDR's internal LDRBDOS)
 
     // RST 7 / RST 38H (0x0038): JP to XIOS tick handler at 0xFC80
     image[0x0038] = 0xC3;  // JP
     image[0x0039] = 0x80;
     image[0x003A] = 0xFC;  // 0xFC80
+
+    // MPMLDR makes direct calls to 0xC300 area (BIOS-like jump table)
+    // Set up a minimal jump table at 0xC300 that redirects to LDRBIOS
+    // 0xC300: JP LDRBIOS+0 (BOOT)
+    // 0xC303: JP LDRBIOS+3 (WBOOT)
+    // ... but MPMLDR uses these for CONOUT etc
+    // Actually, let's just map common entries:
+    // 0xC300 = JP 0x1700 (BOOT)
+    // 0xC303 = JP 0x1703 (WBOOT)
+    // 0xC306 = JP 0x1706 (CONST)
+    // 0xC309 = JP 0x1709 (CONIN)
+    // 0xC30C = JP 0x170C (CONOUT)
+    for (int i = 0; i < 17; i++) {  // Standard 17 BIOS entries
+        image[0xC300 + i*3 + 0] = 0xC3;  // JP
+        image[0xC300 + i*3 + 1] = (0x1700 + i*3) & 0xFF;
+        image[0xC300 + i*3 + 2] = ((0x1700 + i*3) >> 8) & 0xFF;
+    }
+    std::cout << "Set up BIOS redirect table at 0xC300 -> 0x1700\n";
 
     // 0x005C-0x007F: Default FCB (for MPMLDR to find MPM.SYS)
     // Set up FCB for "MPM     SYS" on drive A:
@@ -140,13 +158,28 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        if (mpmldr.size() > 0xF000 - 0x0100) {
+        // MPMLDR.COM from distribution has 128 bytes of zeros at start
+        // NOTE: Boot via MPMLDR (-b option) is not working. Use -s option instead.
+        // The padding skip logic is kept but boot functionality needs debugging.
+        size_t skip = 0;
+        if (mpmldr.size() > 128) {
+            bool all_zeros = true;
+            for (size_t i = 0; i < 128 && all_zeros; i++) {
+                if (mpmldr[i] != 0) all_zeros = false;
+            }
+            if (all_zeros && mpmldr[128] != 0) {
+                skip = 128;
+                std::cout << "Skipping 128-byte zero header in MPMLDR\n";
+            }
+        }
+        size_t load_size = mpmldr.size() - skip;
+        if (load_size > 0xF000 - 0x0100) {
             std::cerr << "Error: MPMLDR too large\n";
             return 1;
         }
 
-        std::memcpy(&image[0x0100], mpmldr.data(), mpmldr.size());
-        std::cout << "Loaded MPMLDR at 0x0100 (" << mpmldr.size() << " bytes)\n";
+        std::memcpy(&image[0x0100], mpmldr.data() + skip, load_size);
+        std::cout << "Loaded MPMLDR at 0x0100 (" << load_size << " bytes)\n";
     }
 
     // Load LDRBIOS at 0x1700 (as expected by MPMLDR's LDRBDOS)
