@@ -317,7 +317,6 @@ void XIOS::do_systeminit() {
         mem_->write_bank(bank, 0x0006, xdos_entry & 0xFF);
         mem_->write_bank(bank, 0x0007, (xdos_entry >> 8) & 0xFF);
     }
-    std::cerr << "[SYSINIT] Set up address 5 in all banks: JP " << std::hex << xdos_entry << std::dec << "\n";
 
     // Copy interrupt vector from current bank to all other banks
     // The Z80 code wrote JP INTHND to 0x0038-0x003A, but only in the current bank.
