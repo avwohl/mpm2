@@ -172,11 +172,11 @@ void XIOS::do_conout() {
     uint8_t console = cpu_->regs.DE.get_high();  // D = console number
     uint8_t ch = cpu_->regs.BC.get_low();        // C = character
 
-    // Debug: trace non-console-0 output
+    // Debug: trace all console output
     if (g_debug_enabled) {
         static int conout_debug = 0;
-        if (console != 0 && conout_debug++ < 10 && ch >= 0x20 && ch < 0x7F) {
-            std::cerr << "[CONOUT] console=" << (int)console << " char='" << (char)ch << "'\n";
+        if (conout_debug++ < 100 && ch >= 0x20 && ch < 0x7F) {
+            std::cerr << "[CONOUT] c=" << (int)console << " '" << (char)ch << "'\n";
         }
     }
 

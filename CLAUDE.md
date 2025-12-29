@@ -289,6 +289,37 @@ mkfs.cpm -f mpm2-hd1k disks/mpm2_hd1k.img
 cpmcp -f mpm2-hd1k disks/mpm2_hd1k.img mpm2_external/mpm2dist/*.* 0:
 ```
 
+### Using cpm_disk.py (Recommended)
+
+The upstream cpmemu project provides `cpm_disk.py` for disk management. It creates hd1k images without sector skew:
+
+```bash
+# Create new disk image
+../cpmemu/util/cpm_disk.py create -f disks/mpm2_hd1k.img
+
+# Add files with SYS attribute (IMPORTANT for MP/M II!)
+../cpmemu/util/cpm_disk.py add --sys disks/mpm2_hd1k.img mpm2_external/mpm2dist/*.PRL
+../cpmemu/util/cpm_disk.py add --sys disks/mpm2_hd1k.img mpm2_external/mpm2dist/*.SPR
+../cpmemu/util/cpm_disk.py add disks/mpm2_hd1k.img mpm2_external/mpm2dist/MPM.SYS
+
+# List files
+../cpmemu/util/cpm_disk.py list disks/mpm2_hd1k.img
+```
+
+### MP/M II File Attributes (SYS)
+
+**CRITICAL**: MP/M II requires the **SYS attribute** on command files (`.PRL`, `.COM`) in user 0 for them to be found when the TMP (Terminal Message Processor) runs in a different user area.
+
+MP/M II command file search order:
+1. Default user on default drive
+2. User 0 on default drive (**requires SYS attribute**)
+3. Default user on system drive
+4. User 0 on system drive (**requires SYS attribute**)
+
+If you see "DIR?" or similar "command not found" errors, the files likely don't have the SYS attribute set. Use `--sys` flag with `cpm_disk.py add` to set this attribute.
+
+The SYS attribute is bit 7 of the first byte of the extension in the CP/M directory entry (byte 9, e.g., 'P' becomes 0xD0 for a `.PRL` file).
+
 ## Building the XIOS
 
 The XIOS and LDRBIOS are written in Z80 assembly and built using um80/ul80:
