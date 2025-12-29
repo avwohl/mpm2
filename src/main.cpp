@@ -279,6 +279,14 @@ int main(int argc, char* argv[]) {
     std::cout << "Running in local mode only\n\n";
     (void)ssh_port;
     (void)host_key;
+
+    // Auto-enable local mode on all consoles when SSH not available
+    for (int i = 0; i < MAX_CONSOLES; i++) {
+        Console* con = ConsoleManager::instance().get(i);
+        if (con) {
+            con->set_local_mode(true);
+        }
+    }
 #endif
 
     // Start Z80 thread
