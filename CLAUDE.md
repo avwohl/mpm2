@@ -328,16 +328,27 @@ For files to be found, they must be in the **same user area as the console** or 
 ../cpmemu/util/cpm_disk.py add -u 3 disks/mpm2_hd1k.img /path/to/MPM.SYS
 ```
 
-### SYS Attribute (Alternative Approach)
+### MP/M II Command Search Order
 
-The SYS attribute is supposed to allow files in user 0 to be found from any user area. To set SYS attribute:
+When you type a command, CLI.ASM searches in this order:
+
+1. **Current user, current drive**: Try `.PRL` then `.COM`
+2. **User 0, current drive**: Try `.PRL` then `.COM` (only files with SYS attribute)
+3. **User 0, system drive**: Try `.PRL` then `.COM` (only SYS files)
+
+### SYS Attribute
+
+The SYS attribute allows files in user 0 to be found from any user area. To set SYS attribute:
 ```bash
 ../cpmemu/util/cpm_disk.py add --sys disks/mpm2_hd1k.img mpm2_external/mpm2dist/*.PRL
 ```
 
-The SYS attribute is bit 7 of the first byte of the extension in the CP/M directory entry (byte 9, e.g., 'P' becomes 0xD0 for a `.PRL` file).
+**Technical detail**: The SYS attribute is bit 7 of byte 10 in the directory entry (second character of extension). CP/M extension attribute bits:
+- Byte 9 (t1): bit 7 = R/O (Read-Only)
+- Byte 10 (t2): bit 7 = SYS (System)
+- Byte 11 (t3): bit 7 = Archive
 
-**Note**: The SYS attribute search for user 0 files may not work in all MP/M II configurations. If you see "DIR?" errors with SYS-attributed files in user 0, use the user-specific approach above.
+For a `.PRL` file, the 'R' becomes 0xD2 ('R' | 0x80) when SYS is set.
 
 ## Building the XIOS
 
