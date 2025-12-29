@@ -274,11 +274,10 @@ int DiskSystem::read(BankedMemory* mem) {
     uint16_t track = disk->current_track();
     uint16_t phys_sector_size = disk->sector_size();
 
-    // Debug: show disk reads when running commands
-    // Only show reads after system boot (track 2 reads with user-bank DMA addresses)
+    // Debug: show directory reads
     if (g_debug_enabled) {
         static int disk_debug_count = 0;
-        if (track == 2 && dma_addr_ >= 0x8000 && disk_debug_count < 50) {
+        if (track == 2 && disk_debug_count < 20) {
             std::cerr << "[DIR READ] t=" << track << " s=" << logical_sector
                       << " dma=" << std::hex << dma_addr_ << std::dec << std::endl;
             disk_debug_count++;
