@@ -369,7 +369,7 @@ mpm2/
 ├── diskdefs              # Custom cpmtools diskdefs (NO SKEW)
 ├── asm/
 │   ├── ldrbios.asm       # Loader BIOS for 8" SSSD (floppy)
-│   ├── bnkxios.asm  # Banked XIOS (I/O port dispatch)
+│   ├── bnkxios.asm       # Banked XIOS (I/O port dispatch)
 │   └── *.bin, *.SPR      # Generated (in .gitignore)
 ├── include/
 │   ├── banked_mem.h
@@ -387,15 +387,21 @@ mpm2/
 │   ├── ssh_session.cpp
 │   ├── xios.cpp
 │   ├── z80_thread.cpp
-│   └── qkz80*.{h,cc} -> symlinks to cpmemu
+│   └── mpm_cpu.cpp
+├── tools/
+│   ├── mkboot.cpp        # Creates boot image from LDRBIOS + MPMLDR
+│   └── patchmpm.cpp      # Patches serial numbers in MPMLDR
 ├── scripts/
-│   ├── build_all.sh    # Master build (runs all steps)
-│   ├── build_asm.sh    # Assemble Z80, build C++
-│   ├── build_hd1k.sh   # Create hd1k disk images
-│   └── gensys.sh       # Run GENSYS to create MPM.SYS
-├── disks/              # Generated disk/boot images (in .gitignore)
-├── build/              # CMake build directory
-├── mpm2_external/      # MP/M II distribution (not in git)
+│   ├── build_all.sh      # Master build (runs all steps)
+│   ├── build_asm.sh      # Assemble Z80, build C++
+│   ├── build_hd1k.sh     # Create hd1k disk images
+│   └── gensys.sh         # Run GENSYS to create MPM.SYS
+├── archive/              # Unused/experimental tools (kept for reference)
+│   ├── tools/            # mkspr, mkdisk, mkmpm, etc.
+│   └── scripts/          # fix_extents.sh, etc.
+├── disks/                # Generated disk/boot images (in .gitignore)
+├── build/                # CMake build directory
+├── mpm2_external/        # MP/M II distribution (not in git)
 └── keys/
     └── ssh_host_rsa_key (generated)
 ```
