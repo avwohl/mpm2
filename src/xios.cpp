@@ -24,11 +24,18 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
 }
 
 void XIOS::handle_port_dispatch(uint8_t func) {
-    // Port-based dispatch: function offset written to port E0
-    // The A register contains the XIOS function offset (0, 3, 6, 9, etc.)
-
     // Temporarily set skip_ret flag so handlers don't do RET
     skip_ret_ = true;
+
+    // Trace function dispatches
+    static int dispatch_count = 0;
+    dispatch_count++;
+    // Only trace SWTUSER, SWTSYS, POLLDEVICE, CONIN, and first 200 calls
+    if (func == XIOS_SWTUSER || func == XIOS_SWTSYS || func == XIOS_POLLDEVICE ||
+        func == XIOS_CONIN || dispatch_count <= 200) {
+        std::cerr << "[DISP #" << dispatch_count << "] func=0x" << std::hex << (int)func
+                  << " PC=0x" << cpu_->regs.PC.get_pair16() << std::dec << "\n";
+    }
 
     switch (func) {
         case XIOS_BOOT:      do_boot(); break;
@@ -108,12 +115,15 @@ void XIOS::do_const() {
     if (con) {
         status = con->const_status();
     }
-    // Debug: show when input is available
-    static int last_status[8] = {0};
-    if (console < 8 && status != last_status[console]) {
-        std::cerr << "[CONST] con=" << (int)console << " status=" << (status ? "READY" : "empty") << "\n";
-        last_status[console] = status;
+
+    // Trace console status polling
+    static int const_count = 0;
+    const_count++;
+    if (const_count <= 20) {
+        std::cerr << "[CONST #" << const_count << "] console=" << (int)console
+                  << " status=" << (status ? "ready" : "empty") << "\n";
     }
+
     cpu_->regs.AF.set_high(status);
     do_ret();
 }
@@ -125,9 +135,6 @@ void XIOS::do_conin() {
     uint8_t ch = 0x1A;  // EOF default
     if (con) {
         ch = con->read_char();
-        if (ch != 0x00) {
-            std::cerr << "[CONIN] con=" << (int)console << " ch=0x" << std::hex << (int)ch << std::dec << "\n";
-        }
     }
     cpu_->regs.AF.set_high(ch);
     do_ret();
@@ -135,16 +142,16 @@ void XIOS::do_conin() {
 
 void XIOS::do_conout() {
     // D = console number (MP/M II XIOS convention), C = character
-    // Use D register (high byte of DE) for console number
     uint8_t console = cpu_->regs.DE.get_high();  // D = console number
     uint8_t ch = cpu_->regs.BC.get_low();        // C = character
 
-    // Debug: show first few CONOUT calls to verify
-    static int debug_count = 0;
-    if (debug_count++ < 20) {
-        uint16_t pc = cpu_->regs.PC.get_pair16();
-        std::cerr << "[do_conout] skip_ret=" << skip_ret_ << " pc=0x" << std::hex << pc
-                  << " console=" << std::dec << (int)console << " ch=0x" << std::hex << (int)ch << std::dec << "\n";
+    // Trace all console output
+    static int out_count = 0;
+    out_count++;
+    if (out_count <= 200) {
+        std::cerr << "[CONOUT #" << out_count << "] console=" << (int)console
+                  << " ch=0x" << std::hex << (int)ch << std::dec
+                  << " '" << (char)(ch >= 32 && ch < 127 ? ch : '.') << "'\n";
     }
 
     // Get the specified console
@@ -185,96 +192,21 @@ void XIOS::do_home() {
 }
 
 void XIOS::do_seldsk() {
+    // Select disk - validates disk and returns success/error in A
+    // Z80 code calculates DPH address from its own DPH_TABLE
     uint8_t disk = cpu_->regs.BC.get_low();  // C = disk number
 
-    // Debug: trace disk selection
-    std::cout << "[SELDSK] disk=" << (int)disk << " (" << (char)('A' + disk) << ":)" << std::endl;
-
-    // Check if disk is valid (mounted)
-    if (!DiskSystem::instance().select(disk)) {
-        std::cout << "[SELDSK] disk " << (char)('A' + disk) << ": not mounted, returning error" << std::endl;
-        if (!skip_ret_) {
-            cpu_->regs.HL.set_pair16(0x0000);  // Error - no such disk (only for PC-based)
-        }
+    // Check if disk is valid (mounted and within range)
+    if (disk >= 4 || !DiskSystem::instance().select(disk)) {
+        std::cerr << "[SELDSK] disk=" << (int)disk << " -> ERROR (not mounted)\n";
+        cpu_->regs.AF.set_high(0xFF);  // Return error
         do_ret();
         return;
     }
 
     current_disk_ = disk;
-
-    // For port dispatch (LDRBIOS), don't modify HL - caller has its own DPH tables
-    if (skip_ret_) {
-        return;  // Just track disk selection, LDRBIOS calculates its own DPH
-    }
-
-    // Set up DPH and DPB structures in memory
-    // DPH table is at XIOS_BASE + 0x100 (0xFD00 by default)
-    // Each DPH is 16 bytes, DPB is 15 bytes
-    uint16_t dph_addr = xios_base_ + 0x100 + (disk * 32);  // 32 bytes per disk (DPH+DPB)
-    uint16_t dpb_addr = dph_addr + 16;
-    uint16_t dirbuf_addr = xios_base_ + 0x80;  // Common directory buffer
-
-    // Get disk parameters
-    Disk* dsk = DiskSystem::instance().get(disk);
-    if (!dsk) {
-        cpu_->regs.HL.set_pair16(0x0000);
-        do_ret();
-        return;
-    }
-
-    // Write DPH (16 bytes)
-    // +0: XLT (sector translation table, 0 = no translation)
-    mem_->store_mem(dph_addr + 0, 0x00);
-    mem_->store_mem(dph_addr + 1, 0x00);
-    // +2: scratch (6 bytes)
-    for (int i = 2; i < 8; i++) mem_->store_mem(dph_addr + i, 0x00);
-    // +8: DIRBUF
-    mem_->store_mem(dph_addr + 8, dirbuf_addr & 0xFF);
-    mem_->store_mem(dph_addr + 9, (dirbuf_addr >> 8) & 0xFF);
-    // +10: DPB pointer
-    mem_->store_mem(dph_addr + 10, dpb_addr & 0xFF);
-    mem_->store_mem(dph_addr + 11, (dpb_addr >> 8) & 0xFF);
-    // +12: CSV (0 = no check)
-    mem_->store_mem(dph_addr + 12, 0x00);
-    mem_->store_mem(dph_addr + 13, 0x00);
-    // +14: ALV (allocation vector at DPB+15)
-    uint16_t alv_addr = dpb_addr + 15;
-    mem_->store_mem(dph_addr + 14, alv_addr & 0xFF);
-    mem_->store_mem(dph_addr + 15, (alv_addr >> 8) & 0xFF);
-
-    // Write DPB (15 bytes) from disk's detected format
-    const DiskParameterBlock& diskdpb = dsk->dpb();
-    uint16_t spt = diskdpb.spt;
-    uint8_t bsh = diskdpb.bsh;
-    uint8_t blm = diskdpb.blm;
-    uint8_t exm = diskdpb.exm;
-    uint16_t dsm = diskdpb.dsm;
-    uint16_t drm = diskdpb.drm;
-    uint8_t al0 = diskdpb.al0;
-    uint8_t al1 = diskdpb.al1;
-    uint16_t cks = diskdpb.cks;
-    uint16_t off = diskdpb.off;
-
-    std::cout << "[SELDSK] DPB: spt=" << spt << " bsh=" << (int)bsh
-              << " format=" << (int)dsk->format() << std::endl;
-
-    mem_->store_mem(dpb_addr + 0, spt & 0xFF);
-    mem_->store_mem(dpb_addr + 1, (spt >> 8) & 0xFF);
-    mem_->store_mem(dpb_addr + 2, bsh);
-    mem_->store_mem(dpb_addr + 3, blm);
-    mem_->store_mem(dpb_addr + 4, exm);
-    mem_->store_mem(dpb_addr + 5, dsm & 0xFF);
-    mem_->store_mem(dpb_addr + 6, (dsm >> 8) & 0xFF);
-    mem_->store_mem(dpb_addr + 7, drm & 0xFF);
-    mem_->store_mem(dpb_addr + 8, (drm >> 8) & 0xFF);
-    mem_->store_mem(dpb_addr + 9, al0);
-    mem_->store_mem(dpb_addr + 10, al1);
-    mem_->store_mem(dpb_addr + 11, cks & 0xFF);
-    mem_->store_mem(dpb_addr + 12, (cks >> 8) & 0xFF);
-    mem_->store_mem(dpb_addr + 13, off & 0xFF);
-    mem_->store_mem(dpb_addr + 14, (off >> 8) & 0xFF);
-
-    cpu_->regs.HL.set_pair16(dph_addr);
+    std::cerr << "[SELDSK] disk=" << (int)disk << " -> OK\n";
+    cpu_->regs.AF.set_high(0);  // Return success
     do_ret();
 }
 
@@ -282,6 +214,14 @@ void XIOS::do_settrk() {
     // For port dispatch: assembly copies BC to HL before OUT
     // For PC-based dispatch (legacy): BC = track number
     current_track_ = skip_ret_ ? cpu_->regs.HL.get_pair16() : cpu_->regs.BC.get_pair16();
+
+    static int trk_count = 0;
+    trk_count++;
+    if (trk_count <= 20 || current_track_ > 1024) {
+        std::cerr << "[SETTRK #" << trk_count << "] track=" << current_track_
+                  << " HL=0x" << std::hex << cpu_->regs.HL.get_pair16()
+                  << " BC=0x" << cpu_->regs.BC.get_pair16() << std::dec << "\n";
+    }
     do_ret();
 }
 
@@ -372,15 +312,22 @@ void XIOS::do_selmemory() {
     // BC = address of memory descriptor
     // descriptor: base(1), size(1), attrib(1), bank(1)
     uint16_t desc_addr = cpu_->regs.BC.get_pair16();
-    uint8_t bank = mem_->fetch_mem(desc_addr + 3);  // Get bank byte
+    uint8_t d_base = mem_->fetch_mem(desc_addr + 0);
+    uint8_t d_size = mem_->fetch_mem(desc_addr + 1);
+    uint8_t d_attr = mem_->fetch_mem(desc_addr + 2);
+    uint8_t bank = mem_->fetch_mem(desc_addr + 3);
 
-    // Debug: trace bank switches
-    static int switch_count = 0;
-    if (switch_count++ < 20) {
-        std::cerr << "[SELMEMORY] desc=0x" << std::hex << desc_addr
-                  << " bank=" << std::dec << (int)bank
-                  << " PC=0x" << std::hex << cpu_->regs.PC.get_pair16()
-                  << " SP=0x" << cpu_->regs.SP.get_pair16() << std::dec << "\n";
+    static int selmem_count = 0;
+    static uint16_t last_desc = 0;
+    selmem_count++;
+
+    // Log if different descriptor or bank != 0
+    if (desc_addr != last_desc || bank != 0) {
+        std::cerr << "[SELMEM #" << selmem_count << "] desc=0x" << std::hex << desc_addr
+                  << " [base=" << (int)d_base << " size=" << (int)d_size
+                  << " attr=" << (int)d_attr << " bank=" << (int)bank << "]"
+                  << " PC=0x" << cpu_->regs.PC.get_pair16() << std::dec << "\n";
+        last_desc = desc_addr;
     }
 
     mem_->select_bank(bank);
@@ -390,30 +337,32 @@ void XIOS::do_selmemory() {
 void XIOS::do_polldevice() {
     // C = device number to poll
     // Return 0xFF if ready, 0x00 if not
+    // Device numbering per simh XIOS:
+    //   Even devices (0,2,4,6) = console output 0-3
+    //   Odd devices (1,3,5,7) = console input 0-3
+    //   Console number = device / 2
     uint8_t device = cpu_->regs.BC.get_low();
 
-    // Device 0 = printer (always ready for now)
-    // Device 1-4 = console output 0-3
-    // Device 5-8 = console input 0-3
-
-    static int poll_debug_count = 0;
-    if (poll_debug_count++ < 20) {
-        std::cerr << "[POLLDEVICE] device=" << (int)device << "\n";
+    static int poll_count = 0;
+    poll_count++;
+    if (poll_count <= 50) {
+        std::cerr << "[POLL #" << poll_count << "] device=" << (int)device << "\n";
     }
 
     uint8_t result = 0x00;
 
-    if (device == 0) {
-        // Printer - always ready
-        result = 0xFF;
-    } else if (device >= 1 && device <= 4) {
-        // Console output - always ready
-        result = 0xFF;
-    } else if (device >= 5 && device <= 8) {
-        // Console input
-        int console = device - 5;
-        Console* con = ConsoleManager::instance().get(console);
-        if (con && con->const_status()) {
+    if (device < 8) {
+        int console = device / 2;
+        bool is_input = (device & 1) != 0;
+
+        if (is_input) {
+            // Console input - check if character ready
+            Console* con = ConsoleManager::instance().get(console);
+            if (con && con->const_status()) {
+                result = 0xFF;
+            }
+        } else {
+            // Console output - always ready
             result = 0xFF;
         }
     }
@@ -434,16 +383,30 @@ void XIOS::do_stopclock() {
 }
 
 void XIOS::do_exitregion() {
-    // Enable interrupts if not preempted
-    if (!preempted_.load()) {
-        cpu_->regs.IFF1 = 1;
-        cpu_->regs.IFF2 = 1;
+    // Just trace - let the Z80 code handle EI based on its PREEMP variable
+    static int exit_count = 0;
+    exit_count++;
+    if (exit_count <= 20) {
+        std::cerr << "[EXITRGN #" << exit_count << "] IFF1_before=" << (int)cpu_->regs.IFF1 << "\n";
     }
+    // Don't touch IFF here - let Z80's EI instruction handle it
     do_ret();
 }
 
 void XIOS::do_maxconsole() {
-    cpu_->regs.AF.set_high(MAX_CONSOLES);
+    // Return max console number (0-based, so 4 consoles = return 3)
+    // Read from SYSTEM.DAT at offset 1 and subtract 1
+    uint8_t num_consoles = mem_->read_common(0xFF01);  // Number of consoles
+    uint8_t max_num = num_consoles > 0 ? num_consoles - 1 : 0;
+
+    static bool traced = false;
+    if (!traced) {
+        traced = true;
+        std::cerr << "[MAXCON] num_consoles=" << (int)num_consoles
+                  << " returning " << (int)max_num << "\n";
+    }
+
+    cpu_->regs.AF.set_high(max_num);
     do_ret();
 }
 
@@ -451,6 +414,14 @@ void XIOS::do_systeminit() {
     // C = breakpoint RST number
     // DE = breakpoint handler address
     // HL = XIOS direct jump table address
+
+    static int init_count = 0;
+    init_count++;
+    std::cerr << "[SYSINIT #" << init_count << "] C=0x" << std::hex
+              << (int)cpu_->regs.BC.get_low()
+              << " DE=0x" << cpu_->regs.DE.get_pair16()
+              << " HL=0x" << cpu_->regs.HL.get_pair16()
+              << std::dec << "\n";
 
     // Initialize consoles
     ConsoleManager::instance().init();
@@ -463,11 +434,8 @@ void XIOS::do_systeminit() {
     uint8_t vec_0039 = mem_->fetch_mem(0x0039);
     uint8_t vec_003A = mem_->fetch_mem(0x003A);
 
-    std::cerr << "[SYSINIT] Replicating interrupt vector to all banks: "
-              << std::hex << (int)vec_0038 << " " << (int)vec_0039 << " " << (int)vec_003A
-              << std::dec << "\n";
-
-    for (int bank = 0; bank < 8; bank++) {  // Assume max 8 banks
+    // Copy interrupt vector to all other banks so interrupts work regardless of bank
+    for (int bank = 0; bank < 8; bank++) {
         if (bank != current_bank) {
             mem_->write_bank(bank, 0x0038, vec_0038);
             mem_->write_bank(bank, 0x0039, vec_0039);
@@ -475,15 +443,20 @@ void XIOS::do_systeminit() {
         }
     }
 
-    // Auto-start the clock - MP/M II expects timer interrupts for scheduling
+    // IMPORTANT: Enable the clock NOW to allow timer-based preemption.
+    //
+    // The issue: CONBDOS console input (conin) uses a busy-loop that calls
+    // XIOS CONIN repeatedly until a character is available. If TMP starts
+    // running before STARTCLOCK is called, it will busy-loop forever waiting
+    // for console input, preventing Init from creating other TMPs.
+    //
+    // By enabling the clock at SYSINIT, timer interrupts (60Hz) will preempt
+    // the busy-looping TMP, giving Init time slices to complete initialization.
+    //
+    // The Z80 SYSINIT code does EI, so interrupts will be enabled at the CPU
+    // level. We just need to ensure our timer thread delivers the interrupts.
+    std::cerr << "[SYSINIT] Enabling clock for preemptive scheduling\n";
     tick_enabled_.store(true);
-
-    // Force-enable interrupts - the Z80 EI instruction was executed before OUT,
-    // but EI's effect is delayed until after the next instruction.
-    cpu_->regs.IFF1 = 1;
-    cpu_->regs.IFF2 = 1;
-
-    std::cerr << "[SYSINIT] Enabled timer + interrupts, IFF1=" << (int)cpu_->regs.IFF1 << "\n";
 
     do_ret();
 }
@@ -502,6 +475,15 @@ void XIOS::do_swtuser() {
     // BC contains memory descriptor address
     // The descriptor's bank field tells us which bank to switch to
     uint16_t desc_addr = cpu_->regs.BC.get_pair16();
+
+    static int swtuser_count = 0;
+    swtuser_count++;
+    if (swtuser_count <= 20) {
+        uint8_t bank = (desc_addr != 0) ? mem_->fetch_mem(desc_addr + 3) : 0;
+        std::cerr << "[SWTUSER #" << swtuser_count << "] desc=0x" << std::hex << desc_addr
+                  << " bank=" << std::dec << (int)bank << "\n";
+    }
+
     if (desc_addr != 0) {
         uint8_t bank = mem_->fetch_mem(desc_addr + 3);
         mem_->select_bank(bank);
@@ -511,6 +493,11 @@ void XIOS::do_swtuser() {
 
 void XIOS::do_swtsys() {
     // Switch to system bank (bank 0)
+    static int swtsys_count = 0;
+    swtsys_count++;
+    if (swtsys_count <= 20) {
+        std::cerr << "[SWTSYS #" << swtsys_count << "] from bank=" << (int)mem_->current_bank() << "\n";
+    }
     mem_->select_bank(0);
     do_ret();
 }
@@ -519,6 +506,12 @@ void XIOS::do_pdisp() {
     // Process dispatcher entry point - called at end of interrupt handler
     // The Z80 code does EI then JP PDISP, but EI's effect is delayed
     // Re-enable interrupts here to ensure they stay enabled
+    static int pdisp_count = 0;
+    pdisp_count++;
+    if (pdisp_count <= 30) {
+        std::cerr << "[PDISP #" << pdisp_count << "] PC=0x" << std::hex
+                  << cpu_->regs.PC.get_pair16() << std::dec << "\n";
+    }
     cpu_->regs.IFF1 = 1;
     cpu_->regs.IFF2 = 1;
     do_ret();

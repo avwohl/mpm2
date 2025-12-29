@@ -328,12 +328,37 @@ int main(int argc, char* argv[]) {
             }
             restore_terminal();
         } else {
-            // Not a TTY - just wait for shutdown signal
+            // Not a TTY - still read from stdin (for piped input) but with select() for timeout
+            fd_set rfds;
+            bool stdin_eof = false;
             while (!g_shutdown_requested && !z80.timed_out()) {
+                if (stdin_eof) {
+                    // Stdin closed - just sleep until shutdown/timeout
+                    usleep(10000);  // 10ms
+                    continue;
+                }
+                FD_ZERO(&rfds);
+                FD_SET(STDIN_FILENO, &rfds);
                 struct timeval tv;
                 tv.tv_sec = 0;
-                tv.tv_usec = 100000;  // 100ms for faster timeout detection
-                select(0, nullptr, nullptr, nullptr, &tv);
+                tv.tv_usec = 10000;  // 10ms
+                int ret = select(STDIN_FILENO + 1, &rfds, nullptr, nullptr, &tv);
+                if (ret > 0 && FD_ISSET(STDIN_FILENO, &rfds)) {
+                    char ch;
+                    ssize_t n = read(STDIN_FILENO, &ch, 1);
+                    if (n > 0) {
+                        // Broadcast to all local mode consoles
+                        for (int i = 0; i < MAX_CONSOLES; i++) {
+                            Console* con = ConsoleManager::instance().get(i);
+                            if (con && con->is_local()) {
+                                con->input_queue().try_write(static_cast<uint8_t>(ch));
+                            }
+                        }
+                    } else if (n == 0) {
+                        // EOF on stdin - stop reading but don't exit
+                        stdin_eof = true;
+                    }
+                }
             }
         }
     }
@@ -364,12 +389,37 @@ int main(int argc, char* argv[]) {
         }
         restore_terminal();
     } else {
-        // Not a TTY - just wait for shutdown signal
+        // Not a TTY - still read from stdin (for piped input) but with select() for timeout
+        fd_set rfds;
+        bool stdin_eof = false;
         while (!g_shutdown_requested && !z80.timed_out()) {
+            if (stdin_eof) {
+                // Stdin closed - just sleep until shutdown/timeout
+                usleep(10000);  // 10ms
+                continue;
+            }
+            FD_ZERO(&rfds);
+            FD_SET(STDIN_FILENO, &rfds);
             struct timeval tv;
             tv.tv_sec = 0;
-            tv.tv_usec = 100000;  // 100ms for faster timeout detection
-            select(0, nullptr, nullptr, nullptr, &tv);
+            tv.tv_usec = 10000;  // 10ms
+            int ret = select(STDIN_FILENO + 1, &rfds, nullptr, nullptr, &tv);
+            if (ret > 0 && FD_ISSET(STDIN_FILENO, &rfds)) {
+                char ch;
+                ssize_t n = read(STDIN_FILENO, &ch, 1);
+                if (n > 0) {
+                    // Broadcast to all local mode consoles
+                    for (int i = 0; i < MAX_CONSOLES; i++) {
+                        Console* con = ConsoleManager::instance().get(i);
+                        if (con && con->is_local()) {
+                            con->input_queue().try_write(static_cast<uint8_t>(ch));
+                        }
+                    }
+                } else if (n == 0) {
+                    // EOF on stdin - stop reading but don't exit
+                    stdin_eof = true;
+                }
+            }
         }
     }
 #endif

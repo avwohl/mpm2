@@ -77,6 +77,8 @@ CONST:
         ; Console status
         ; Returns A=0 if no char, A=FF if char ready
         ; Dispatch to emulator via I/O port
+        ; D=console number (0 for LDRBIOS)
+        LD      D, 0            ; Console 0
         LD      A, FUNC_CONST
         OUT     (DISPATCH_PORT), A
         RET
@@ -85,6 +87,8 @@ CONIN:
         ; Console input
         ; Returns A=character
         ; Dispatch to emulator via I/O port
+        ; D=console number (0 for LDRBIOS)
+        LD      D, 0            ; Console 0
         LD      A, FUNC_CONIN
         OUT     (DISPATCH_PORT), A
         RET
@@ -93,6 +97,8 @@ CONOUT:
         ; Console output
         ; C=character to output
         ; Dispatch to emulator via I/O port
+        ; D=console number (0 for LDRBIOS - only one console during boot)
+        LD      D, 0            ; Console 0
         LD      A, FUNC_CONOUT
         OUT     (DISPATCH_PORT), A
         RET

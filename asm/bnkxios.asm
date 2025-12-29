@@ -90,7 +90,7 @@ WBOOT:  JP      DO_WBOOT        ; 03h - Warm start
         JP      DO_EXITRGN      ; 3Fh - Exit region
         JP      DO_MAXCON       ; 42h - Max console
         JP      DO_SYSINIT      ; 45h - System init
-        DB      0               ; 48h - Force internal idle dispatch (0 = use PDISP)
+        JP      DO_IDLE         ; 48h - Idle procedure
 
 ; =============================================================================
 ; Commonbase structure - patched by GENSYS, used by XDOS/BNKBDOS
@@ -135,6 +135,31 @@ DO_CONST:
 DO_CONIN:
         ; Console input - D = console number
         ; Returns A = character
+        ; Per MP/M II spec: WAIT until character is available
+CONIN_LOOP:
+        ; First check if character is ready (CONST)
+        LD      A, FUNC_CONST
+        OUT     (XIOS_DISPATCH), A
+        OR      A
+        JR      NZ, CONIN_READY
+
+        ; No character ready - yield via XDOS POLL
+        ; POLL function = 131, device in E
+        ; Console input devices: 1,3,5,7 for consoles 0-3 (device = console*2 + 1)
+        PUSH    DE              ; Save console number
+        LD      A, D            ; Console number (0-3)
+        ADD     A, A            ; A = console * 2
+        INC     A               ; A = console * 2 + 1
+        LD      E, A            ; E = device number
+        LD      C, POLL         ; C = POLL function (131)
+        CALL    XDOS
+        POP     DE              ; Restore console number
+
+        ; After poll returns, check again
+        JR      CONIN_LOOP
+
+CONIN_READY:
+        ; Character is ready - get it
         LD      A, FUNC_CONIN
         OUT     (XIOS_DISPATCH), A
         RET
@@ -170,8 +195,25 @@ DO_HOME:
 DO_SELDSK:
         ; Select disk - C = disk number
         ; Returns HL = DPH address, or 0 if error
+        ; First notify emulator of disk selection
         LD      A, FUNC_SELDSK
         OUT     (XIOS_DISPATCH), A
+        ; Check if emulator returned error (A = 0xFF)
+        CP      0FFH
+        JR      Z, SELDSK_ERR
+        ; Calculate DPH address = DPH_TABLE + (disk * 16)
+        LD      A, C            ; A = disk number
+        RLCA                    ; *2
+        RLCA                    ; *4
+        RLCA                    ; *8
+        RLCA                    ; *16
+        LD      L, A
+        LD      H, 0
+        LD      DE, DPH_TABLE
+        ADD     HL, DE          ; HL = DPH_TABLE + disk*16
+        RET
+SELDSK_ERR:
+        LD      HL, 0           ; Return 0 = error
         RET
 
 DO_SETTRK:
@@ -263,6 +305,9 @@ DO_STOPCLK:
 
 DO_EXITRGN:
         ; Exit region - enable interrupts if not preempted
+        ; Trace via port dispatch
+        LD      A, FUNC_EXITRGN
+        OUT     (XIOS_DISPATCH), A
         LD      A, (PREEMP)
         OR      A
         RET     NZ
@@ -289,6 +334,13 @@ DO_SYSINIT:
         ; Notify emulator
         LD      A, FUNC_SYSINIT
         OUT     (XIOS_DISPATCH), A
+        RET
+
+DO_IDLE:
+        ; Idle procedure - called when no process is ready
+        ; Enable interrupts and wait for the next tick
+        EI
+        HALT                    ; Wait for interrupt
         RET
 
 DO_SWTUSER:
@@ -347,7 +399,10 @@ NOTICK:
         JR      NZ, NOTSEC
 
         ; Reset counter and set flag #2 (1 second flag)
-        LD      (HL), 60
+        ; Note: Load constant from memory because GENSYS incorrectly
+        ; relocates immediate values that look like page numbers (0x3C = 60)
+        LD      A, (CONST60)
+        LD      (HL), A
         LD      C, FLAGSET
         LD      E, 2
         CALL    XDOS
@@ -361,7 +416,8 @@ NOTSEC:
         POP     DE
         POP     BC
         POP     AF
-        EI
+        ; Note: Do NOT enable interrupts here
+        ; The dispatcher enables them when resuming a process
         JP      PDISP           ; Dispatch to next ready process
 
 ; =============================================================================
@@ -371,6 +427,7 @@ NOTSEC:
 TICKN:  DB      0               ; Tick enable flag
 CNT60:  DB      60              ; 60 Hz counter (for 1-second flag)
 PREEMP: DB      0               ; Preempted flag
+CONST60: DB     60              ; Constant 60 for resetting CNT60
 
 ; =============================================================================
 ; Disk Parameter Headers and DPBs

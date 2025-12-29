@@ -130,7 +130,8 @@ rm -f *.rel *.spr *.SPR
 # The emulator's port dispatch handles actual disk I/O regardless of format
 LDRBIOS="ldrbios"
 um80 -o "${LDRBIOS}.rel" "${LDRBIOS}.asm"
-ul80 -o "${LDRBIOS}.bin" "${LDRBIOS}.rel" 
+# LDRBIOS loads at 0x1700, so link with that origin
+ul80 -p 1700 -o "${LDRBIOS}.bin" "${LDRBIOS}.rel" 
 
 echo "  Output: $ASM_DIR/${LDRBIOS}.bin"
 echo "  Emulator handles actual disk format via port dispatch"
@@ -144,7 +145,7 @@ cd "$ASM_DIR"
 
 BNKXIOS="bnkxios"
 um80 -o "${BNKXIOS}.rel" "${BNKXIOS}.asm"
-ul80 --prl -o "${BNKXIOS}.spr" "${BNKXIOS}.rel"
+ul80 --prl -p 0 -o "${BNKXIOS}.spr" "${BNKXIOS}.rel"
 
 echo "  Output: $ASM_DIR/${BNKXIOS}.spr"
 echo ""

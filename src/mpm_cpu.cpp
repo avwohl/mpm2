@@ -82,44 +82,45 @@ void MpmCpu::handle_xios_dispatch() {
     // We prefer A since that's what OUT actually outputs.
     uint8_t func = regs.AF.get_high();  // A register
 
-    // Trace BOOT function calls
-    if (func == 0x00) {
-        std::cerr << "[XIOS DISPATCH] BOOT called, PC=0x" << std::hex
-                  << regs.PC.get_pair16() << std::dec << std::endl;
-    }
+    // Trace BOOT function calls (disabled for cleaner output)
+    // if (func == 0x00) {
+    //     std::cerr << "[XIOS DISPATCH] BOOT called, PC=0x" << std::hex
+    //               << regs.PC.get_pair16() << std::dec << std::endl;
+    // }
 
     // Trace key functions: SYSINIT(0x45), STRTCLK(0x39), PDISP(0x54), XDOS(0x57)
-    if (func == 0x39 || func == 0x45 || func == 0x54 || func == 0x57) {
-        std::cerr << "[XIOS KEY] func=0x" << std::hex << (int)func
-                  << " PC=0x" << regs.PC.get_pair16()
-                  << " C=" << (int)regs.BC.get_low()
-                  << std::dec << std::endl;
-    }
+    // (disabled for cleaner output)
+    // if (func == 0x39 || func == 0x45 || func == 0x54 || func == 0x57) {
+    //     std::cerr << "[XIOS KEY] func=0x" << std::hex << (int)func
+    //               << " PC=0x" << regs.PC.get_pair16()
+    //               << " C=" << (int)regs.BC.get_low()
+    //               << std::dec << std::endl;
+    // }
 
-    // Log all XIOS calls for first 200 calls
-    static int xios_log_count = 0;
-    if (xios_log_count++ < 200) {
-        std::cerr << "[XIOS #" << xios_log_count << "] func=0x" << std::hex << (int)func
-                  << " PC=0x" << regs.PC.get_pair16()
-                  << std::dec << std::endl;
-    }
+    // Log all XIOS calls (disabled for cleaner output)
+    // static int xios_log_count = 0;
+    // if (xios_log_count++ < 200) {
+    //     std::cerr << "[XIOS #" << xios_log_count << "] func=0x" << std::hex << (int)func
+    //               << " PC=0x" << regs.PC.get_pair16()
+    //               << std::dec << std::endl;
+    // }
 
-    // Dump FC00 area after some calls to see if XIOSJMP is populated
-    static int dump_done = 0;
-    static int my_call_count = 0;
-    my_call_count++;
-    if (my_call_count == 500 && !dump_done) {
-        dump_done = 1;
-        std::cerr << "[XIOSJMP DUMP] FC00-FC5F after " << my_call_count << " calls:\n";
-        for (int row = 0; row < 6; row++) {
-            std::cerr << std::hex << std::setfill('0');
-            std::cerr << std::setw(4) << (0xFC00 + row*16) << ": ";
-            for (int i = 0; i < 16; i++) {
-                std::cerr << std::setw(2) << (int)mem->fetch_mem(0xFC00 + row*16 + i) << " ";
-            }
-            std::cerr << std::dec << "\n";
-        }
-    }
+    // Dump FC00 area after some calls to see if XIOSJMP is populated (disabled)
+    // static int dump_done = 0;
+    // static int my_call_count = 0;
+    // my_call_count++;
+    // if (my_call_count == 500 && !dump_done) {
+    //     dump_done = 1;
+    //     std::cerr << "[XIOSJMP DUMP] FC00-FC5F after " << my_call_count << " calls:\n";
+    //     for (int row = 0; row < 6; row++) {
+    //         std::cerr << std::hex << std::setfill('0');
+    //         std::cerr << std::setw(4) << (0xFC00 + row*16) << ": ";
+    //         for (int i = 0; i < 16; i++) {
+    //             std::cerr << std::setw(2) << (int)mem->fetch_mem(0xFC00 + row*16 + i) << " ";
+    //         }
+    //         std::cerr << std::dec << "\n";
+    //     }
+    // }
 
     // Debug trace - trace dispatches with unknown functions
     if (func != 0x00 && func != 0x03 && func != 0x06 && func != 0x09 &&
