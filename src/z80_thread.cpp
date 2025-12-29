@@ -11,6 +11,8 @@
 #include <iostream>
 #include <iomanip>
 
+extern bool g_debug_enabled;
+
 
 Z80Thread::Z80Thread()
     : running_(false)
@@ -285,29 +287,10 @@ bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
         memory_->write_bank(bank, 0x0007, (xdos_entry >> 8) & 0xFF);
     }
 
-    // Patch commonbase PDISP and XDOS entries to point to real XDOS
-    uint16_t xios_base = bnkxios_base * 256;
-    // Layout:
-    //   +0: COLDBOOT (JP DO_BOOT) - returns HL=commonbase, OK as is
-    //   +3: SWTUSER (JP DO_SWTUSER) - bank switch, OK as is
-    //   +6: SWTSYS (JP DO_SWTSYS) - bank switch, OK as is
-    //   +9: PDISP (JP) - MUST point to real XDOS process dispatcher
-    //   +12: XDOS (JP) - MUST point to real XDOS entry at xdos_base
-    //   +15: SYSDAT (DW) - address of system data
-    uint16_t commonbase_addr = xios_base + 0x4B;  // COMMONBASE is at offset 0x4B after 25 JP entries
-    uint16_t real_xdos = xdos_base * 256;
-
-    // XDOS entry at commonbase+12 -> should JP to real XDOS (xdos_base*256)
-    // The JP instruction is: C3 lo hi
-    memory_->write_common(commonbase_addr + 12, 0xC3);  // JP opcode
-    memory_->write_common(commonbase_addr + 13, real_xdos & 0xFF);
-    memory_->write_common(commonbase_addr + 14, (real_xdos >> 8) & 0xFF);
-
-    // PDISP entry at commonbase+9 -> should JP to XDOS+3 (dispatcher entry)
-    uint16_t pdisp_addr = real_xdos + 3;
-    memory_->write_common(commonbase_addr + 9, 0xC3);   // JP opcode
-    memory_->write_common(commonbase_addr + 10, pdisp_addr & 0xFF);
-    memory_->write_common(commonbase_addr + 11, (pdisp_addr >> 8) & 0xFF);
+    // NOTE: The COMMONBASE entries (PDISP at +9, XDOS at +12) are already
+    // correctly patched in the loaded MPM.SYS file by GENSYS. The XDOS entry
+    // at C757 should jump to E79C (the real XDOS BDOS entry), NOT to CE00.
+    // DO NOT overwrite these - they are correct as loaded!
 
     return true;
 }
@@ -379,8 +362,20 @@ void Z80Thread::thread_func() {
             if (xios_->clock_enabled()) {
                 static int tick_count_local = 0;
                 tick_count_local++;
-                // Skip first few ticks to let system initialize
-                if (tick_count_local < 5) continue;
+                // Skip first few ticks to let boot complete initial setup
+                if (tick_count_local < 10) continue;
+                if (g_debug_enabled && (tick_count_local <= 20 || (tick_count_local % 60) == 0)) {
+                    std::cerr << "[TICK] count=" << tick_count_local
+                              << " IFF=" << (int)cpu_->regs.IFF1
+                              << " PC=0x" << std::hex << cpu_->regs.PC.get_pair16() << std::dec << "\n";
+                }
+                // Force-enable interrupts if they're stuck off
+                // MP/M dispatcher should re-enable them, but if it fails to,
+                // we enable them here to ensure timer interrupts can be delivered
+                if (!cpu_->regs.IFF1) {
+                    cpu_->regs.IFF1 = 1;
+                    cpu_->regs.IFF2 = 1;
+                }
                 cpu_->request_rst(7);  // RST 38H
                 xios_->set_preempted(true);
                 xios_->tick();

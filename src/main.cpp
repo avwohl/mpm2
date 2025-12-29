@@ -323,11 +323,12 @@ int main(int argc, char* argv[]) {
                         g_shutdown_requested = 1;
                         break;
                     }
-                    // Send to console 3 - the default active console in MP/M II
-                    // TODO: Make this configurable or auto-detect the active console
-                    Console* con = ConsoleManager::instance().get(3);
-                    if (con && con->is_local()) {
-                        con->input_queue().try_write(static_cast<uint8_t>(ch));
+                    // Send input to ALL consoles - let MP/M decide which TMP gets it
+                    for (int i = 0; i < MAX_CONSOLES; i++) {
+                        Console* con = ConsoleManager::instance().get(i);
+                        if (con && con->is_local()) {
+                            con->input_queue().try_write(static_cast<uint8_t>(ch));
+                        }
                     }
                 } else {
                     // No input available - sleep briefly to avoid busy-wait
@@ -418,11 +419,12 @@ int main(int argc, char* argv[]) {
                 if (n > 0) {
                     // Convert LF to CR for CP/M compatibility
                     if (ch == '\n') ch = '\r';
-                    // Send to console 3 - the default active console in MP/M II
-                    // TODO: Make this configurable or auto-detect the active console
-                    Console* con = ConsoleManager::instance().get(3);
-                    if (con && con->is_local()) {
-                        con->input_queue().try_write(static_cast<uint8_t>(ch));
+                    // Send input to ALL consoles - let MP/M decide which TMP gets it
+                    for (int i = 0; i < MAX_CONSOLES; i++) {
+                        Console* con = ConsoleManager::instance().get(i);
+                        if (con && con->is_local()) {
+                            con->input_queue().try_write(static_cast<uint8_t>(ch));
+                        }
                     }
                 } else if (n == 0) {
                     // EOF on stdin - stop reading but don't exit

@@ -8,6 +8,8 @@
 #include <iostream>
 #include <iomanip>
 
+extern bool g_debug_enabled;
+
 MpmCpu::MpmCpu(qkz80_cpu_mem* memory)
     : qkz80(memory)
 {
@@ -69,6 +71,19 @@ void MpmCpu::handle_xios_dispatch() {
 
     // Function offset is in A register (from OUT (port), A instruction)
     uint8_t func = regs.AF.get_high();
+
+    static int dispatch_count = 0;
+    dispatch_count++;
+    // Check if we're in interrupt handler range (C832-C870 approximately)
+    uint16_t pc = regs.PC.get_pair16();
+    bool in_inthnd = (pc >= 0xC832 && pc <= 0xC870);
+    if (g_debug_enabled && (in_inthnd || dispatch_count <= 50 || (dispatch_count % 1000) == 0)) {
+        std::cerr << "[DISPATCH] func=0x" << std::hex << (int)func
+                  << " PC=0x" << pc << std::dec
+                  << " count=" << dispatch_count;
+        if (in_inthnd) std::cerr << " <INTHND>";
+        std::cerr << "\n";
+    }
 
     // Dispatch to XIOS handler
     // The handler will set result registers (A, HL, etc.)
