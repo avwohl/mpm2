@@ -278,6 +278,75 @@ bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
               << std::setw(4) << std::setfill('0') << entry_point << "H\n"
               << std::dec << std::setfill(' ');
 
+    // Debug: check XIOSJMP table at FC57H (XDOS entry)
+    uint8_t fc57_0 = memory_->fetch_mem(0xFC57);
+    uint8_t fc57_1 = memory_->fetch_mem(0xFC58);
+    uint8_t fc57_2 = memory_->fetch_mem(0xFC59);
+    std::cerr << "[XIOSJMP DEBUG] FC57H (XDOS): " << std::hex
+              << (int)fc57_0 << " " << (int)fc57_1 << " " << (int)fc57_2
+              << " -> target: " << (fc57_1 | (fc57_2 << 8)) << std::dec << "\n";
+
+    // Debug: dump DPB to verify AL0/AL1 values
+    // BNKXIOS is at bnkxios_base, DPB is near the end
+    // Looking for pattern: SPT=64 (0x40), BSH=5, BLM=31, EXM=1, DSM=2039 (0x7F7)
+    std::cerr << "[DPB DEBUG] Searching for DPB in BNKXIOS (base=0x" << std::hex << (bnkxios_base * 256) << "):\n";
+    uint16_t bnkxios_end = rsp_base * 256;
+    for (uint16_t addr = bnkxios_base * 256; addr < bnkxios_end - 16; addr++) {
+        uint16_t spt = memory_->fetch_mem(addr) | (memory_->fetch_mem(addr+1) << 8);
+        uint8_t bsh = memory_->fetch_mem(addr+2);
+        uint8_t blm = memory_->fetch_mem(addr+3);
+        if (spt == 64 && bsh == 5 && blm == 31) {
+            std::cerr << "  Found DPB at 0x" << addr << ":\n";
+            std::cerr << "    SPT=" << spt << " BSH=" << (int)bsh << " BLM=" << (int)blm << "\n";
+            uint8_t exm = memory_->fetch_mem(addr+4);
+            uint16_t dsm = memory_->fetch_mem(addr+5) | (memory_->fetch_mem(addr+6) << 8);
+            uint16_t drm = memory_->fetch_mem(addr+7) | (memory_->fetch_mem(addr+8) << 8);
+            uint8_t al0 = memory_->fetch_mem(addr+9);
+            uint8_t al1 = memory_->fetch_mem(addr+10);
+            std::cerr << "    EXM=" << (int)exm << " DSM=" << dsm << " DRM=" << drm << "\n";
+            std::cerr << "    AL0=0x" << (int)al0 << " AL1=0x" << (int)al1 << "\n";
+
+            // DPH is 10 bytes before DPB address in DPH
+            // DPH structure: XLT(2), scratch(6), DIRBUF(2), DPB(2), CSV(2), ALV(2)
+            // DPB pointer is at offset 10 in DPH
+            // So DPH starts at DPB_address - the offset where we found it in DPH
+            // Actually, we need to find DPH0 and read DIRBUF from it
+            // DPH0 should be before DPB_8MB in memory
+            uint16_t dph0_addr = addr - 6;  // DPB is at offset 10, subtract to get DPH start... no, that's wrong
+            // Let me just search backward for the DPH that points to this DPB
+            for (uint16_t dph = bnkxios_base * 256; dph < addr - 10; dph++) {
+                uint16_t dpb_ptr = memory_->fetch_mem(dph + 10) | (memory_->fetch_mem(dph + 11) << 8);
+                if (dpb_ptr == addr) {
+                    std::cerr << "  Found DPH at 0x" << dph << " pointing to DPB:\n";
+                    uint16_t dirbuf = memory_->fetch_mem(dph + 8) | (memory_->fetch_mem(dph + 9) << 8);
+                    std::cerr << "    DIRBUF=0x" << dirbuf << "\n";
+                    break;
+                }
+            }
+            break;
+        }
+    }
+    std::cerr << std::dec;
+
+    // Debug: check address 5 (BDOS entry) in all banks
+    for (int bank = 0; bank < 4; bank++) {
+        uint8_t b5_0 = memory_->read_bank(bank, 0x0005);
+        uint8_t b5_1 = memory_->read_bank(bank, 0x0006);
+        uint8_t b5_2 = memory_->read_bank(bank, 0x0007);
+        std::cerr << "[BDOS ENTRY] Address 5 in bank " << bank << ": " << std::hex
+                  << (int)b5_0 << " " << (int)b5_1 << " " << (int)b5_2
+                  << " -> target: 0x" << (b5_1 | (b5_2 << 8)) << std::dec << "\n";
+    }
+
+    // Initialize address 5 in all banks with JMP to XDOS
+    uint16_t xdos_entry = xdos_base * 256;
+    for (int bank = 0; bank < 4; bank++) {
+        memory_->write_bank(bank, 0x0005, 0xC3);  // JP opcode
+        memory_->write_bank(bank, 0x0006, xdos_entry & 0xFF);
+        memory_->write_bank(bank, 0x0007, (xdos_entry >> 8) & 0xFF);
+    }
+    std::cerr << "[INIT] Set address 5 in all banks to JP 0x" << std::hex << xdos_entry << std::dec << "\n";
+
     // CRITICAL: Patch commonbase PDISP and XDOS entries to point to real XDOS
     uint16_t xios_base = bnkxios_base * 256;
     uint16_t xiosjmp_base = xios_jmp_tbl_base * 256;
@@ -369,13 +438,6 @@ void Z80Thread::thread_func() {
         if (now >= next_tick_) {
             next_tick_ += TICK_INTERVAL;
 
-            // Debug: count ticks
-            static int tick_counter = 0;
-            tick_counter++;
-            if (tick_counter <= 5 || tick_counter % 60 == 0) {
-                std::cerr << "[TICK #" << tick_counter << "] clock=" << xios_->clock_enabled()
-                          << " IFF=" << (int)cpu_->regs.IFF1 << "\n";
-            }
 
             // Deliver tick interrupt if clock is enabled and interrupts are enabled
             if (xios_->clock_enabled() && cpu_->regs.IFF1) {

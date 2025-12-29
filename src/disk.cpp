@@ -97,8 +97,8 @@ void Disk::set_format(DiskFormat format) {
             dpb_.exm = 1;       // Per DISKDEF.LIB: (BLS/1024-1) >> 1 when DSM>256
             dpb_.dsm = 2039;    // 2040 blocks (8MB - 2 tracks) / 4K
             dpb_.drm = 1023;    // 1024 directory entries
-            dpb_.al0 = 0xFF;
-            dpb_.al1 = 0xFF;
+            dpb_.al0 = 0xFF;    // Blocks 0-7 for directory (1024*32=32KB=8 blocks)
+            dpb_.al1 = 0x00;    // Blocks 8-15 are data
             dpb_.cks = 0;       // No checksum (fixed disk)
             dpb_.off = 2;       // 2 system tracks
             break;
@@ -270,6 +270,15 @@ int DiskSystem::read(BankedMemory* mem) {
     uint16_t logical_sector = disk->current_sector();
     uint16_t track = disk->current_track();
     uint16_t phys_sector_size = disk->sector_size();
+
+    // Debug: show disk reads when running commands
+    // Only show reads after system boot (track 2 reads with user-bank DMA addresses)
+    static int disk_debug_count = 0;
+    if (track == 2 && dma_addr_ >= 0x8000 && disk_debug_count < 50) {
+        std::cerr << "[DIR READ] t=" << track << " s=" << logical_sector
+                  << " dma=" << std::hex << dma_addr_ << std::dec << std::endl;
+        disk_debug_count++;
+    }
 
     // Apply sector skew translation for formats that use it (e.g., ibm-3740)
     uint16_t translated_sector = translate(logical_sector, track);

@@ -181,7 +181,8 @@ int main(int argc, char* argv[]) {
     std::cout << "Initialized " << MAX_CONSOLES << " consoles\n";
 
     // Enable local console mode if requested
-    // Enable on all consoles since MP/M II may use any console for boot output
+    // Enable output on ALL consoles (MP/M II uses multiple consoles for TMPs)
+    // Input will be directed to console 0 only (see input handling below)
     if (local_console) {
         for (int i = 0; i < MAX_CONSOLES; i++) {
             Console* con = ConsoleManager::instance().get(i);
@@ -189,7 +190,7 @@ int main(int argc, char* argv[]) {
                 con->set_local_mode(true);
             }
         }
-        std::cout << "Local console enabled on all " << MAX_CONSOLES << " consoles\n";
+        std::cout << "Local console enabled on all " << MAX_CONSOLES << " consoles (input to console 0)\n";
     }
 
     // Mount disks
@@ -272,6 +273,7 @@ int main(int argc, char* argv[]) {
     (void)host_key;
 
     // Auto-enable local mode on all consoles when SSH not available
+    // Output from all consoles, input to console 0 only
     for (int i = 0; i < MAX_CONSOLES; i++) {
         Console* con = ConsoleManager::instance().get(i);
         if (con) {
@@ -313,7 +315,7 @@ int main(int argc, char* argv[]) {
                         g_shutdown_requested = 1;
                         break;
                     }
-                    // Broadcast to all local mode consoles
+                    // Broadcast to all local consoles - MP/M II may use any console
                     for (int i = 0; i < MAX_CONSOLES; i++) {
                         Console* con = ConsoleManager::instance().get(i);
                         if (con && con->is_local()) {
@@ -346,7 +348,7 @@ int main(int argc, char* argv[]) {
                     char ch;
                     ssize_t n = read(STDIN_FILENO, &ch, 1);
                     if (n > 0) {
-                        // Broadcast to all local mode consoles
+                        // Broadcast to all local consoles - MP/M II may use any console
                         for (int i = 0; i < MAX_CONSOLES; i++) {
                             Console* con = ConsoleManager::instance().get(i);
                             if (con && con->is_local()) {
@@ -362,27 +364,23 @@ int main(int argc, char* argv[]) {
         }
     }
 #else
-    // Local console mode - read from stdin and broadcast to all local consoles
-    std::cerr << "[DEBUG] Entering local console loop\n";
+    // Local console mode - read from stdin and broadcast to all consoles
     if (setup_raw_terminal()) {
-        std::cerr << "[DEBUG] Raw terminal mode enabled\n";
         while (!g_shutdown_requested && !z80.timed_out()) {
             // Poll stdin for input
             char ch;
             ssize_t n = read(STDIN_FILENO, &ch, 1);
             if (n > 0) {
-                std::cerr << "[DEBUG] Got char: 0x" << std::hex << (int)(unsigned char)ch << std::dec << "\n";
                 // Handle Ctrl+C for shutdown
                 if (ch == 0x03) {
                     g_shutdown_requested = 1;
                     break;
                 }
-                // Broadcast to all local mode consoles
+                // Broadcast to all local consoles - MP/M II may use any console
                 for (int i = 0; i < MAX_CONSOLES; i++) {
                     Console* con = ConsoleManager::instance().get(i);
                     if (con && con->is_local()) {
                         con->input_queue().try_write(static_cast<uint8_t>(ch));
-                        std::cerr << "[DEBUG] Queued to console " << i << "\n";
                     }
                 }
             } else {
@@ -392,7 +390,6 @@ int main(int argc, char* argv[]) {
         }
         restore_terminal();
     } else {
-        std::cerr << "[DEBUG] Raw terminal setup failed, using select() loop\n";
         // Not a TTY - still read from stdin (for piped input) but with select() for timeout
         fd_set rfds;
         bool stdin_eof = false;
@@ -412,13 +409,13 @@ int main(int argc, char* argv[]) {
                 char ch;
                 ssize_t n = read(STDIN_FILENO, &ch, 1);
                 if (n > 0) {
-                    std::cerr << "[DEBUG] Select loop got char: 0x" << std::hex << (int)(unsigned char)ch << std::dec << "\n";
-                    // Broadcast to all local mode consoles
+                    // Convert LF to CR for CP/M compatibility
+                    if (ch == '\n') ch = '\r';
+                    // Broadcast to all local consoles - MP/M II may use any console
                     for (int i = 0; i < MAX_CONSOLES; i++) {
                         Console* con = ConsoleManager::instance().get(i);
                         if (con && con->is_local()) {
                             con->input_queue().try_write(static_cast<uint8_t>(ch));
-                            std::cerr << "[DEBUG] Queued to console " << i << "\n";
                         }
                     }
                 } else if (n == 0) {

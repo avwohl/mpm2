@@ -482,6 +482,7 @@ DPH3:
         DW      ALV3
 
 ; Disk Parameter Block for hd1k format (8MB)
+; 1024 dir entries * 32 bytes = 32KB = 8 blocks (0-7)
 DPB_8MB:
         DW      64              ; SPT - 64 sectors per track (128-byte logical)
         DB      5               ; BSH - block shift (4K blocks)
@@ -489,8 +490,8 @@ DPB_8MB:
         DB      1               ; EXM - extent mask
         DW      2039            ; DSM - disk size - 1 in blocks
         DW      1023            ; DRM - directory max - 1
-        DB      0FFH            ; AL0 - 8 directory blocks allocated
-        DB      0FFH            ; AL1
+        DB      0FFH            ; AL0 - blocks 0-7 for directory
+        DB      000H            ; AL1 - blocks 8-15 are data
         DW      0               ; CKS - checksum vector size (0 = fixed disk)
         DW      2               ; OFF - reserved tracks
 

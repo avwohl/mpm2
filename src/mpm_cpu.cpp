@@ -95,22 +95,6 @@ void MpmCpu::handle_xios_dispatch() {
     //               << std::dec << std::endl;
     // }
 
-    // Dump FC00 area after some calls to see if XIOSJMP is populated
-    static int dump_done = 0;
-    static int my_call_count = 0;
-    my_call_count++;
-    if (my_call_count == 500 && !dump_done) {
-        dump_done = 1;
-        std::cerr << "[XIOSJMP DUMP] FC00-FC5F after " << my_call_count << " calls:\n";
-        for (int row = 0; row < 6; row++) {
-            std::cerr << std::hex << std::setfill('0');
-            std::cerr << std::setw(4) << (0xFC00 + row*16) << ": ";
-            for (int i = 0; i < 16; i++) {
-                std::cerr << std::setw(2) << (int)mem->fetch_mem(0xFC00 + row*16 + i) << " ";
-            }
-            std::cerr << std::dec << "\n";
-        }
-    }
 
     // Debug trace - trace dispatches with unknown functions
     if (func != 0x00 && func != 0x03 && func != 0x06 && func != 0x09 &&

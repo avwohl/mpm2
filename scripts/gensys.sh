@@ -22,7 +22,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/build"
 ASM_DIR="$PROJECT_DIR/asm"
 DISKS_DIR="$PROJECT_DIR/disks"
-CPMEMU="${CPMEMU:-/Users/wohl/src/cpmemu/src/cpmemu}"
+CPMEMU="${CPMEMU:-$HOME/src/cpmemu/src/cpmemu}"
 WORK_DIR="/tmp/gensys_work"
 
 # Number of consoles (default 4)
@@ -173,6 +173,34 @@ cpmrm -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NMBCNS}con.img" "0:mpm.sys" 2>
 cpmrm -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NMBCNS}con.img" "0:mpmldr.com" 2>/dev/null || true
 cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NMBCNS}con.img" mpm.sys 0:
 cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm_system_${NMBCNS}con.img" mpmldr.com 0:mpmldr.com
+
+# Fix cpmtools extent bug for hd1k format
+# cpmtools incorrectly writes files >16KB with extent=1 instead of extent=0
+# We need to patch the directory entry for MPM.SYS
+echo "Fixing cpmtools extent issue for MPM.SYS..."
+# MPM.SYS is typically at directory offset 0x4400 after other files
+# Search for "MPM     SYS" and patch the extent byte
+DISK="$DISKS_DIR/mpm_system_${NMBCNS}con.img"
+DIR_START=16384  # 2 tracks * 16 sectors * 512 bytes
+
+# Find MPM.SYS entry (search first 32KB of directory)
+for offset in $(seq $DIR_START 32 $((DIR_START + 32768))); do
+    # Read filename at this offset (bytes 1-11)
+    fname=$(dd if="$DISK" bs=1 skip=$((offset + 1)) count=11 2>/dev/null)
+    if [ "$fname" = "MPM     SYS" ]; then
+        # Found it! Check extent byte (offset + 12)
+        extent=$(dd if="$DISK" bs=1 skip=$((offset + 12)) count=1 2>/dev/null | xxd -p)
+        if [ "$extent" = "01" ]; then
+            echo "  Found MPM.SYS at offset $offset with extent=1"
+            # Patch extent to 0
+            printf '\x00' | dd of="$DISK" bs=1 seek=$((offset + 12)) conv=notrunc 2>/dev/null
+            # Patch RC to cover full file (196 records for 25088 bytes)
+            printf '\xC4' | dd of="$DISK" bs=1 seek=$((offset + 15)) conv=notrunc 2>/dev/null
+            echo "  Patched: extent=0, RC=196"
+        fi
+        break
+    fi
+done
 
 echo ""
 echo "Generation complete!"

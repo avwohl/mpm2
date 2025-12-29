@@ -1,9 +1,9 @@
-; ldrbios.asm - MP/M II Loader BIOS for 8" SSSD (floppy) disks
+; ldrbios.asm - MP/M II Loader BIOS for hd1k (8MB hard disk) format
 ; Part of MP/M II Emulator
 ; SPDX-License-Identifier: GPL-3.0-or-later
 ;
 ; Loader BIOS for the boot phase. Uses I/O port traps.
-; For 8" SSSD (ibm-3740 compatible) format - no skew.
+; For hd1k format: 8MB, 512-byte sectors, 16 sectors/track, 1024 tracks, 4K blocks
 ;
 ; Assemble with: um80 -o ldrbios.rel ldrbios.asm
 
@@ -261,8 +261,8 @@ PRTSTR:
 
 BOOTMSG:
         DB      0DH, 0AH
-        DB      '[LDRBIOS] MP/M II Loader BIOS (8" SSSD)', 0DH, 0AH
-        DB      '[LDRBIOS] DPB: 26 SPT, 1K blocks, 2 reserved tracks', 0DH, 0AH
+        DB      '[LDRBIOS] MP/M II Loader BIOS (hd1k 8MB)', 0DH, 0AH
+        DB      '[LDRBIOS] DPB: 64 SPT, 4K blocks, 2 reserved tracks', 0DH, 0AH
         DB      0
 
 SELDSK_MSG:
@@ -281,13 +281,13 @@ CURDMA: DW      0080H           ; Current DMA address
 ; =============================================================================
 
 DPH_TABLE:
-; DPH for drive A (8" SSSD - no skew)
+; DPH for drive A (hd1k - no skew)
 DPH_A:
         DW      0               ; XLT - no translation
         DW      0, 0, 0         ; Scratch
         DW      DIRBUF          ; DIRBUF
-        DW      DPB_SSSD        ; DPB for 8" SSSD
-        DW      CSV_A           ; CSV
+        DW      DPB_HD1K        ; DPB for hd1k
+        DW      0               ; CSV - not used for fixed disk
         DW      ALV_A           ; ALV
 
 ; DPH for drive B
@@ -295,8 +295,8 @@ DPH_B:
         DW      0
         DW      0, 0, 0
         DW      DIRBUF
-        DW      DPB_SSSD
-        DW      CSV_B
+        DW      DPB_HD1K
+        DW      0
         DW      ALV_B
 
 ; DPH for drive C
@@ -304,8 +304,8 @@ DPH_C:
         DW      0
         DW      0, 0, 0
         DW      DIRBUF
-        DW      DPB_SSSD
-        DW      CSV_C
+        DW      DPB_HD1K
+        DW      0
         DW      ALV_C
 
 ; DPH for drive D
@@ -313,45 +313,41 @@ DPH_D:
         DW      0
         DW      0, 0, 0
         DW      DIRBUF
-        DW      DPB_SSSD
-        DW      CSV_D
+        DW      DPB_HD1K
+        DW      0
         DW      ALV_D
 
 ; =============================================================================
-; Disk Parameter Block for 8" SSSD (ibm-3740)
+; Disk Parameter Block for hd1k (8MB hard disk)
+; 16 sectors/track × 512 bytes = 8KB/track = 64 logical sectors (128 bytes each)
+; 1024 tracks - 2 reserved = 1022 data tracks
+; 4KB blocks, 1024 directory entries
 ; =============================================================================
 
-DPB_SSSD:
-        DW      26              ; SPT - sectors per track
-        DB      3               ; BSH - block shift (1K blocks)
-        DB      7               ; BLM - block mask
-        DB      0               ; EXM - extent mask
-        DW      242             ; DSM - disk size - 1 (243 blocks)
-        DW      63              ; DRM - directory max - 1 (64 entries)
-        DB      0C0H            ; AL0 - first 2 blocks for directory
-        DB      000H            ; AL1
-        DW      16              ; CKS - checksum size
+DPB_HD1K:
+        DW      64              ; SPT - 64 logical sectors per track (128-byte)
+        DB      5               ; BSH - block shift (4K blocks: 2^5 × 128 = 4096)
+        DB      31              ; BLM - block mask (4096/128 - 1 = 31)
+        DB      1               ; EXM - extent mask (for DSM>255 with 4K blocks)
+        DW      2039            ; DSM - disk size - 1 (2040 blocks)
+        DW      1023            ; DRM - directory max - 1 (1024 entries)
+        DB      0FFH            ; AL0 - blocks 0-7 for directory
+        DB      000H            ; AL1 - (8 blocks × 4KB = 32KB for 1024 × 32 byte entries)
+        DW      0               ; CKS - 0 for fixed disk
         DW      2               ; OFF - reserved tracks
 
 ; =============================================================================
-; Buffers for 8" SSSD format
-; DSM=242 -> ALV needs (242/8)+1 = 31 bytes
-; DRM=63  -> CSV needs (63+1)/4 = 16 bytes
+; Buffers for hd1k format
+; DSM=2039 -> ALV needs (2039/8)+1 = 256 bytes
 ; =============================================================================
 
 DIRBUF: DS      128             ; Directory buffer
 
-; Allocation vectors (31 bytes each)
-ALV_A:  DS      31
-ALV_B:  DS      31
-ALV_C:  DS      31
-ALV_D:  DS      31
-
-; Checksum vectors (16 bytes each)
-CSV_A:  DS      16
-CSV_B:  DS      16
-CSV_C:  DS      16
-CSV_D:  DS      16
+; Allocation vectors (256 bytes each for hd1k)
+ALV_A:  DS      256
+ALV_B:  DS      256
+ALV_C:  DS      256
+ALV_D:  DS      256
 
 ; =============================================================================
 ; End of LDRBIOS

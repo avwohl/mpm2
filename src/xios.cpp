@@ -24,19 +24,6 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
 }
 
 void XIOS::handle_port_dispatch(uint8_t func) {
-    // Debug: count XIOS calls after initial boot
-    static int xios_call_count = 0;
-    xios_call_count++;
-    // Show periodic sample and the final count
-    if (xios_call_count == 1000 || xios_call_count == 10000) {
-        std::cerr << "[DEBUG XIOS] Call #" << xios_call_count << " func=0x" << std::hex << (int)func << std::dec << "\n";
-    }
-    static int last_reported = 0;
-    if (xios_call_count - last_reported > 100000) {
-        std::cerr << "[DEBUG XIOS] Total calls so far: " << xios_call_count << "\n";
-        last_reported = xios_call_count;
-    }
-
     // Temporarily set skip_ret flag so handlers don't do RET
     skip_ret_ = true;
 
@@ -119,15 +106,10 @@ void XIOS::do_const() {
         status = con->const_status();
     }
 
-    // Debug: count CONST calls and show when input is available
-    static int const_count = 0;
-    const_count++;
-    if (const_count <= 5 || const_count % 10000 == 0) {
-        std::cerr << "[DEBUG XIOS] CONST #" << const_count << " console=" << (int)console
-                  << " status=0x" << std::hex << (int)status << std::dec << "\n";
-    }
-    if (status != 0x00) {
-        std::cerr << "[DEBUG XIOS] CONST console=" << (int)console << " INPUT READY!\n";
+    // Debug: trace all console polling (first 20 calls per console)
+    static int const_debug[8] = {0};
+    if (console < 8 && const_debug[console]++ < 5) {
+        std::cerr << "[CONST] console=" << (int)console << " status=" << (status ? "ready" : "empty") << "\n";
     }
 
     cpu_->regs.AF.set_high(status);
@@ -143,9 +125,35 @@ void XIOS::do_conin() {
         ch = con->read_char();
     }
 
-    // Debug: show character read
-    if (ch != 0x00) {
-        std::cerr << "[DEBUG XIOS] CONIN console=" << (int)console << " char=0x" << std::hex << (int)ch << std::dec << "\n";
+    // Debug: trace console input and check address 5 when CR received
+    static int conin_debug = 0;
+    if (ch != 0 && ch != 0x1A && conin_debug++ < 20) {
+        std::cerr << "[CONIN] console=" << (int)console << " char='"
+                  << (ch >= 0x20 && ch < 0x7F ? (char)ch : '?') << "' (0x"
+                  << std::hex << (int)ch << std::dec << ")\n";
+        // On CR, check what's at address 5 in current bank and what's at XDOS entry
+        if (ch == 0x0D) {
+            uint8_t bank = mem_->current_bank();
+            uint8_t b0 = mem_->read_bank(bank, 0x0005);
+            uint8_t b1 = mem_->read_bank(bank, 0x0006);
+            uint8_t b2 = mem_->read_bank(bank, 0x0007);
+            std::cerr << "[CONIN CR] bank=" << (int)bank << " addr5: "
+                      << std::hex << (int)b0 << " " << (int)b1 << " " << (int)b2 << std::dec;
+            if (b0 == 0xC3) {
+                uint16_t target = b1 | (b2 << 8);
+                std::cerr << " = JP " << std::hex << target << std::dec;
+                // Also check what's at the target address (XDOS entry)
+                uint8_t xb0 = mem_->fetch_mem(target);
+                uint8_t xb1 = mem_->fetch_mem(target + 1);
+                uint8_t xb2 = mem_->fetch_mem(target + 2);
+                std::cerr << "\n[XDOS " << target << "] " << (int)xb0 << " " << (int)xb1 << " " << (int)xb2;
+                if (xb0 == 0xC3) {
+                    uint16_t xtarget = xb1 | (xb2 << 8);
+                    std::cerr << " = JP " << xtarget;
+                }
+            }
+            std::cerr << "\n";
+        }
     }
 
     cpu_->regs.AF.set_high(ch);
@@ -156,6 +164,12 @@ void XIOS::do_conout() {
     // D = console number (MP/M II XIOS convention), C = character
     uint8_t console = cpu_->regs.DE.get_high();  // D = console number
     uint8_t ch = cpu_->regs.BC.get_low();        // C = character
+
+    // Debug: trace non-console-0 output
+    static int conout_debug = 0;
+    if (console != 0 && conout_debug++ < 10 && ch >= 0x20 && ch < 0x7F) {
+        std::cerr << "[CONOUT] console=" << (int)console << " char='" << (char)ch << "'\n";
+    }
 
     // Get the specified console
     Console* con = ConsoleManager::instance().get(console);
@@ -201,6 +215,7 @@ void XIOS::do_seldsk() {
 
     // Check if disk is valid (mounted and within range)
     if (disk >= 4 || !DiskSystem::instance().select(disk)) {
+        std::cerr << "[SELDSK] disk " << (int)disk << " ERROR (unmounted or out of range)\n";
         cpu_->regs.AF.set_high(0xFF);  // Return error
         do_ret();
         return;
@@ -208,6 +223,7 @@ void XIOS::do_seldsk() {
 
     current_disk_ = disk;
     cpu_->regs.AF.set_high(0);  // Return success
+    // Note: Z80 code sets HL to DPH address after this returns
     do_ret();
 }
 
@@ -281,7 +297,69 @@ void XIOS::do_selmemory() {
     // BC = address of memory descriptor
     // descriptor: base(1), size(1), attrib(1), bank(1)
     uint16_t desc_addr = cpu_->regs.BC.get_pair16();
+    uint8_t base = mem_->fetch_mem(desc_addr);
+    uint8_t size = mem_->fetch_mem(desc_addr + 1);
+    uint8_t attr = mem_->fetch_mem(desc_addr + 2);
     uint8_t bank = mem_->fetch_mem(desc_addr + 3);
+
+    // Debug: trace bank switches and dump memory segment table on first call
+    static int selmem_debug = 0;
+    static bool dumped_segments = false;
+
+    if (!dumped_segments) {
+        dumped_segments = true;
+        std::cerr << "\n[SELMEM] Dumping memory segment table around desc=" << std::hex << desc_addr << ":\n";
+        // Dump 20 4-byte descriptors
+        for (int i = -10; i <= 10; i++) {
+            uint16_t addr = desc_addr + (i * 4);
+            uint8_t b = mem_->fetch_mem(addr);
+            uint8_t s = mem_->fetch_mem(addr + 1);
+            uint8_t a = mem_->fetch_mem(addr + 2);
+            uint8_t bnk = mem_->fetch_mem(addr + 3);
+            std::cerr << "  " << std::hex << std::setw(4) << addr << ": "
+                      << std::setw(2) << (int)b << " " << std::setw(2) << (int)s
+                      << " " << std::setw(2) << (int)a << " " << std::setw(2) << (int)bnk;
+            if (addr == desc_addr) std::cerr << " <-- current desc";
+            std::cerr << std::dec << "\n";
+        }
+        // Also dump SYSDAT area where memory segments might be
+        std::cerr << "\n[SELMEM] SYSDAT (FF00) memory segment info:\n";
+        for (int i = 0; i < 64; i += 4) {
+            uint16_t addr = 0xFF00 + i;
+            std::cerr << "  " << std::hex << addr << ": ";
+            for (int j = 0; j < 4; j++) {
+                std::cerr << std::setw(2) << std::setfill('0') << (int)mem_->fetch_mem(addr + j) << " ";
+            }
+            std::cerr << std::setfill(' ') << std::dec << "\n";
+        }
+        std::cerr << "\n";
+    }
+
+    if (selmem_debug++ < 20) {
+        // Show return address (caller)
+        uint16_t sp = cpu_->regs.SP.get_pair16();
+        uint8_t lo = mem_->fetch_mem(sp);
+        uint8_t hi = mem_->fetch_mem(sp + 1);
+        uint16_t caller = (hi << 8) | lo;
+        std::cerr << "[SELMEM] desc=" << std::hex << desc_addr
+                  << " [base=" << (int)base << " size=" << (int)size
+                  << " attr=" << (int)attr << " bank=" << (int)bank << "]"
+                  << " caller=" << caller
+                  << " cur=" << (int)mem_->current_bank() << std::dec << "\n";
+        // Show if this is the first call requesting a user bank
+        if (bank > 0) {
+            std::cerr << "[SELMEM] *** FIRST USER BANK REQUEST: bank=" << (int)bank << " ***\n";
+        }
+    }
+    // Also track any SELMEM call that requests a non-zero bank
+    if (bank > 0) {
+        static bool first_user = true;
+        if (first_user) {
+            first_user = false;
+            std::cerr << "[SELMEM] === USER BANK SWITCH TO BANK " << (int)bank << " ===\n";
+        }
+    }
+
     mem_->select_bank(bank);
     do_ret();
 }
@@ -296,12 +374,6 @@ void XIOS::do_polldevice() {
     uint8_t device = cpu_->regs.BC.get_low();
     uint8_t result = 0x00;
 
-    // Debug: count POLLDEVICE calls
-    static int poll_count = 0;
-    poll_count++;
-    if (poll_count <= 20 || poll_count % 10000 == 0) {
-        std::cerr << "[DEBUG] POLLDEVICE #" << poll_count << " device=" << (int)device << "\n";
-    }
 
     if (device < 8) {
         int console = device / 2;
@@ -312,7 +384,6 @@ void XIOS::do_polldevice() {
             Console* con = ConsoleManager::instance().get(console);
             if (con && con->const_status()) {
                 result = 0xFF;
-                std::cerr << "[DEBUG XIOS] POLLDEV input device=" << (int)device << " console=" << console << " READY\n";
             }
         } else {
             // Console output - always ready
@@ -336,12 +407,6 @@ void XIOS::do_stopclock() {
 
 void XIOS::do_exitregion() {
     // Exit mutual exclusion region - re-enable interrupts
-    // This is called when leaving a critical section
-    static int exitrgn_count = 0;
-    exitrgn_count++;
-    if (exitrgn_count <= 10) {
-        std::cerr << "[DEBUG] EXITREGION #" << exitrgn_count << " IFF was " << (int)cpu_->regs.IFF1 << "\n";
-    }
     cpu_->regs.IFF1 = 1;
     cpu_->regs.IFF2 = 1;
     do_ret();
@@ -363,6 +428,17 @@ void XIOS::do_systeminit() {
 
     // Initialize consoles
     ConsoleManager::instance().init();
+
+    // Set up address 5 (BDOS/XDOS entry) in all banks
+    // XDOS is at CE00H, entry point is CE06H
+    // This is normally done by CLI, but we need to ensure it's in all banks
+    uint16_t xdos_entry = 0xCE06;  // XDOS base (CE00) + 6
+    for (int bank = 0; bank <= 4; bank++) {
+        mem_->write_bank(bank, 0x0005, 0xC3);  // JP opcode
+        mem_->write_bank(bank, 0x0006, xdos_entry & 0xFF);
+        mem_->write_bank(bank, 0x0007, (xdos_entry >> 8) & 0xFF);
+    }
+    std::cerr << "[SYSINIT] Set up address 5 in all banks: JP " << std::hex << xdos_entry << std::dec << "\n";
 
     // Copy interrupt vector from current bank to all other banks
     // The Z80 code wrote JP INTHND to 0x0038-0x003A, but only in the current bank.
@@ -435,8 +511,12 @@ void XIOS::do_pdisp() {
 }
 
 void XIOS::do_xdosent() {
-    // XDOS entry point - no longer used
-    // BNKXIOS now jumps directly to XIOSJMP XDOS entry
+    // XDOS entry point - debug: show what's at FC57H
+    uint8_t b0 = mem_->fetch_mem(0xFC57);
+    uint8_t b1 = mem_->fetch_mem(0xFC58);
+    uint8_t b2 = mem_->fetch_mem(0xFC59);
+    std::cerr << "[XDOSENT] FC57H contains: " << std::hex
+              << (int)b0 << " " << (int)b1 << " " << (int)b2 << std::dec << std::endl;
     do_ret();
 }
 
