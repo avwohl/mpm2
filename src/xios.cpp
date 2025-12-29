@@ -10,6 +10,9 @@
 #include <iostream>
 #include <iomanip>
 
+// Debug flag from main.cpp
+extern bool g_debug_enabled;
+
 XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
     : cpu_(cpu)
     , mem_(mem)
@@ -303,60 +306,62 @@ void XIOS::do_selmemory() {
     uint8_t bank = mem_->fetch_mem(desc_addr + 3);
 
     // Debug: trace bank switches and dump memory segment table on first call
-    static int selmem_debug = 0;
-    static bool dumped_segments = false;
+    if (g_debug_enabled) {
+        static int selmem_debug = 0;
+        static bool dumped_segments = false;
 
-    if (!dumped_segments) {
-        dumped_segments = true;
-        std::cerr << "\n[SELMEM] Dumping memory segment table around desc=" << std::hex << desc_addr << ":\n";
-        // Dump 20 4-byte descriptors
-        for (int i = -10; i <= 10; i++) {
-            uint16_t addr = desc_addr + (i * 4);
-            uint8_t b = mem_->fetch_mem(addr);
-            uint8_t s = mem_->fetch_mem(addr + 1);
-            uint8_t a = mem_->fetch_mem(addr + 2);
-            uint8_t bnk = mem_->fetch_mem(addr + 3);
-            std::cerr << "  " << std::hex << std::setw(4) << addr << ": "
-                      << std::setw(2) << (int)b << " " << std::setw(2) << (int)s
-                      << " " << std::setw(2) << (int)a << " " << std::setw(2) << (int)bnk;
-            if (addr == desc_addr) std::cerr << " <-- current desc";
-            std::cerr << std::dec << "\n";
-        }
-        // Also dump SYSDAT area where memory segments might be
-        std::cerr << "\n[SELMEM] SYSDAT (FF00) memory segment info:\n";
-        for (int i = 0; i < 64; i += 4) {
-            uint16_t addr = 0xFF00 + i;
-            std::cerr << "  " << std::hex << addr << ": ";
-            for (int j = 0; j < 4; j++) {
-                std::cerr << std::setw(2) << std::setfill('0') << (int)mem_->fetch_mem(addr + j) << " ";
+        if (!dumped_segments) {
+            dumped_segments = true;
+            std::cerr << "\n[SELMEM] Dumping memory segment table around desc=" << std::hex << desc_addr << ":\n";
+            // Dump 20 4-byte descriptors
+            for (int i = -10; i <= 10; i++) {
+                uint16_t addr = desc_addr + (i * 4);
+                uint8_t b = mem_->fetch_mem(addr);
+                uint8_t s = mem_->fetch_mem(addr + 1);
+                uint8_t a = mem_->fetch_mem(addr + 2);
+                uint8_t bnk = mem_->fetch_mem(addr + 3);
+                std::cerr << "  " << std::hex << std::setw(4) << addr << ": "
+                          << std::setw(2) << (int)b << " " << std::setw(2) << (int)s
+                          << " " << std::setw(2) << (int)a << " " << std::setw(2) << (int)bnk;
+                if (addr == desc_addr) std::cerr << " <-- current desc";
+                std::cerr << std::dec << "\n";
             }
-            std::cerr << std::setfill(' ') << std::dec << "\n";
+            // Also dump SYSDAT area where memory segments might be
+            std::cerr << "\n[SELMEM] SYSDAT (FF00) memory segment info:\n";
+            for (int i = 0; i < 64; i += 4) {
+                uint16_t addr = 0xFF00 + i;
+                std::cerr << "  " << std::hex << addr << ": ";
+                for (int j = 0; j < 4; j++) {
+                    std::cerr << std::setw(2) << std::setfill('0') << (int)mem_->fetch_mem(addr + j) << " ";
+                }
+                std::cerr << std::setfill(' ') << std::dec << "\n";
+            }
+            std::cerr << "\n";
         }
-        std::cerr << "\n";
-    }
 
-    if (selmem_debug++ < 20) {
-        // Show return address (caller)
-        uint16_t sp = cpu_->regs.SP.get_pair16();
-        uint8_t lo = mem_->fetch_mem(sp);
-        uint8_t hi = mem_->fetch_mem(sp + 1);
-        uint16_t caller = (hi << 8) | lo;
-        std::cerr << "[SELMEM] desc=" << std::hex << desc_addr
-                  << " [base=" << (int)base << " size=" << (int)size
-                  << " attr=" << (int)attr << " bank=" << (int)bank << "]"
-                  << " caller=" << caller
-                  << " cur=" << (int)mem_->current_bank() << std::dec << "\n";
-        // Show if this is the first call requesting a user bank
-        if (bank > 0) {
-            std::cerr << "[SELMEM] *** FIRST USER BANK REQUEST: bank=" << (int)bank << " ***\n";
+        if (selmem_debug++ < 20) {
+            // Show return address (caller)
+            uint16_t sp = cpu_->regs.SP.get_pair16();
+            uint8_t lo = mem_->fetch_mem(sp);
+            uint8_t hi = mem_->fetch_mem(sp + 1);
+            uint16_t caller = (hi << 8) | lo;
+            std::cerr << "[SELMEM] desc=" << std::hex << desc_addr
+                      << " [base=" << (int)base << " size=" << (int)size
+                      << " attr=" << (int)attr << " bank=" << (int)bank << "]"
+                      << " caller=" << caller
+                      << " cur=" << (int)mem_->current_bank() << std::dec << "\n";
+            // Show if this is the first call requesting a user bank
+            if (bank > 0) {
+                std::cerr << "[SELMEM] *** FIRST USER BANK REQUEST: bank=" << (int)bank << " ***\n";
+            }
         }
-    }
-    // Also track any SELMEM call that requests a non-zero bank
-    if (bank > 0) {
-        static bool first_user = true;
-        if (first_user) {
-            first_user = false;
-            std::cerr << "[SELMEM] === USER BANK SWITCH TO BANK " << (int)bank << " ===\n";
+        // Also track any SELMEM call that requests a non-zero bank
+        if (bank > 0) {
+            static bool first_user = true;
+            if (first_user) {
+                first_user = false;
+                std::cerr << "[SELMEM] === USER BANK SWITCH TO BANK " << (int)bank << " ===\n";
+            }
         }
     }
 

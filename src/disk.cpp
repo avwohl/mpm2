@@ -8,6 +8,9 @@
 #include <iostream>
 #include <iomanip>
 
+// Debug flag from main.cpp
+extern bool g_debug_enabled;
+
 Disk::Disk()
     : read_only_(false)
     , format_(DiskFormat::SSSD_8)
@@ -273,11 +276,13 @@ int DiskSystem::read(BankedMemory* mem) {
 
     // Debug: show disk reads when running commands
     // Only show reads after system boot (track 2 reads with user-bank DMA addresses)
-    static int disk_debug_count = 0;
-    if (track == 2 && dma_addr_ >= 0x8000 && disk_debug_count < 50) {
-        std::cerr << "[DIR READ] t=" << track << " s=" << logical_sector
-                  << " dma=" << std::hex << dma_addr_ << std::dec << std::endl;
-        disk_debug_count++;
+    if (g_debug_enabled) {
+        static int disk_debug_count = 0;
+        if (track == 2 && dma_addr_ >= 0x8000 && disk_debug_count < 50) {
+            std::cerr << "[DIR READ] t=" << track << " s=" << logical_sector
+                      << " dma=" << std::hex << dma_addr_ << std::dec << std::endl;
+            disk_debug_count++;
+        }
     }
 
     // Apply sector skew translation for formats that use it (e.g., ibm-3740)

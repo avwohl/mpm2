@@ -23,6 +23,9 @@
 // Global flag for clean shutdown
 static volatile sig_atomic_t g_shutdown_requested = 0;
 
+// Global debug flag (non-static, accessible from other translation units)
+bool g_debug_enabled = false;
+
 void signal_handler(int sig) {
     (void)sig;
     g_shutdown_requested = 1;
@@ -77,6 +80,7 @@ void print_usage(const char* prog) {
               << "  -s, --sys FILE        Load MPM.SYS directly (bypass MPMLDR)\n"
               << "  -l, --local           Enable local console (output to stdout)\n"
               << "  -t, --timeout SECS    Timeout in seconds for debugging (0 = no timeout)\n"
+              << "  -D, --debug           Enable debug output (XIOS, disk operations)\n"
               << "  -h, --help            Show this help\n"
               << "\n"
               << "Examples:\n"
@@ -107,12 +111,13 @@ int main(int argc, char* argv[]) {
         {"sys",     required_argument, nullptr, 's'},
         {"local",   no_argument,       nullptr, 'l'},
         {"timeout", required_argument, nullptr, 't'},
+        {"debug",   no_argument,       nullptr, 'D'},
         {"help",    no_argument,       nullptr, 'h'},
         {nullptr,   0,                 nullptr, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "p:k:d:b:s:lt:h", long_options, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "p:k:d:b:s:lt:Dh", long_options, nullptr)) != -1) {
         switch (opt) {
             case 'p':
                 ssh_port = std::atoi(optarg);
@@ -153,6 +158,9 @@ int main(int argc, char* argv[]) {
                 break;
             case 't':
                 timeout_seconds = std::atoi(optarg);
+                break;
+            case 'D':
+                g_debug_enabled = true;
                 break;
             case 'h':
                 print_usage(argv[0]);
