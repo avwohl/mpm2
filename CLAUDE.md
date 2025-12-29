@@ -282,6 +282,34 @@ The upstream cpmemu project provides `cpm_disk.py` for disk management. It creat
 
 The prompt "3A>" means user 3, drive A (NOT console 3).
 
+### Startup Files
+
+MP/M II's TMP (Terminal Message Processor) executes a startup file when each console logs in. The startup file naming convention is:
+
+| Console | User | Startup File |
+|---------|------|--------------|
+| 0 | 0 | `$0$.SUP` |
+| 1 | 1 | `$1$.SUP` |
+| 2 | 2 | `$2$.SUP` |
+| 3 | 3 | `$3$.SUP` |
+
+**Key points:**
+- Filename has TWO dollar signs: `$n$.SUP` (not `$n.SUP`)
+- Each startup file must be in the **matching user area** (console n looks in user n)
+- Content is CP/M text: commands followed by `\r`, padded with `0x1A` to 128 bytes
+
+The `build_hd1k.sh` script automatically creates startup files containing a `DIR` command for all 4 consoles.
+
+To create startup files manually:
+```bash
+# Create startup file content
+printf 'DIR\r' > /tmp/startup.sup
+dd if=/dev/zero bs=1 count=124 | tr '\0' '\032' >> /tmp/startup.sup
+
+# Add to correct user area
+../cpmemu/util/cpm_disk.py add -u 3 disks/mpm2_hd1k.img /tmp/startup.sup '$3$.SUP'
+```
+
 ### File Placement for Multi-User Systems
 
 For files to be found, they must be in the **same user area as the console** or in user 0 with the SYS attribute. However, the SYS attribute search appears to not work reliably in some MP/M II configurations.
