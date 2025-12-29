@@ -170,11 +170,17 @@ Options:
   -k, --key FILE        Host key file (default: keys/ssh_host_rsa_key)
   -d, --disk A:FILE     Mount disk image on drive A-P
   -b, --boot FILE       Boot image file (MPMLDR + MPM.SYS)
+  -s, --sys FILE        Load MPM.SYS directly (bypass MPMLDR)
+  -l, --local           Enable local console output
+  -t, --timeout SECS    Boot timeout for debugging
   -x, --xios ADDR       XIOS base address in hex (default: FC00)
 
 Examples:
+  # Standard boot (uses MPMLDR)
   ./mpm2_emu -d A:system.dsk -d B:work.dsk -b mpm2boot.bin
-  ./mpm2_emu -p 2222 -d A:mpm2.dsk -b boot.img
+
+  # Direct MPM.SYS load (bypasses MPMLDR)
+  ./mpm2_emu -l -s disks/MPM.SYS -d A:system.dsk
 ```
 
 Connect via SSH:
