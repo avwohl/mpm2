@@ -460,7 +460,7 @@ DPH0:
         DW      0, 0, 0         ; Scratch area
         DW      DIRBUF          ; DIRBUF address
         DW      DPB_8MB         ; DPB address
-        DW      0               ; CSV (not used)
+        DW      CSV0            ; CSV (provide buffer even with CKS=0)
         DW      ALV0            ; ALV address
 
 ; DPH for drive B
@@ -469,7 +469,7 @@ DPH1:
         DW      0, 0, 0
         DW      DIRBUF
         DW      DPB_8MB
-        DW      0
+        DW      CSV1
         DW      ALV1
 
 ; DPH for drive C
@@ -478,7 +478,7 @@ DPH2:
         DW      0, 0, 0
         DW      DIRBUF
         DW      DPB_8MB
-        DW      0
+        DW      CSV2
         DW      ALV2
 
 ; DPH for drive D
@@ -487,11 +487,12 @@ DPH3:
         DW      0, 0, 0
         DW      DIRBUF
         DW      DPB_8MB
-        DW      0
+        DW      CSV3
         DW      ALV3
 
 ; Disk Parameter Block for hd1k format (8MB)
 ; 1024 dir entries * 32 bytes = 32KB = 8 blocks (0-7)
+; CKS = 0 for fixed disk (no directory checksums)
 DPB_8MB:
         DW      64              ; SPT - 64 sectors per track (128-byte logical)
         DB      5               ; BSH - block shift (4K blocks)
@@ -501,7 +502,7 @@ DPB_8MB:
         DW      1023            ; DRM - directory max - 1
         DB      0FFH            ; AL0 - blocks 0-7 for directory
         DB      000H            ; AL1 - blocks 8-15 are data
-        DW      0               ; CKS - checksum vector size (0 = fixed disk)
+        DW      0               ; CKS - no checksums (fixed disk)
         DW      2               ; OFF - reserved tracks
 
 ; DPB for 8" SSSD (IBM 3740 standard - 77 tracks, 26 sectors, 128 bytes)
@@ -523,5 +524,11 @@ ALV0:   DS      256             ; Allocation vector drive A
 ALV1:   DS      256             ; Allocation vector drive B
 ALV2:   DS      256             ; Allocation vector drive C
 ALV3:   DS      256             ; Allocation vector drive D
+; CSV buffers - minimal since CKS=0 (fixed disk, no checksums)
+; Provide valid addresses to avoid null pointer issues
+CSV0:   DS      1               ; Checksum vector drive A
+CSV1:   DS      1               ; Checksum vector drive B
+CSV2:   DS      1               ; Checksum vector drive C
+CSV3:   DS      1               ; Checksum vector drive D
 
         END

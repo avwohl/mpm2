@@ -172,8 +172,10 @@ void XIOS::do_seldsk() {
     uint8_t disk = cpu_->regs.BC.get_low();  // C = disk number
 
     // Check if disk is valid (mounted and within range)
-    if (disk >= 4 || !DiskSystem::instance().select(disk)) {
-        std::cerr << "[SELDSK] disk " << (int)disk << " ERROR (unmounted or out of range)\n";
+    // DiskSystem::select() returns false if disk is out of range or unmounted
+    if (!DiskSystem::instance().select(disk)) {
+        // Only warn for unmounted disks - it's normal for programs to probe drives
+        // std::cerr << "[SELDSK] disk " << (int)disk << " not mounted\n";
         cpu_->regs.AF.set_high(0xFF);  // Return error
         do_ret();
         return;
