@@ -39,17 +39,6 @@ qkz80_uint8 BankedMemory::fetch_mem(qkz80_uint16 addr, bool is_instruction) {
 }
 
 void BankedMemory::store_mem(qkz80_uint16 addr, qkz80_uint8 byte) {
-    // Trace writes to TMPD area (FE00-FEFF)
-    static int tmpd_write_count = 0;
-    if (addr >= 0xFE00 && addr < 0xFF00) {
-        tmpd_write_count++;
-        if (tmpd_write_count <= 100) {
-            std::cerr << "[TMPD WRITE #" << tmpd_write_count << "] addr=0x"
-                      << std::hex << addr << " byte=0x" << (int)byte
-                      << std::dec << "\n";
-        }
-    }
-
     if (addr >= COMMON_BASE) {
         // Common area
         common_[addr - COMMON_BASE] = byte;

@@ -96,10 +96,6 @@ void SSHSession::thread_func() {
 
     con->set_connected(true);
 
-    // Debug: show queue status
-    std::cerr << "[SSH " << console_id_ << "] Connected, output queue has "
-              << con->output_queue().available() << " bytes\n";
-
     // Send banner
     char banner[128];
     snprintf(banner, sizeof(banner),
@@ -157,11 +153,7 @@ void SSHSession::thread_func() {
         if (FD_ISSET(fd_, &wfds)) {
             size_t count = con->output_queue().read_some(buf, sizeof(buf));
             if (count > 0) {
-                int sent = wolfSSH_stream_send(ssh_, buf, count);
-                static int send_debug = 0;
-                if (send_debug++ < 10) {
-                    std::cerr << "[SSH " << console_id_ << "] Sent " << count << " bytes, ret=" << sent << "\n";
-                }
+                wolfSSH_stream_send(ssh_, buf, count);
             }
         }
     }

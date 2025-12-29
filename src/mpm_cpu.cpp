@@ -14,16 +14,6 @@ MpmCpu::MpmCpu(qkz80_cpu_mem* memory)
 }
 
 void MpmCpu::port_out(qkz80_uint8 port, qkz80_uint8 value) {
-    // Debug: trace all port outputs
-    static int entry_count = 0;
-    entry_count++;
-    if (entry_count <= 50) {
-        std::cerr << "*** PORT_OUT #" << entry_count << " port=0x" << std::hex << (int)port
-                  << " val=0x" << (int)value << " PC=0x" << regs.PC.get_pair16()
-                  << std::dec << " ***\n";
-        std::cerr.flush();
-    }
-
     switch (port) {
         case MpmPorts::XIOS_DISPATCH:
             // XIOS dispatch: B register contains function offset

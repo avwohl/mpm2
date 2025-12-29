@@ -306,14 +306,6 @@ void XIOS::do_maxconsole() {
     // Read from SYSTEM.DAT at offset 1 and subtract 1
     uint8_t num_consoles = mem_->read_common(0xFF01);  // Number of consoles
     uint8_t max_num = num_consoles > 0 ? num_consoles - 1 : 0;
-
-    static bool traced = false;
-    if (!traced) {
-        traced = true;
-        std::cerr << "[MAXCON] num_consoles=" << (int)num_consoles
-                  << " returning " << (int)max_num << "\n";
-    }
-
     cpu_->regs.AF.set_high(max_num);
     do_ret();
 }
@@ -374,15 +366,6 @@ void XIOS::do_swtuser() {
     // BC contains memory descriptor address
     // The descriptor's bank field tells us which bank to switch to
     uint16_t desc_addr = cpu_->regs.BC.get_pair16();
-
-    static int swtuser_count = 0;
-    swtuser_count++;
-    if (swtuser_count <= 20) {
-        uint8_t bank = (desc_addr != 0) ? mem_->fetch_mem(desc_addr + 3) : 0;
-        std::cerr << "[SWTUSER #" << swtuser_count << "] desc=0x" << std::hex << desc_addr
-                  << " bank=" << std::dec << (int)bank << "\n";
-    }
-
     if (desc_addr != 0) {
         uint8_t bank = mem_->fetch_mem(desc_addr + 3);
         mem_->select_bank(bank);
@@ -392,11 +375,6 @@ void XIOS::do_swtuser() {
 
 void XIOS::do_swtsys() {
     // Switch to system bank (bank 0)
-    static int swtsys_count = 0;
-    swtsys_count++;
-    if (swtsys_count <= 20) {
-        std::cerr << "[SWTSYS #" << swtsys_count << "] from bank=" << (int)mem_->current_bank() << "\n";
-    }
     mem_->select_bank(0);
     do_ret();
 }
@@ -405,12 +383,6 @@ void XIOS::do_pdisp() {
     // Process dispatcher entry point - called at end of interrupt handler
     // The Z80 code does EI then JP PDISP, but EI's effect is delayed
     // Re-enable interrupts here to ensure they stay enabled
-    static int pdisp_count = 0;
-    pdisp_count++;
-    if (pdisp_count <= 30) {
-        std::cerr << "[PDISP #" << pdisp_count << "] PC=0x" << std::hex
-                  << cpu_->regs.PC.get_pair16() << std::dec << "\n";
-    }
     cpu_->regs.IFF1 = 1;
     cpu_->regs.IFF2 = 1;
     do_ret();
@@ -466,13 +438,6 @@ void XIOS::do_bdos() {
     // C = function number, DE = parameter
     uint8_t func = cpu_->regs.BC.get_low();
     uint16_t de = cpu_->regs.DE.get_pair16();
-
-    // Debug output
-    static int call_count = 0;
-    if (call_count < 50) {
-        std::cerr << "[BDOS] func=" << (int)func << " DE=0x" << std::hex << de << std::dec << "\n";
-        call_count++;
-    }
 
     switch (func) {
         case 0:  // System reset
@@ -576,8 +541,6 @@ void XIOS::do_bdos() {
                 }
                 filename[12] = '\0';
 
-                std::cerr << "[BDOS 15] Open file: " << filename << "\n";
-
                 // Search directory for file
                 // Directory is at track 2 (after system tracks) for hd1k
                 Disk* dsk = DiskSystem::instance().get(current_disk_);
@@ -625,9 +588,6 @@ void XIOS::do_bdos() {
                         }
 
                         if (match && ent[12] == 0) {  // Extent 0 only
-                            std::cerr << "[BDOS 15] Found file at sector " << sec
-                                      << " entry " << entry << "\n";
-
                             // Copy directory entry to FCB
                             for (int i = 0; i < 32; i++) {
                                 mem_->store_mem(fcb + i, ent[i]);
@@ -660,8 +620,6 @@ void XIOS::do_bdos() {
 
                 if (cr >= rc) {
                     // Need next extent - for now, just return EOF
-                    // TODO: Load next extent
-                    std::cerr << "[BDOS 20] EOF at CR=" << (int)cr << " RC=" << (int)rc << "\n";
                     cpu_->regs.AF.set_high(1);  // EOF
                     break;
                 }
@@ -679,7 +637,6 @@ void XIOS::do_bdos() {
                 uint16_t block_num = alloc_lo | (alloc_hi << 8);
 
                 if (block_num == 0) {
-                    std::cerr << "[BDOS 20] No block allocated at index " << block_in_extent << "\n";
                     cpu_->regs.AF.set_high(1);  // EOF
                     break;
                 }
@@ -696,13 +653,6 @@ void XIOS::do_bdos() {
                 int track = 2 + (total_offset / bytes_per_track);  // +2 for reserved tracks
                 int sector = (total_offset % bytes_per_track) / 512;
                 int offset_in_sector = (total_offset % bytes_per_track) % 512;
-
-                static int read_trace = 0;
-                if (read_trace++ < 20) {
-                    std::cerr << "[BDOS 20] CR=" << (int)cr << " block=" << block_num
-                              << " trk=" << track << " sec=" << sector
-                              << " off=" << offset_in_sector << "\n";
-                }
 
                 // Read the sector
                 DiskSystem::instance().set_track(track);

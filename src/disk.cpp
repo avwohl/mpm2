@@ -279,16 +279,11 @@ int DiskSystem::read(BankedMemory* mem) {
     uint16_t phys_sector = translated_sector / records_per_phys;  // 0-based (disk image is 0-indexed)
     uint16_t offset_in_phys = (translated_sector % records_per_phys) * 128;
 
-    // Debug tracing for directory reads (track 2 is directory for hd1k with OFF=2)
-    bool trace_this = (dma_addr_ >= 0xFC00 && dma_addr_ < 0xFD00);
-    bool trace_dir = (track == 2);  // Trace all directory reads
-
     // Temporarily set physical sector for reading
     disk->set_sector(phys_sector);
 
     uint8_t buffer[1024];  // Max sector size
     int result = disk->read_sector(buffer);
-
 
     // Restore logical sector (for consistency)
     disk->set_sector(logical_sector);
@@ -297,38 +292,6 @@ int DiskSystem::read(BankedMemory* mem) {
         // Copy only 128 bytes (one CP/M record) to memory at DMA address
         for (uint16_t i = 0; i < 128; i++) {
             mem->store_mem(dma_addr_ + i, buffer[offset_in_phys + i]);
-        }
-
-        // Trace key addresses
-        if (trace_this || trace_dir) {
-            std::cerr << "[DISK READ] trk=" << std::dec << track
-                      << " logsec=" << logical_sector
-                      << " xlat=" << translated_sector
-                      << " physec=" << phys_sector
-                      << " off=" << offset_in_phys
-                      << " dma=0x" << std::hex << dma_addr_
-                      << " first bytes: ";
-            for (int i = 0; i < 8; i++) {
-                std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                          << (int)buffer[offset_in_phys + i] << " ";
-            }
-            std::cerr << std::dec << std::endl;
-            // Verify the data was actually written
-            std::cerr << "[DISK READ] Verifying at 0x" << std::hex << dma_addr_ << " after store: ";
-            for (int i = 0; i < 8; i++) {
-                std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                          << (int)mem->fetch_mem(dma_addr_ + i) << " ";
-            }
-            std::cerr << std::dec << std::endl;
-            // Also show MPM.SYS entry position (32 bytes in)
-            if (trace_dir) {
-                std::cerr << "[DISK READ] MPM.SYS should be at offset 32: ";
-                for (int i = 0; i < 16; i++) {
-                    std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                              << (int)buffer[offset_in_phys + 32 + i] << " ";
-                }
-                std::cerr << std::dec << std::endl;
-            }
         }
     }
 

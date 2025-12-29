@@ -348,31 +348,7 @@ uint64_t Z80Thread::cycles() const {
 }
 
 void Z80Thread::thread_func() {
-    std::cerr << "[Z80] Starting at PC=0x" << std::hex
-              << cpu_->regs.PC.get_pair16() << std::dec << std::endl;
-
-    // Trace first N instructions to see initialization
-    int init_trace = 0;
-    const int INIT_TRACE_LIMIT = 0;  // Set to e.g. 200 to trace startup
-
-    // Trace disabled by default - set to non-zero to enable periodic traces
-    uint64_t trace_interval = 0;  // Was 100000
-    uint64_t next_trace = trace_interval;
-
-    // Debug output disabled for cleaner console output
-    // std::cerr << "[Z80] Entering main loop, stop_requested=" << stop_requested_.load() << std::endl;
     while (!stop_requested_.load()) {
-        // static bool first_loop = true;
-        // if (first_loop) {
-        //     std::cerr << "[Z80] First loop iteration" << std::endl;
-        //     first_loop = false;
-        // }
-        // Periodic instruction trace (disabled when trace_interval == 0)
-        if (trace_interval > 0 && instruction_count_.load() >= next_trace) {
-            std::cerr << "[Z80 TRACE] " << instruction_count_.load() << " instructions, PC=0x"
-                      << std::hex << cpu_->regs.PC.get_pair16() << std::dec << std::endl;
-            next_trace += trace_interval;
-        }
         // Check for timeout
         auto now = std::chrono::steady_clock::now();
         if (timeout_seconds_ > 0) {
