@@ -61,7 +61,6 @@
 #
 # C++ tools (built by cmake):
 #   - mkboot: Creates boot image from LDRBIOS + MPMLDR
-#   - mkspr: Creates SPR files from HEX files
 #   - patchmpm: Patches serial numbers in MPMLDR
 #
 # CP/M tools:
@@ -115,7 +114,7 @@ echo "Step 1: Building C++ emulator and tools..."
 cd "$BUILD_DIR"
 cmake .. > /dev/null
 make -j4 2>&1 | grep -v "^make\[" || true
-echo "  Built: mpm2_emu, mkboot, mkspr, patchmpm"
+echo "  Built: mpm2_emu, mkboot, patchmpm"
 echo ""
 
 # ------------------------------------------------------------------------------

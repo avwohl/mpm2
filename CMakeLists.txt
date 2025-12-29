@@ -122,24 +122,6 @@ target_compile_options(mkboot PRIVATE
     -Wall -Wextra -Wpedantic
 )
 
-# Disk image creation tool
-add_executable(mkdisk tools/mkdisk.cpp)
-target_compile_options(mkdisk PRIVATE
-    -Wall -Wextra -Wpedantic
-)
-
-# SPR file creation tool
-add_executable(mkspr tools/mkspr.cpp)
-target_compile_options(mkspr PRIVATE
-    -Wall -Wextra -Wpedantic
-)
-
-# MPM.SYS construction tool
-add_executable(mkmpm tools/mkmpm.cpp)
-target_compile_options(mkmpm PRIVATE
-    -Wall -Wextra -Wpedantic
-)
-
 # MPM.SYS patching tool
 add_executable(patchmpm tools/patchmpm.cpp)
 target_compile_options(patchmpm PRIVATE
@@ -147,4 +129,4 @@ target_compile_options(patchmpm PRIVATE
 )
 
 # Install targets
-install(TARGETS mpm2_emu mkboot mkdisk mkspr mkmpm RUNTIME DESTINATION bin)
+install(TARGETS mpm2_emu mkboot patchmpm RUNTIME DESTINATION bin)
