@@ -5,11 +5,6 @@
 #include "disk.h"
 #include "banked_mem.h"
 #include <cstring>
-#include <iostream>
-#include <iomanip>
-
-// Debug flag from main.cpp
-extern bool g_debug_enabled;
 
 Disk::Disk()
     : read_only_(false)
@@ -274,16 +269,6 @@ int DiskSystem::read(BankedMemory* mem) {
     uint16_t track = disk->current_track();
     uint16_t phys_sector_size = disk->sector_size();
 
-    // Debug: show directory reads
-    if (g_debug_enabled) {
-        static int disk_debug_count = 0;
-        if (track == 2 && disk_debug_count < 50) {
-            std::cerr << "[DIR READ] t=" << track << " s=" << logical_sector
-                      << " dma=" << std::hex << dma_addr_ << std::dec << std::endl;
-            disk_debug_count++;
-        }
-    }
-
     // Apply sector skew translation for formats that use it (e.g., ibm-3740)
     uint16_t translated_sector = translate(logical_sector, track);
 
@@ -305,26 +290,6 @@ int DiskSystem::read(BankedMemory* mem) {
         // Copy only 128 bytes (one CP/M record) to memory at DMA address
         for (uint16_t i = 0; i < 128; i++) {
             mem->store_mem(dma_addr_ + i, buffer[offset_in_phys + i]);
-        }
-
-        // Debug: show all directory entries being read
-        if (g_debug_enabled && track == 2) {
-            std::cerr << "[DIR DATA] s=" << logical_sector << " entries: ";
-            // Show first 12 bytes of each of the 4 entries in this 128-byte sector
-            for (int entry = 0; entry < 4; entry++) {
-                int base = entry * 32;
-                uint8_t user = buffer[offset_in_phys + base];
-                if (user != 0xE5 && user < 32) {
-                    // Show user and masked filename
-                    fprintf(stderr, "%d:", user);
-                    for (int i = 1; i <= 11; i++) {
-                        uint8_t c = buffer[offset_in_phys + base + i] & 0x7F;
-                        if (c >= 0x20 && c < 0x7F) fprintf(stderr, "%c", c);
-                    }
-                    fprintf(stderr, " ");
-                }
-            }
-            std::cerr << std::endl;
         }
     }
 
