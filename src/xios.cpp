@@ -23,13 +23,6 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
 }
 
 void XIOS::handle_port_dispatch(uint8_t func) {
-    // Debug: trace first dispatch calls
-    static int dispatch_count = 0;
-    if (dispatch_count++ < 20) {
-        std::cerr << "[DISPATCH #" << dispatch_count << "] func=0x" << std::hex << (int)func
-                  << " PC=0x" << cpu_->regs.PC.get_pair16() << std::dec << std::endl;
-    }
-
     // Temporarily set skip_ret flag so handlers don't do RET
     skip_ret_ = true;
 
@@ -117,15 +110,6 @@ void XIOS::do_conout() {
     // D = console number (MP/M II XIOS convention), C = character
     uint8_t console = cpu_->regs.DE.get_high();  // D = console number
     uint8_t ch = cpu_->regs.BC.get_low();        // C = character
-
-    // Debug: trace first few CONOUT calls
-    static int conout_count = 0;
-    if (conout_count++ < 50) {
-        std::cerr << "[CONOUT #" << conout_count << "] console=" << (int)console
-                  << " ch=0x" << std::hex << (int)ch << std::dec;
-        if (ch >= 0x20 && ch < 0x7F) std::cerr << " '" << (char)ch << "'";
-        std::cerr << std::endl;
-    }
 
     // Get the specified console
     Console* con = ConsoleManager::instance().get(console);
