@@ -303,130 +303,6 @@ bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
     memory_->write_common(commonbase_addr + 10, pdisp_addr & 0xFF);
     memory_->write_common(commonbase_addr + 11, (pdisp_addr >> 8) & 0xFF);
 
-    // Debug: show the patched commonbase structure
-    std::cerr << "\n[PATCH] Commonbase at 0x" << std::hex << commonbase_addr << ":\n";
-    std::cerr << "  PDISP (+9) -> JP 0x" << std::setw(4) << std::setfill('0') << pdisp_addr << "\n";
-    std::cerr << "  XDOS  (+c) -> JP 0x" << std::setw(4) << std::setfill('0') << real_xdos << "\n";
-
-    // Show interrupt handler code from DO_SYSINIT area
-    std::cerr << "[DEBUG] Code at C800 (DO_SYSINIT area):\n  ";
-    for (int i = 0; i < 64; i++) {
-        if (i > 0 && i % 16 == 0) std::cerr << "\n  ";
-        std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                  << (int)memory_->read_common(0xC800 + i) << " ";
-    }
-    std::cerr << std::dec << std::setfill(' ') << "\n";
-
-    // Show INTHND at 0xC831 (interrupt handler proper)
-    std::cerr << "[DEBUG] INTHND at C831 (interrupt handler):\n  ";
-    for (int i = 0; i < 64; i++) {
-        if (i > 0 && i % 16 == 0) std::cerr << "\n  ";
-        std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                  << (int)memory_->read_common(0xC831 + i) << " ";
-    }
-    std::cerr << std::dec << std::setfill(' ') << "\n";
-
-    // Show commonbase area
-    std::cerr << "[DEBUG] Commonbase at " << std::hex << commonbase_addr << ":\n  ";
-    for (int i = 0; i < 24; i++) {
-        std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                  << (int)memory_->read_common(commonbase_addr + i) << " ";
-    }
-    std::cerr << std::dec << std::setfill(' ') << "\n";
-
-    // Show memory at 0xe9d1 (the descriptor address we keep seeing)
-    std::cerr << "[DEBUG] Memory at E9D0:\n  ";
-    for (int i = 0; i < 16; i++) {
-        std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                  << (int)memory_->read_common(0xE9D0 + i) << " ";
-    }
-    std::cerr << std::dec << std::setfill(' ') << "\n";
-
-    // Also show memory segments in SYSTEM.DAT at FF10
-    std::cerr << "[DEBUG] Memory segments at FF10 (SYSDAT+0x10):\n";
-    for (int seg = 0; seg < 6; seg++) {
-        uint16_t addr = 0xFF10 + seg * 4;
-        uint8_t base = memory_->read_common(addr);
-        uint8_t size = memory_->read_common(addr + 1);
-        uint8_t attr = memory_->read_common(addr + 2);
-        uint8_t bank = memory_->read_common(addr + 3);
-        std::cerr << "  Seg " << seg << " @ " << std::hex << addr << ": base="
-                  << std::setw(2) << (int)base << " size=" << std::setw(2) << (int)size
-                  << " attr=" << std::setw(2) << (int)attr << " bank=" << (int)bank
-                  << std::dec << "\n";
-    }
-
-    // Show XDOS entry at CE00
-    std::cerr << "[DEBUG] XDOS at CE00:\n  ";
-    for (int i = 0; i < 32; i++) {
-        if (i > 0 && i % 16 == 0) std::cerr << "\n  ";
-        std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                  << (int)memory_->read_common(0xCE00 + i) << " ";
-    }
-    std::cerr << std::dec << std::setfill(' ') << "\n";
-
-    // Show sysdat variable at CE0C (should be 0xFF00)
-    uint16_t sysdat_var = memory_->read_common(0xCE0C) | (memory_->read_common(0xCE0D) << 8);
-    std::cerr << "[DEBUG] sysdat variable at CE0C = 0x" << std::hex << sysdat_var << std::dec << "\n";
-
-    // Show key SYSTEM.DAT offsets for TMP initialization
-    if (sysdat_var >= 0xFF00) {
-        uint8_t tmpd_base = memory_->read_common(sysdat_var + 243);  // offset 243 = tmpd$base
-        uint8_t console_dat = memory_->read_common(sysdat_var + 244); // offset 244 = console$dat$base
-        uint8_t tmp_base = memory_->read_common(sysdat_var + 247);   // offset 247 = tmp$base
-        std::cerr << "[DEBUG] SYSTEM.DAT TMP fields:\n";
-        std::cerr << "  tmpd$base (243) = 0x" << std::hex << (int)tmpd_base
-                  << " -> TMPD at 0x" << (tmpd_base * 256) << "\n";
-        std::cerr << "  console$dat (244) = 0x" << (int)console_dat
-                  << " -> console data at 0x" << (console_dat * 256) << "\n";
-        std::cerr << "  tmp$base (247) = 0x" << (int)tmp_base
-                  << " -> TMP code at 0x" << (tmp_base * 256) << std::dec << "\n";
-    }
-
-    // Show TMPD.DAT at FE00 (TMP process descriptor data)
-    std::cerr << "[DEBUG] TMPD at FE00:\n  ";
-    for (int i = 0; i < 64; i++) {
-        if (i > 0 && i % 16 == 0) std::cerr << "\n  ";
-        std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                  << (int)memory_->read_common(0xFE00 + i) << " ";
-    }
-    std::cerr << std::dec << std::setfill(' ') << "\n";
-
-    // Show dispatcher area at DD38
-    std::cerr << "[DEBUG] Dispatcher at DD38:\n  ";
-    for (int i = 0; i < 32; i++) {
-        if (i > 0 && i % 16 == 0) std::cerr << "\n  ";
-        std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                  << (int)memory_->read_common(0xDD38 + i) << " ";
-    }
-    std::cerr << std::dec << std::setfill(' ') << "\n";
-
-    // Show SWTUSER at C7EC and SWTSYS at C7F1
-    std::cerr << "[DEBUG] SWTUSER at C7EC:\n  ";
-    for (int i = 0; i < 16; i++) {
-        std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                  << (int)memory_->read_common(0xC7EC + i) << " ";
-    }
-    std::cerr << "\n[DEBUG] SWTSYS at C7F1:\n  ";
-    for (int i = 0; i < 16; i++) {
-        std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                  << (int)memory_->read_common(0xC7F1 + i) << " ";
-    }
-    std::cerr << std::dec << std::setfill(' ') << "\n";
-
-    // Check user banks for TMP code
-    std::cerr << "[DEBUG] Bank 1 at 0x0000 (first 16 bytes):\n  ";
-    for (int i = 0; i < 16; i++) {
-        std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                  << (int)memory_->read_bank(1, i) << " ";
-    }
-    std::cerr << "\n[DEBUG] Bank 1 at 0x0100 (TPA start):\n  ";
-    for (int i = 0; i < 16; i++) {
-        std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                  << (int)memory_->read_bank(1, 0x0100 + i) << " ";
-    }
-    std::cerr << std::dec << std::setfill(' ') << "\n";
-
     return true;
 }
 
@@ -518,13 +394,6 @@ void Z80Thread::thread_func() {
             next_tick_ += TICK_INTERVAL;
 
             // Deliver tick interrupt if clock is enabled and interrupts are enabled
-            static int tick_count_trace = 0;
-            tick_count_trace++;
-            if (tick_count_trace <= 20) {
-                std::cerr << "[TICK #" << tick_count_trace << "] clock="
-                          << xios_->clock_enabled() << " IFF=" << (int)cpu_->regs.IFF1
-                          << " PC=0x" << std::hex << cpu_->regs.PC.get_pair16() << std::dec << "\n";
-            }
             if (xios_->clock_enabled() && cpu_->regs.IFF1) {
                 deliver_tick_interrupt();
             }
@@ -589,19 +458,6 @@ void Z80Thread::deliver_tick_interrupt() {
     // Save current PC on stack
     uint16_t sp = cpu_->regs.SP.get_pair16();
     uint16_t pc = cpu_->regs.PC.get_pair16();
-
-    static int int_count = 0;
-    int_count++;
-    if (int_count <= 10) {
-        // Show what the interrupt vector contains
-        uint8_t v0 = memory_->fetch_mem(0x0038);
-        uint8_t v1 = memory_->fetch_mem(0x0039);
-        uint8_t v2 = memory_->fetch_mem(0x003A);
-        std::cerr << "[INT #" << int_count << "] from PC=0x" << std::hex << pc
-                  << " SP=0x" << sp << " vec@38=" << std::setfill('0') << std::setw(2)
-                  << (int)v0 << " " << std::setw(2) << (int)v1 << " " << std::setw(2) << (int)v2
-                  << " bank=" << std::dec << (int)memory_->current_bank() << "\n";
-    }
 
     sp -= 2;
     cpu_->regs.SP.set_pair16(sp);
