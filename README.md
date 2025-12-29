@@ -121,8 +121,8 @@ Options:
   -p, --port PORT       SSH listen port (default: 2222)
   -k, --key FILE        Host key file (default: keys/ssh_host_rsa_key)
   -d, --disk A:FILE     Mount disk image on drive A-P
-  -b, --boot FILE       Boot image file (MPMLDR + MPM.SYS)
-  -s, --sys FILE        Load MPM.SYS directly (bypass MPMLDR)
+  -b, --boot FILE       Boot image file (MPMLDR + LDRBIOS)
+  -s, --sys FILE        Load MPM.SYS directly (recommended)
   -l, --local           Enable local console output
   -t, --timeout SECS    Boot timeout for debugging
   -h, --help            Show help

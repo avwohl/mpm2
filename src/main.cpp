@@ -75,7 +75,6 @@ void print_usage(const char* prog) {
               << "  -d, --disk A:FILE     Mount disk image on drive A-P\n"
               << "  -b, --boot FILE       Boot image file (MPMLDR + MPM.SYS)\n"
               << "  -s, --sys FILE        Load MPM.SYS directly (bypass MPMLDR)\n"
-              << "  -x, --xios ADDR       XIOS base address in hex (default: FC00)\n"
               << "  -l, --local           Enable local console (output to stdout)\n"
               << "  -t, --timeout SECS    Timeout in seconds for debugging (0 = no timeout)\n"
               << "  -h, --help            Show this help\n"
@@ -95,7 +94,6 @@ int main(int argc, char* argv[]) {
     std::string host_key = "keys/ssh_host_rsa_key.der";
     std::string boot_image;
     std::string mpm_sys_file;  // Direct MPM.SYS loading (bypasses MPMLDR)
-    uint16_t xios_base = 0x8800;
     bool local_console = false;
     int timeout_seconds = 0;
     std::vector<std::pair<int, std::string>> disk_mounts;
@@ -107,7 +105,6 @@ int main(int argc, char* argv[]) {
         {"disk",    required_argument, nullptr, 'd'},
         {"boot",    required_argument, nullptr, 'b'},
         {"sys",     required_argument, nullptr, 's'},
-        {"xios",    required_argument, nullptr, 'x'},
         {"local",   no_argument,       nullptr, 'l'},
         {"timeout", required_argument, nullptr, 't'},
         {"help",    no_argument,       nullptr, 'h'},
@@ -115,7 +112,7 @@ int main(int argc, char* argv[]) {
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "p:k:d:b:s:x:lt:h", long_options, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "p:k:d:b:s:lt:h", long_options, nullptr)) != -1) {
         switch (opt) {
             case 'p':
                 ssh_port = std::atoi(optarg);
@@ -150,9 +147,6 @@ int main(int argc, char* argv[]) {
                 break;
             case 's':
                 mpm_sys_file = optarg;
-                break;
-            case 'x':
-                xios_base = std::strtoul(optarg, nullptr, 16);
                 break;
             case 'l':
                 local_console = true;
@@ -247,8 +241,6 @@ int main(int argc, char* argv[]) {
             }
             return 1;
         }
-        z80.set_xios_base(xios_base);
-        std::cout << "XIOS base: 0x" << std::hex << xios_base << std::dec << "\n";
     }
 
 #ifdef HAVE_WOLFSSH
