@@ -152,6 +152,32 @@ copy_to_hd1k() {
     echo "  Copied $((prl_count + other_count)) files total"
 }
 
+# Create startup files for each console
+# MP/M II TMP looks for $n$.SUP in user n's area at login
+create_startup_files() {
+    local image="$1"
+    local temp_file=$(mktemp)
+
+    echo "Creating startup files for consoles 0-3..."
+
+    # Create startup file content: "DIR\r" + 0x1A padding to 128 bytes
+    printf 'DIR\r' > "$temp_file"
+    dd if=/dev/zero bs=1 count=124 2>/dev/null | tr '\0' '\032' >> "$temp_file"
+
+    # Add to each user area (console n runs as user n)
+    for u in 0 1 2 3; do
+        local filename="\$${u}\$.SUP"
+        # Create temp file with correct name
+        cp "$temp_file" "$TEMP_DIR/$filename"
+        python3 "$CPM_DISK" add -u $u "$image" "$TEMP_DIR/$filename" 2>/dev/null || {
+            echo "  Warning: Could not create $filename for user $u"
+        }
+    done
+
+    rm -f "$temp_file"
+    echo "  Created startup files: \$0\$.SUP through \$3\$.SUP"
+}
+
 # Show disk contents
 show_contents() {
     local image="$1"
@@ -287,6 +313,9 @@ fi
 
 # Copy all extracted files to hd1k
 copy_to_hd1k "$OUTPUT" "$TEMP_DIR"
+
+# Create startup files for each console
+create_startup_files "$OUTPUT"
 
 # Show results
 show_contents "$OUTPUT"
