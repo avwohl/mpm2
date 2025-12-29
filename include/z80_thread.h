@@ -57,9 +57,6 @@ public:
 private:
     void thread_func();
 
-    // Timer interrupt delivery
-    void deliver_tick_interrupt();
-
     std::unique_ptr<MpmCpu> cpu_;
     std::unique_ptr<BankedMemory> memory_;
     std::unique_ptr<XIOS> xios_;

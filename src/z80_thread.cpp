@@ -434,14 +434,15 @@ void Z80Thread::thread_func() {
             }
         }
 
-        // Check for timer interrupt
+        // Check for timer interrupt (60Hz tick)
         if (now >= next_tick_) {
             next_tick_ += TICK_INTERVAL;
 
-
-            // Deliver tick interrupt if clock is enabled and interrupts are enabled
-            if (xios_->clock_enabled() && cpu_->regs.IFF1) {
-                deliver_tick_interrupt();
+            // Request tick interrupt if clock is enabled
+            if (xios_->clock_enabled()) {
+                cpu_->request_rst(7);  // RST 38H
+                xios_->set_preempted(true);
+                xios_->tick();
             }
 
             // Check for one-second tick
@@ -451,75 +452,23 @@ void Z80Thread::thread_func() {
             }
         }
 
-        // Check for HALT instruction (0x76) - handle specially for MP/M
-        uint16_t pc = cpu_->regs.PC.get_pair16();
-        uint8_t opcode = memory_->fetch_mem(pc);
-        // qkz80 library calls exit() on HALT, but MP/M uses HALT in idle loop
-        if (opcode == 0x76) {
-            // Advance PC past HALT
-            cpu_->regs.PC.set_pair16(pc + 1);
-            instruction_count_++;
-
-            // Wait for timer interrupt or stop request or timeout
-            while (!stop_requested_.load() && !xios_->clock_enabled()) {
-                // Check timeout while waiting
-                if (timeout_seconds_ > 0) {
-                    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                        std::chrono::steady_clock::now() - start_time_).count();
-                    if (elapsed >= timeout_seconds_) {
-                        std::cerr << "\n[TIMEOUT] Timed out while HALTed after " << elapsed << " seconds\n";
-                        std::cerr << "[TIMEOUT] PC=0x" << std::hex << pc
-                                  << " SP=0x" << cpu_->regs.SP.get_pair16()
-                                  << " bank=" << std::dec << (int)memory_->current_bank()
-                                  << " instructions=" << instruction_count_.load() << "\n";
-                        timed_out_.store(true);
-                        stop_requested_.store(true);
-                        break;
-                    }
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        // Handle HALT - CPU waits for interrupt
+        if (cpu_->is_halted()) {
+            // If clock is running and interrupts pending, deliver and wake
+            if (cpu_->check_interrupts()) {
+                cpu_->clear_halted();
+            } else {
+                // Sleep briefly to avoid busy-waiting
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
             }
-
-            // If interrupts are enabled and clock is running, wait for tick
-            if (cpu_->regs.IFF1 && xios_->clock_enabled()) {
-                // Sleep until next tick
-                auto now = std::chrono::steady_clock::now();
-                if (now < next_tick_) {
-                    std::this_thread::sleep_until(next_tick_);
-                }
-            }
-            continue;
         }
+
+        // Deliver any pending interrupts before executing
+        cpu_->check_interrupts();
 
         // Execute one instruction
         cpu_->execute();
         instruction_count_++;
     }
-}
-
-void Z80Thread::deliver_tick_interrupt() {
-    // MP/M uses RST 38H for timer interrupt
-    // Push PC on stack and jump to interrupt vector
-
-    // Save current PC on stack
-    uint16_t sp = cpu_->regs.SP.get_pair16();
-    uint16_t pc = cpu_->regs.PC.get_pair16();
-
-    sp -= 2;
-    cpu_->regs.SP.set_pair16(sp);
-    memory_->store_mem(sp, pc & 0xFF);
-    memory_->store_mem(sp + 1, (pc >> 8) & 0xFF);
-
-    // Set preempted flag
-    xios_->set_preempted(true);
-
-    // Disable interrupts
-    cpu_->regs.IFF1 = 0;
-    cpu_->regs.IFF2 = 0;
-
-    // Jump to interrupt handler (RST 38H = address 0x0038)
-    cpu_->regs.PC.set_pair16(0x0038);
-
-    // Signal tick to XIOS
-    xios_->tick();
 }
