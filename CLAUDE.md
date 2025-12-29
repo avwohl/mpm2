@@ -306,19 +306,38 @@ The upstream cpmemu project provides `cpm_disk.py` for disk management. It creat
 ../cpmemu/util/cpm_disk.py list disks/mpm2_hd1k.img
 ```
 
-### MP/M II File Attributes (SYS)
+### MP/M II Console User Numbers
 
-**CRITICAL**: MP/M II requires the **SYS attribute** on command files (`.PRL`, `.COM`) in user 0 for them to be found when the TMP (Terminal Message Processor) runs in a different user area.
+**IMPORTANT**: In MP/M II, each console starts in a different user area by default:
+- Console 0 starts in user 0
+- Console 1 starts in user 1
+- Console 2 starts in user 2
+- Console 3 starts in user 3
 
-MP/M II command file search order:
-1. Default user on default drive
-2. User 0 on default drive (**requires SYS attribute**)
-3. Default user on system drive
-4. User 0 on system drive (**requires SYS attribute**)
+The prompt "3A>" means user 3, drive A (NOT console 3).
 
-If you see "DIR?" or similar "command not found" errors, the files likely don't have the SYS attribute set. Use `--sys` flag with `cpm_disk.py add` to set this attribute.
+### File Placement for Multi-User Systems
+
+For files to be found, they must be in the **same user area as the console** or in user 0 with the SYS attribute. However, the SYS attribute search appears to not work reliably in some MP/M II configurations.
+
+**Recommended approach**: Place files in the user area matching the console:
+```bash
+# For console 3 (user 3)
+../cpmemu/util/cpm_disk.py add -u 3 disks/mpm2_hd1k.img mpm2_external/mpm2dist/*.PRL
+../cpmemu/util/cpm_disk.py add -u 3 disks/mpm2_hd1k.img mpm2_external/mpm2dist/*.SPR
+../cpmemu/util/cpm_disk.py add -u 3 disks/mpm2_hd1k.img /path/to/MPM.SYS
+```
+
+### SYS Attribute (Alternative Approach)
+
+The SYS attribute is supposed to allow files in user 0 to be found from any user area. To set SYS attribute:
+```bash
+../cpmemu/util/cpm_disk.py add --sys disks/mpm2_hd1k.img mpm2_external/mpm2dist/*.PRL
+```
 
 The SYS attribute is bit 7 of the first byte of the extension in the CP/M directory entry (byte 9, e.g., 'P' becomes 0xD0 for a `.PRL` file).
+
+**Note**: The SYS attribute search for user 0 files may not work in all MP/M II configurations. If you see "DIR?" errors with SYS-attributed files in user 0, use the user-specific approach above.
 
 ## Building the XIOS
 
