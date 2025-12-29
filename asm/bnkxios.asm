@@ -326,6 +326,14 @@ DO_SYSINIT:
         IM      1
         EI
 
+        ; Enable tick interrupts
+        ; Note: XDOS should call STARTCLOCK, but in case it doesn't,
+        ; enable it here to ensure preemption works
+        LD      A, 0FFH
+        LD      (TICKN), A
+        LD      A, FUNC_STARTCLK
+        OUT     (XIOS_DISPATCH), A
+
         ; Notify emulator
         LD      A, FUNC_SYSINIT
         OUT     (XIOS_DISPATCH), A
@@ -352,6 +360,7 @@ DO_SWTSYS:
 
 DO_PDISP:
         ; Process dispatcher - called to switch processes
+        ; Trap to emulator to re-enable interrupts and return
         LD      A, FUNC_PDISP
         OUT     (XIOS_DISPATCH), A
         RET

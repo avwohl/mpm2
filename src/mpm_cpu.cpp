@@ -91,16 +91,7 @@ void MpmCpu::handle_bank_select(uint8_t bank) {
 
 void MpmCpu::halt(void) {
     // Z80 HALT instruction - CPU waits for interrupt
-    // In MP/M II context, this typically means system idle or error
-    std::cerr << "\n*** HALT instruction at PC=0x" << std::hex
-              << regs.PC.get_pair16() << std::dec << " ***\n";
-    std::cerr << "    Bank=" << (int)(banked_mem_ ? banked_mem_->current_bank() : 0)
-              << " SP=0x" << std::hex << regs.SP.get_pair16()
-              << " AF=0x" << regs.AF.get_pair16()
-              << " BC=0x" << regs.BC.get_pair16()
-              << " DE=0x" << regs.DE.get_pair16()
-              << " HL=0x" << regs.HL.get_pair16()
-              << std::dec << std::endl;
+    // In MP/M II context, this is the normal idle loop
     halted_ = true;
 }
 

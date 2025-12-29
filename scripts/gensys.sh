@@ -58,10 +58,15 @@ fi
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
 
-# Extract required SPR files from distribution disk
+# Copy required SPR files from distribution directory
+# (disk image versions may be corrupted by cpm_disk.py extraction)
 echo "Extracting SPR files from distribution..."
-python3 "$CPM_DISK" extract -o . "$DISKS_DIR/mpm2_hd1k.img" \
-    resbdos.spr bnkbdos.spr xdos.spr bnkxdos.spr tmp.spr gensys.com
+DIST_DIR="$PROJECT_DIR/mpm2_external/mpm2dist"
+for f in RESBDOS.SPR BNKBDOS.SPR XDOS.SPR BNKXDOS.SPR TMP.SPR GENSYS.COM; do
+    lf=$(echo "$f" | tr '[:upper:]' '[:lower:]')
+    cp "$DIST_DIR/$f" "./$lf"
+    echo "Extracted $lf -> ./$lf ($(wc -c < "./$lf" | tr -d ' ') bytes)"
+done
 
 # Copy our custom BNKXIOS.SPR (port-based I/O for emulator)
 if [ -f "$ASM_DIR/bnkxios.spr" ]; then
@@ -140,7 +145,9 @@ echo "MPM.SYS created ($(wc -c < mpm.sys | tr -d ' ') bytes)"
 
 # Get serial number from RESBDOS.SPR and patch MPMLDR.COM
 echo "Patching MPMLDR.COM serial number..."
-python3 "$CPM_DISK" extract -o . "$DISKS_DIR/mpm2_hd1k.img" mpmldr.com
+# Use original MPMLDR.COM from distribution, not from disk image
+# (disk image version may be corrupted or have wrong format)
+cp "$PROJECT_DIR/mpm2_external/mpm2dist/MPMLDR.COM" mpmldr.com
 
 # Extract serial from RESBDOS.SPR
 # The serial is 6 bytes after "RESEARCH " at offset 0x1F9-0x1FE: 00 14 01 00 05 68

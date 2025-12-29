@@ -377,6 +377,10 @@ void Z80Thread::thread_func() {
 
             // Request tick interrupt if clock is enabled
             if (xios_->clock_enabled()) {
+                static int tick_count_local = 0;
+                tick_count_local++;
+                // Skip first few ticks to let system initialize
+                if (tick_count_local < 5) continue;
                 cpu_->request_rst(7);  // RST 38H
                 xios_->set_preempted(true);
                 xios_->tick();

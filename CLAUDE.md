@@ -59,7 +59,24 @@ Manual byte poking leads to subtle errors. Use the tested DISKDEF.LIB macros fro
 
 ### Disk Formats
 
-**IMPORTANT: Use scripts/*.sh scripts to build disks. They use cpm_disk.py which creates hd1k images with no sector skew.**
+**IMPORTANT: Use `../cpmemu/util/cpm_disk.py` for all disk image operations. DO NOT use cpmtools (cpmls, cpmcp, mkfs.cpm) or diskdefs files.**
+
+```bash
+# List files on disk
+../cpmemu/util/cpm_disk.py list disks/mpm2_system.img
+
+# Add file to disk
+../cpmemu/util/cpm_disk.py add disks/mpm2_system.img localfile.com
+
+# Extract file from disk
+../cpmemu/util/cpm_disk.py extract disks/mpm2_system.img FILENAME.COM
+
+# Delete file
+../cpmemu/util/cpm_disk.py delete disks/mpm2_system.img FILENAME.COM
+
+# Create new hd1k disk
+../cpmemu/util/cpm_disk.py create disks/newdisk.img
+```
 
 The emulator uses disk images with **NO SECTOR SKEW** for simplicity. The hd1k format (8MB hard disk) is the primary supported format:
 
