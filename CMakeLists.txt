@@ -122,11 +122,5 @@ target_compile_options(mkboot PRIVATE
     -Wall -Wextra -Wpedantic
 )
 
-# MPM.SYS patching tool
-add_executable(patchmpm tools/patchmpm.cpp)
-target_compile_options(patchmpm PRIVATE
-    -Wall -Wextra -Wpedantic
-)
-
 # Install targets
-install(TARGETS mpm2_emu mkboot patchmpm RUNTIME DESTINATION bin)
+install(TARGETS mpm2_emu mkboot RUNTIME DESTINATION bin)

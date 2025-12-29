@@ -389,15 +389,14 @@ mpm2/
 │   ├── z80_thread.cpp
 │   └── mpm_cpu.cpp
 ├── tools/
-│   ├── mkboot.cpp        # Creates boot image from LDRBIOS + MPMLDR
-│   └── patchmpm.cpp      # Patches serial numbers in MPMLDR
+│   └── mkboot.cpp        # Creates boot image from LDRBIOS + MPMLDR
 ├── scripts/
 │   ├── build_all.sh      # Master build (runs all steps)
 │   ├── build_asm.sh      # Assemble Z80, build C++
 │   ├── build_hd1k.sh     # Create hd1k disk images
 │   └── gensys.sh         # Run GENSYS to create MPM.SYS
 ├── archive/              # Unused/experimental tools (kept for reference)
-│   ├── tools/            # mkspr, mkdisk, mkmpm, etc.
+│   ├── tools/            # mkspr, mkdisk, mkmpm, patchmpm, etc.
 │   └── scripts/          # fix_extents.sh, etc.
 ├── disks/                # Generated disk/boot images (in .gitignore)
 ├── build/                # CMake build directory
