@@ -264,11 +264,10 @@ int main(int argc, char* argv[]) {
         std::cout << "SSH server listening on port " << ssh_port << "\n";
         std::cout << "Connect with: ssh -p " << ssh_port << " user@localhost\n\n";
     } else {
-        std::cout << "Running in local console mode (SSH disabled)\n\n";
+        std::cout << "Local console mode (-l flag)\n\n";
     }
 #else
-    std::cout << "SSH support not available (wolfSSH not found)\n";
-    std::cout << "Running in local mode only\n\n";
+    std::cout << "SSH not compiled in - local console only\n\n";
     (void)ssh_port;
     (void)host_key;
 
@@ -364,12 +363,15 @@ int main(int argc, char* argv[]) {
     }
 #else
     // Local console mode - read from stdin and broadcast to all local consoles
+    std::cerr << "[DEBUG] Entering local console loop\n";
     if (setup_raw_terminal()) {
+        std::cerr << "[DEBUG] Raw terminal mode enabled\n";
         while (!g_shutdown_requested && !z80.timed_out()) {
             // Poll stdin for input
             char ch;
             ssize_t n = read(STDIN_FILENO, &ch, 1);
             if (n > 0) {
+                std::cerr << "[DEBUG] Got char: 0x" << std::hex << (int)(unsigned char)ch << std::dec << "\n";
                 // Handle Ctrl+C for shutdown
                 if (ch == 0x03) {
                     g_shutdown_requested = 1;
@@ -380,6 +382,7 @@ int main(int argc, char* argv[]) {
                     Console* con = ConsoleManager::instance().get(i);
                     if (con && con->is_local()) {
                         con->input_queue().try_write(static_cast<uint8_t>(ch));
+                        std::cerr << "[DEBUG] Queued to console " << i << "\n";
                     }
                 }
             } else {
@@ -389,6 +392,7 @@ int main(int argc, char* argv[]) {
         }
         restore_terminal();
     } else {
+        std::cerr << "[DEBUG] Raw terminal setup failed, using select() loop\n";
         // Not a TTY - still read from stdin (for piped input) but with select() for timeout
         fd_set rfds;
         bool stdin_eof = false;
@@ -408,11 +412,13 @@ int main(int argc, char* argv[]) {
                 char ch;
                 ssize_t n = read(STDIN_FILENO, &ch, 1);
                 if (n > 0) {
+                    std::cerr << "[DEBUG] Select loop got char: 0x" << std::hex << (int)(unsigned char)ch << std::dec << "\n";
                     // Broadcast to all local mode consoles
                     for (int i = 0; i < MAX_CONSOLES; i++) {
                         Console* con = ConsoleManager::instance().get(i);
                         if (con && con->is_local()) {
                             con->input_queue().try_write(static_cast<uint8_t>(ch));
+                            std::cerr << "[DEBUG] Queued to console " << i << "\n";
                         }
                     }
                 } else if (n == 0) {

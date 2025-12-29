@@ -24,6 +24,19 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
 }
 
 void XIOS::handle_port_dispatch(uint8_t func) {
+    // Debug: count XIOS calls after initial boot
+    static int xios_call_count = 0;
+    xios_call_count++;
+    // Show periodic sample and the final count
+    if (xios_call_count == 1000 || xios_call_count == 10000) {
+        std::cerr << "[DEBUG XIOS] Call #" << xios_call_count << " func=0x" << std::hex << (int)func << std::dec << "\n";
+    }
+    static int last_reported = 0;
+    if (xios_call_count - last_reported > 100000) {
+        std::cerr << "[DEBUG XIOS] Total calls so far: " << xios_call_count << "\n";
+        last_reported = xios_call_count;
+    }
+
     // Temporarily set skip_ret flag so handlers don't do RET
     skip_ret_ = true;
 
@@ -106,6 +119,17 @@ void XIOS::do_const() {
         status = con->const_status();
     }
 
+    // Debug: count CONST calls and show when input is available
+    static int const_count = 0;
+    const_count++;
+    if (const_count <= 5 || const_count % 10000 == 0) {
+        std::cerr << "[DEBUG XIOS] CONST #" << const_count << " console=" << (int)console
+                  << " status=0x" << std::hex << (int)status << std::dec << "\n";
+    }
+    if (status != 0x00) {
+        std::cerr << "[DEBUG XIOS] CONST console=" << (int)console << " INPUT READY!\n";
+    }
+
     cpu_->regs.AF.set_high(status);
     do_ret();
 }
@@ -118,6 +142,12 @@ void XIOS::do_conin() {
     if (con) {
         ch = con->read_char();
     }
+
+    // Debug: show character read
+    if (ch != 0x00) {
+        std::cerr << "[DEBUG XIOS] CONIN console=" << (int)console << " char=0x" << std::hex << (int)ch << std::dec << "\n";
+    }
+
     cpu_->regs.AF.set_high(ch);
     do_ret();
 }
@@ -266,6 +296,13 @@ void XIOS::do_polldevice() {
     uint8_t device = cpu_->regs.BC.get_low();
     uint8_t result = 0x00;
 
+    // Debug: count POLLDEVICE calls
+    static int poll_count = 0;
+    poll_count++;
+    if (poll_count <= 20 || poll_count % 10000 == 0) {
+        std::cerr << "[DEBUG] POLLDEVICE #" << poll_count << " device=" << (int)device << "\n";
+    }
+
     if (device < 8) {
         int console = device / 2;
         bool is_input = (device & 1) != 0;
@@ -275,6 +312,7 @@ void XIOS::do_polldevice() {
             Console* con = ConsoleManager::instance().get(console);
             if (con && con->const_status()) {
                 result = 0xFF;
+                std::cerr << "[DEBUG XIOS] POLLDEV input device=" << (int)device << " console=" << console << " READY\n";
             }
         } else {
             // Console output - always ready
@@ -297,7 +335,15 @@ void XIOS::do_stopclock() {
 }
 
 void XIOS::do_exitregion() {
-    // Let the Z80 code handle EI based on its PREEMP variable
+    // Exit mutual exclusion region - re-enable interrupts
+    // This is called when leaving a critical section
+    static int exitrgn_count = 0;
+    exitrgn_count++;
+    if (exitrgn_count <= 10) {
+        std::cerr << "[DEBUG] EXITREGION #" << exitrgn_count << " IFF was " << (int)cpu_->regs.IFF1 << "\n";
+    }
+    cpu_->regs.IFF1 = 1;
+    cpu_->regs.IFF2 = 1;
     do_ret();
 }
 
@@ -389,9 +435,8 @@ void XIOS::do_pdisp() {
 }
 
 void XIOS::do_xdosent() {
-    // XDOS entry point
-    // Called with C = function number, DE = parameter
-    // For now, just return - XDOS is loaded and handles this itself
+    // XDOS entry point - no longer used
+    // BNKXIOS now jumps directly to XIOSJMP XDOS entry
     do_ret();
 }
 

@@ -136,6 +136,7 @@ DO_CONIN:
         ; Console input - D = console number
         ; Returns A = character
         ; Per MP/M II spec: WAIT until character is available
+        ; Note: Using PDISP instead of POLL for better interrupt handling
 CONIN_LOOP:
         ; First check if character is ready (CONST)
         LD      A, FUNC_CONST
@@ -143,19 +144,13 @@ CONIN_LOOP:
         OR      A
         JR      NZ, CONIN_READY
 
-        ; No character ready - yield via XDOS POLL
-        ; POLL function = 131, device in E
-        ; Console input devices: 1,3,5,7 for consoles 0-3 (device = console*2 + 1)
+        ; No character ready - yield to dispatcher
+        ; This allows other processes to run without blocking
         PUSH    DE              ; Save console number
-        LD      A, D            ; Console number (0-3)
-        ADD     A, A            ; A = console * 2
-        INC     A               ; A = console * 2 + 1
-        LD      E, A            ; E = device number
-        LD      C, POLL         ; C = POLL function (131)
-        CALL    XDOS
+        CALL    PDISP           ; Yield to other processes
         POP     DE              ; Restore console number
 
-        ; After poll returns, check again
+        ; Check again
         JR      CONIN_LOOP
 
 CONIN_READY:
@@ -363,9 +358,9 @@ DO_PDISP:
 
 DO_XDOSENT:
         ; XDOS entry point
-        LD      A, FUNC_XDOSENT
-        OUT     (XIOS_DISPATCH), A
-        RET
+        ; Jump directly to XIOSJMP XDOS entry (FC00H + 57H = FC57H)
+        ; This is patched by GENSYS to point to real XDOS
+        JP      0FC57H
 
 ; =============================================================================
 ; Interrupt Handler - 60Hz tick
@@ -393,6 +388,20 @@ INTHND:
         CALL    XDOS
 
 NOTICK:
+        ; Check console input devices and set flags if input ready
+        ; Simplified: just poll devices without FLAGSET for now
+        ; Device 1,3,5,7 -> Console 0,1,2,3
+        LD      B, 4            ; Console count
+        LD      D, 1            ; Start with device 1 (console 0 input)
+CHKCON:
+        LD      C, D            ; C = device number for POLLDEVICE
+        LD      A, FUNC_POLLDEV
+        OUT     (XIOS_DISPATCH), A
+        ; Result in A - we're just polling to trigger wakeup check
+        INC     D               ; Next device (skip by 2 to get odd numbers: 1,3,5,7)
+        INC     D
+        DJNZ    CHKCON
+
         ; Update 1-second counter (60 ticks = 1 second)
         LD      HL, CNT60
         DEC     (HL)

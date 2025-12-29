@@ -369,6 +369,14 @@ void Z80Thread::thread_func() {
         if (now >= next_tick_) {
             next_tick_ += TICK_INTERVAL;
 
+            // Debug: count ticks
+            static int tick_counter = 0;
+            tick_counter++;
+            if (tick_counter <= 5 || tick_counter % 60 == 0) {
+                std::cerr << "[TICK #" << tick_counter << "] clock=" << xios_->clock_enabled()
+                          << " IFF=" << (int)cpu_->regs.IFF1 << "\n";
+            }
+
             // Deliver tick interrupt if clock is enabled and interrupts are enabled
             if (xios_->clock_enabled() && cpu_->regs.IFF1) {
                 deliver_tick_interrupt();
