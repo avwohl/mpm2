@@ -110,9 +110,11 @@ void XIOS::do_const() {
     }
 
     // Debug: trace all console polling (first 20 calls per console)
-    static int const_debug[8] = {0};
-    if (console < 8 && const_debug[console]++ < 5) {
-        std::cerr << "[CONST] console=" << (int)console << " status=" << (status ? "ready" : "empty") << "\n";
+    if (g_debug_enabled) {
+        static int const_debug[8] = {0};
+        if (console < 8 && const_debug[console]++ < 5) {
+            std::cerr << "[CONST] console=" << (int)console << " status=" << (status ? "ready" : "empty") << "\n";
+        }
     }
 
     cpu_->regs.AF.set_high(status);
@@ -129,33 +131,35 @@ void XIOS::do_conin() {
     }
 
     // Debug: trace console input and check address 5 when CR received
-    static int conin_debug = 0;
-    if (ch != 0 && ch != 0x1A && conin_debug++ < 20) {
-        std::cerr << "[CONIN] console=" << (int)console << " char='"
-                  << (ch >= 0x20 && ch < 0x7F ? (char)ch : '?') << "' (0x"
-                  << std::hex << (int)ch << std::dec << ")\n";
-        // On CR, check what's at address 5 in current bank and what's at XDOS entry
-        if (ch == 0x0D) {
-            uint8_t bank = mem_->current_bank();
-            uint8_t b0 = mem_->read_bank(bank, 0x0005);
-            uint8_t b1 = mem_->read_bank(bank, 0x0006);
-            uint8_t b2 = mem_->read_bank(bank, 0x0007);
-            std::cerr << "[CONIN CR] bank=" << (int)bank << " addr5: "
-                      << std::hex << (int)b0 << " " << (int)b1 << " " << (int)b2 << std::dec;
-            if (b0 == 0xC3) {
-                uint16_t target = b1 | (b2 << 8);
-                std::cerr << " = JP " << std::hex << target << std::dec;
-                // Also check what's at the target address (XDOS entry)
-                uint8_t xb0 = mem_->fetch_mem(target);
-                uint8_t xb1 = mem_->fetch_mem(target + 1);
-                uint8_t xb2 = mem_->fetch_mem(target + 2);
-                std::cerr << "\n[XDOS " << target << "] " << (int)xb0 << " " << (int)xb1 << " " << (int)xb2;
-                if (xb0 == 0xC3) {
-                    uint16_t xtarget = xb1 | (xb2 << 8);
-                    std::cerr << " = JP " << xtarget;
+    if (g_debug_enabled) {
+        static int conin_debug = 0;
+        if (ch != 0 && ch != 0x1A && conin_debug++ < 20) {
+            std::cerr << "[CONIN] console=" << (int)console << " char='"
+                      << (ch >= 0x20 && ch < 0x7F ? (char)ch : '?') << "' (0x"
+                      << std::hex << (int)ch << std::dec << ")\n";
+            // On CR, check what's at address 5 in current bank and what's at XDOS entry
+            if (ch == 0x0D) {
+                uint8_t bank = mem_->current_bank();
+                uint8_t b0 = mem_->read_bank(bank, 0x0005);
+                uint8_t b1 = mem_->read_bank(bank, 0x0006);
+                uint8_t b2 = mem_->read_bank(bank, 0x0007);
+                std::cerr << "[CONIN CR] bank=" << (int)bank << " addr5: "
+                          << std::hex << (int)b0 << " " << (int)b1 << " " << (int)b2 << std::dec;
+                if (b0 == 0xC3) {
+                    uint16_t target = b1 | (b2 << 8);
+                    std::cerr << " = JP " << std::hex << target << std::dec;
+                    // Also check what's at the target address (XDOS entry)
+                    uint8_t xb0 = mem_->fetch_mem(target);
+                    uint8_t xb1 = mem_->fetch_mem(target + 1);
+                    uint8_t xb2 = mem_->fetch_mem(target + 2);
+                    std::cerr << "\n[XDOS " << target << "] " << (int)xb0 << " " << (int)xb1 << " " << (int)xb2;
+                    if (xb0 == 0xC3) {
+                        uint16_t xtarget = xb1 | (xb2 << 8);
+                        std::cerr << " = JP " << xtarget;
+                    }
                 }
+                std::cerr << "\n";
             }
-            std::cerr << "\n";
         }
     }
 
@@ -169,9 +173,11 @@ void XIOS::do_conout() {
     uint8_t ch = cpu_->regs.BC.get_low();        // C = character
 
     // Debug: trace non-console-0 output
-    static int conout_debug = 0;
-    if (console != 0 && conout_debug++ < 10 && ch >= 0x20 && ch < 0x7F) {
-        std::cerr << "[CONOUT] console=" << (int)console << " char='" << (char)ch << "'\n";
+    if (g_debug_enabled) {
+        static int conout_debug = 0;
+        if (console != 0 && conout_debug++ < 10 && ch >= 0x20 && ch < 0x7F) {
+            std::cerr << "[CONOUT] console=" << (int)console << " char='" << (char)ch << "'\n";
+        }
     }
 
     // Get the specified console
@@ -517,11 +523,13 @@ void XIOS::do_pdisp() {
 
 void XIOS::do_xdosent() {
     // XDOS entry point - debug: show what's at FC57H
-    uint8_t b0 = mem_->fetch_mem(0xFC57);
-    uint8_t b1 = mem_->fetch_mem(0xFC58);
-    uint8_t b2 = mem_->fetch_mem(0xFC59);
-    std::cerr << "[XDOSENT] FC57H contains: " << std::hex
-              << (int)b0 << " " << (int)b1 << " " << (int)b2 << std::dec << std::endl;
+    if (g_debug_enabled) {
+        uint8_t b0 = mem_->fetch_mem(0xFC57);
+        uint8_t b1 = mem_->fetch_mem(0xFC58);
+        uint8_t b2 = mem_->fetch_mem(0xFC59);
+        std::cerr << "[XDOSENT] FC57H contains: " << std::hex
+                  << (int)b0 << " " << (int)b1 << " " << (int)b2 << std::dec << std::endl;
+    }
     do_ret();
 }
 
