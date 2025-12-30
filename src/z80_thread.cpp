@@ -27,8 +27,10 @@ Z80Thread::~Z80Thread() {
 }
 
 bool Z80Thread::init(const std::string& boot_image) {
-    // Create memory (4 banks = 128KB + 32KB common)
-    memory_ = std::make_unique<BankedMemory>(4);
+    // Create memory (5 banks for MP/M II with 4 user segments plus system)
+    // Banks: 0=system, 1-4=user TMPs
+    // With 5 banks: 5 * 48KB banked + 16KB common = 256KB total
+    memory_ = std::make_unique<BankedMemory>(5);
 
     // Create CPU with memory (MpmCpu extends qkz80 with I/O port handling)
     cpu_ = std::make_unique<MpmCpu>(memory_.get());
@@ -383,9 +385,11 @@ void Z80Thread::thread_func() {
                 tick_count_local++;
                 // Skip first few ticks to let boot complete initial setup
                 if (tick_count_local < 10) continue;
-                if (g_debug_enabled && (tick_count_local <= 20 || (tick_count_local % 60) == 0)) {
-                    std::cerr << "[TICK] count=" << tick_count_local
+                // Log first 30 ticks and then every 60 (only in debug mode)
+                if (g_debug_enabled && (tick_count_local <= 30 || (tick_count_local % 60) == 0)) {
+                    std::cerr << "[TICK] #" << tick_count_local
                               << " IFF=" << (int)cpu_->regs.IFF1
+                              << " bank=" << (int)memory_->current_bank()
                               << " PC=0x" << std::hex << cpu_->regs.PC.get_pair16() << std::dec << "\n";
                 }
                 // Check IFF state and request interrupt if enabled
@@ -421,6 +425,39 @@ void Z80Thread::thread_func() {
             if (++tick_count_ >= 60) {
                 tick_count_ = 0;
                 xios_->one_second_tick();
+
+                // Dump TMPD area once after 2 seconds (only in debug mode)
+                static int sec_count = 0;
+                sec_count++;
+                if (g_debug_enabled && sec_count == 2) {
+                    std::cerr << "[TICK] TMPD dump after 2 seconds:\n";
+                    for (int tmp = 0; tmp < 4; tmp++) {
+                        int base = 0xFE00 + (tmp * 64);
+                        std::cerr << "  TMP" << tmp << " at 0x" << std::hex << base << ": ";
+                        for (int i = 0; i < 16; i++) {
+                            std::cerr << std::setw(2) << std::setfill('0')
+                                      << (int)memory_->read_common(base + i) << " ";
+                        }
+                        std::cerr << "\n";
+                    }
+                    // Also dump process descriptors by looking for active ones
+                    std::cerr << "[TICK] Looking for active process descriptors E900-EA00:\n";
+                    for (int pd = 0; pd < 16; pd++) {
+                        int addr = 0xE900 + pd * 16;
+                        // Check if this looks like a valid PD (non-zero link or status)
+                        uint8_t first = memory_->read_common(addr);
+                        uint8_t second = memory_->read_common(addr + 1);
+                        if (first != 0 || second != 0) {
+                            std::cerr << "  0x" << std::hex << addr << ": ";
+                            for (int i = 0; i < 16; i++) {
+                                std::cerr << std::setw(2) << std::setfill('0')
+                                          << (int)memory_->read_common(addr + i) << " ";
+                            }
+                            std::cerr << "\n";
+                        }
+                    }
+                    std::cerr << std::dec;
+                }
             }
         }
 
@@ -437,10 +474,52 @@ void Z80Thread::thread_func() {
         }
 
         // Deliver any pending interrupts before executing
-        cpu_->check_interrupts();
+        uint16_t pc_before = cpu_->regs.PC.get_pair16();
+        bool delivered = cpu_->check_interrupts();
+        uint16_t pc_after = cpu_->regs.PC.get_pair16();
+
+        // Log when interrupt is actually delivered (only in debug mode)
+        if (g_debug_enabled && delivered) {
+            static int int_count = 0;
+            int_count++;
+            if (int_count <= 10) {
+                std::cerr << "[INT] #" << int_count
+                          << " delivered, PC: 0x" << std::hex << pc_before
+                          << " -> 0x" << pc_after << std::dec << "\n";
+            }
+        }
 
         // Execute one instruction
         cpu_->execute();
         instruction_count_++;
+
+        // Trace XDOS calls (only in debug mode)
+        static bool traced_creates = false;
+        if (g_debug_enabled && !traced_creates) {
+            uint16_t pc = cpu_->regs.PC.get_pair16();
+            // Check if PC is at XDOS entry point
+            if (pc == 0xCE00 || pc == 0xCE06) {
+                uint8_t func = cpu_->regs.BC.get_low();
+                // XDOS function 144 (0x90) = CREATE PROCESS
+                if (func == 0x90) {
+                    uint16_t pd_addr = cpu_->regs.DE.get_pair16();
+                    // Read process name from PD offset 6-13
+                    std::cerr << "[XDOS CREATE] PD=0x" << std::hex << pd_addr
+                              << " name='";
+                    for (int i = 6; i < 14; i++) {
+                        uint8_t ch = memory_->read_common(pd_addr + i) & 0x7F;
+                        if (ch >= 0x20 && ch < 0x7F) {
+                            std::cerr << (char)ch;
+                        }
+                    }
+                    std::cerr << "'" << std::dec << "\n";
+                }
+                // XDOS function 143 (0x8F) = TERMINATE
+                if (func == 0x8F) {
+                    std::cerr << "[XDOS TERMINATE] E=" << (int)cpu_->regs.DE.get_low() << "\n";
+                    traced_creates = true;  // Stop tracing after init terminates
+                }
+            }
+        }
     }
 }
