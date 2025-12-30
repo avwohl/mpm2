@@ -8,6 +8,7 @@
 #include "disk.h"
 #include "qkz80.h"
 #include <iostream>
+#include <iomanip>
 #include <set>
 
 extern bool g_debug_enabled;
