@@ -292,6 +292,23 @@ bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
     // at C757 should jump to E79C (the real XDOS BDOS entry), NOT to CE00.
     // DO NOT overwrite these - they are correct as loaded!
 
+    // Debug: show COMMONBASE entries after loading
+    uint16_t commonbase = bnkxios_base * 256 + 0x4B;
+    std::cerr << "COMMONBASE at " << std::hex << commonbase << ":\n";
+    for (int i = 0; i < 18; i += 3) {
+        uint8_t op = memory_->read_common(commonbase + i);
+        uint16_t addr = memory_->read_common(commonbase + i + 1) |
+                       (memory_->read_common(commonbase + i + 2) << 8);
+        const char* names[] = {"COLDBOOT", "SWTUSER", "SWTSYS", "PDISP", "XDOS", "SYSDAT"};
+        std::cerr << "  " << names[i/3] << ": ";
+        if (op == 0xC3) {
+            std::cerr << "JP " << std::setw(4) << std::setfill('0') << addr << "H\n";
+        } else {
+            std::cerr << "?? (" << (int)op << ")\n";
+        }
+    }
+    std::cerr << std::dec << std::setfill(' ');
+
     return true;
 }
 
@@ -369,15 +386,32 @@ void Z80Thread::thread_func() {
                               << " IFF=" << (int)cpu_->regs.IFF1
                               << " PC=0x" << std::hex << cpu_->regs.PC.get_pair16() << std::dec << "\n";
                 }
-                // Force-enable interrupts if they're stuck off
-                // MP/M dispatcher should re-enable them, but if it fails to,
-                // we enable them here to ensure timer interrupts can be delivered
-                if (!cpu_->regs.IFF1) {
-                    cpu_->regs.IFF1 = 1;
-                    cpu_->regs.IFF2 = 1;
+                // Check IFF state and request interrupt if enabled
+                // Z80 hardware automatically disables interrupts (IFF=0) when
+                // an interrupt is acknowledged. The XDOS dispatcher should
+                // re-enable them with EI before resuming processes.
+                //
+                // If IFF stays 0 after first interrupt, XDOS isn't EI'ing properly
+                // In that case, we need to force-enable to keep the system running.
+                static int iff_zero_count = 0;
+                if (cpu_->regs.IFF1) {
+                    iff_zero_count = 0;  // Reset counter
+                    cpu_->request_rst(7);  // RST 38H
+                } else {
+                    iff_zero_count++;
+                    // If IFF has been 0 for too many ticks, force-enable
+                    // This works around XDOS not EI'ing when returning to process
+                    if (iff_zero_count >= 5 && tick_count_local > 15) {
+                        if (g_debug_enabled && iff_zero_count == 5) {
+                            std::cerr << "[TICK] Forcing IFF=1 after " << iff_zero_count
+                                      << " ticks with IFF=0, PC=0x" << std::hex
+                                      << cpu_->regs.PC.get_pair16() << std::dec << "\n";
+                        }
+                        cpu_->regs.IFF1 = 1;
+                        cpu_->regs.IFF2 = 1;
+                        cpu_->request_rst(7);
+                    }
                 }
-                cpu_->request_rst(7);  // RST 38H
-                xios_->set_preempted(true);
                 xios_->tick();
             }
 

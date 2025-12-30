@@ -94,21 +94,22 @@ WBOOT:  JP      DO_WBOOT        ; 03h - Warm start
 
 ; =============================================================================
 ; Commonbase structure - patched by GENSYS, used by XDOS/BNKBDOS
-; These addresses are returned by BOOT and used for bank switching
+; GENSYS patches SWTUSER, SWTSYS, PDISP, XDOS, SYSDAT to real addresses
+; Use JP $-$ as placeholders (generates JP 0000 which GENSYS recognizes)
 ; =============================================================================
 
 COMMONBASE:
         JP      DO_BOOT         ; 4Bh - Cold start (returns HL = commonbase)
 SWTUSER:
-        JP      DO_SWTUSER      ; 4Eh - Switch to user bank
+        JP      $-$             ; 4Eh - Switch to user bank (patched by GENSYS)
 SWTSYS:
-        JP      DO_SWTSYS       ; 51h - Switch to system bank
+        JP      $-$             ; 51h - Switch to system bank (patched by GENSYS)
 PDISP:
-        JP      DO_PDISP        ; 54h - MP/M dispatcher
+        JP      $-$             ; 54h - MP/M dispatcher (patched by GENSYS -> XDOS+3)
 XDOS:
-        JP      DO_XDOSENT      ; 57h - XDOS entry
+        JP      $-$             ; 57h - XDOS entry (patched by GENSYS -> XDOS+6)
 SYSDAT:
-        DW      0FF00H          ; 5Ah - System data page address (patched by GENSYS)
+        DW      $-$             ; 5Ah - System data page address (patched by GENSYS)
 
 ; =============================================================================
 ; Entry point implementations using port dispatch
@@ -324,19 +325,15 @@ DO_SYSINIT:
 
         ; Set interrupt mode 1 (Z80)
         IM      1
-        EI
 
-        ; Enable tick interrupts
-        ; Note: XDOS should call STARTCLOCK, but in case it doesn't,
-        ; enable it here to ensure preemption works
-        LD      A, 0FFH
-        LD      (TICKN), A
-        LD      A, FUNC_STARTCLK
-        OUT     (XIOS_DISPATCH), A
-
-        ; Notify emulator
+        ; Notify emulator of initialization
         LD      A, FUNC_SYSINIT
         OUT     (XIOS_DISPATCH), A
+
+        ; IMPORTANT: Enable interrupts LAST, after all initialization
+        ; Do NOT enable TICKN here - XDOS will call STARTCLOCK when ready
+        ; (Per SIMH XIOS: tickn starts at 0, STARTCLOCK sets it to 0xFF)
+        EI
         RET
 
 DO_IDLE:
@@ -524,11 +521,12 @@ ALV0:   DS      256             ; Allocation vector drive A
 ALV1:   DS      256             ; Allocation vector drive B
 ALV2:   DS      256             ; Allocation vector drive C
 ALV3:   DS      256             ; Allocation vector drive D
-; CSV buffers - minimal since CKS=0 (fixed disk, no checksums)
-; Provide valid addresses to avoid null pointer issues
-CSV0:   DS      1               ; Checksum vector drive A
-CSV1:   DS      1               ; Checksum vector drive B
-CSV2:   DS      1               ; Checksum vector drive C
-CSV3:   DS      1               ; Checksum vector drive D
+; CSV buffers - size = (DRM/4)+1 = (1023/4)+1 = 256 bytes each
+; Even with CKS=0 in DPB, BNKBDOS may still use this area
+; SIMH XIOS uses this formula for all drives
+CSV0:   DS      256             ; Checksum vector drive A
+CSV1:   DS      256             ; Checksum vector drive B
+CSV2:   DS      256             ; Checksum vector drive C
+CSV3:   DS      256             ; Checksum vector drive D
 
         END

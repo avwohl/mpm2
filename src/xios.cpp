@@ -325,14 +325,15 @@ void XIOS::do_stopclock() {
 }
 
 void XIOS::do_exitregion() {
-    // Exit mutual exclusion region - re-enable interrupts
+    // Exit mutual exclusion region
+    // NOTE: Do NOT enable interrupts here - the Z80 EXITRGN code handles it
+    // It checks PREEMP flag and only does EI if not preempted
+    // (Per SIMH XIOS pattern)
     static int exitregion_count = 0;
     exitregion_count++;
     if (g_debug_enabled && (exitregion_count % 100) == 0) {
-        std::cerr << "[EXITREGION] count=" << exitregion_count << " IFF was=" << (int)cpu_->regs.IFF1 << "\n";
+        std::cerr << "[EXITREGION] count=" << exitregion_count << " IFF=" << (int)cpu_->regs.IFF1 << "\n";
     }
-    cpu_->regs.IFF1 = 1;
-    cpu_->regs.IFF2 = 1;
     do_ret();
 }
 
@@ -397,18 +398,11 @@ void XIOS::do_systeminit() {
 
     // IMPORTANT: Enable the clock NOW to allow timer-based preemption.
     //
-    // The issue: CONBDOS console input (conin) uses a busy-loop that calls
-    // XIOS CONIN repeatedly until a character is available. If TMP starts
-    // running before STARTCLOCK is called, it will busy-loop forever waiting
-    // for console input, preventing Init from creating other TMPs.
-    //
-    // By enabling the clock at SYSINIT, timer interrupts (60Hz) will preempt
-    // the busy-looping TMP, giving Init time slices to complete initialization.
-    //
-    // The Z80 SYSINIT code does EI, so interrupts will be enabled at the CPU
-    // level. We just need to ensure our timer thread delivers the interrupts.
+    // Enable timer interrupts from SYSINIT (per SIMH pattern: startTimerInterrupts
+    // is sent during SYSINIT via initsequence). The Z80 TICKN flag (set by
+    // STARTCLOCK) controls whether INTHND calls FLAGSET for process scheduling,
+    // but the timer runs regardless so PDISP is called on each tick.
     tick_enabled_.store(true);
-
     do_ret();
 }
 
