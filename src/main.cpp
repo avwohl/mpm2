@@ -93,6 +93,13 @@ void print_usage(const char* prog) {
 }
 
 int main(int argc, char* argv[]) {
+    // Check DEBUG environment variable
+    if (const char* debug_env = std::getenv("DEBUG")) {
+        if (std::string(debug_env) == "1" || std::string(debug_env) == "true") {
+            g_debug_enabled = true;
+        }
+    }
+
     // Default options
     int ssh_port = 2222;
     std::string host_key = "keys/ssh_host_rsa_key.der";

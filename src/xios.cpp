@@ -369,6 +369,15 @@ void XIOS::do_systeminit() {
     // Initialize consoles
     ConsoleManager::instance().init();
 
+    // Set up address 0 (WBOOT entry) in all banks - jumps to XIOSJMP table
+    // SIMH XIOS does this: puts JP <HL> at address 0 where HL = XIOSJMP (FC00H)
+    uint16_t xiosjmp = 0xFC00;
+    for (int bank = 0; bank <= 4; bank++) {
+        mem_->write_bank(bank, 0x0000, 0xC3);  // JP opcode
+        mem_->write_bank(bank, 0x0001, xiosjmp & 0xFF);
+        mem_->write_bank(bank, 0x0002, (xiosjmp >> 8) & 0xFF);
+    }
+
     // Set up address 5 (BDOS/XDOS entry) in all banks
     // XDOS is at CE00H, entry point is CE06H
     // This is normally done by CLI, but we need to ensure it's in all banks
