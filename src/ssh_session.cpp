@@ -100,10 +100,7 @@ void SSHSession::thread_func() {
     char banner[128];
     snprintf(banner, sizeof(banner),
              "\r\nMP/M II Console %d\r\n\r\n", console_id_);
-    int send_ret = wolfSSH_stream_send(ssh_, reinterpret_cast<byte*>(banner), strlen(banner));
-    if (send_ret < 0) {
-        std::cerr << "[SSH] Banner send failed: " << wolfSSH_get_error(ssh_) << "\n";
-    }
+    wolfSSH_stream_send(ssh_, reinterpret_cast<byte*>(banner), strlen(banner));
 
     uint8_t buf[256];
 

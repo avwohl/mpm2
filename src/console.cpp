@@ -86,8 +86,10 @@ Console* ConsoleManager::get(int id) {
 }
 
 Console* ConsoleManager::find_free() {
-    // Assign consoles starting from 0 (MP/M II uses all consoles for users)
-    for (int i = 0; i < MAX_CONSOLES; i++) {
+    // MP/M II typically has 4 consoles (0-3), with TMP running on console 3
+    // Assign from highest down so first connection gets console 3 where TMP is active
+    constexpr int MPM_MAX_CONSOLES = 4;  // MP/M II typically uses 4 consoles
+    for (int i = MPM_MAX_CONSOLES - 1; i >= 0; i--) {
         if (consoles_[i] && !consoles_[i]->is_connected()) {
             return consoles_[i].get();
         }

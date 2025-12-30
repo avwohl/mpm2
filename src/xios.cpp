@@ -8,6 +8,7 @@
 #include "disk.h"
 #include "qkz80.h"
 #include <iostream>
+#include <set>
 
 extern bool g_debug_enabled;
 
@@ -62,7 +63,13 @@ void XIOS::handle_port_dispatch(uint8_t func) {
         case XIOS_SYSDAT:     do_sysdat(); break;
 
         default:
-            std::cerr << "[XIOS PORT] Unknown function 0x" << std::hex << (int)func << std::dec << std::endl;
+            // Only warn once per unknown function to avoid spamming
+            static std::set<uint8_t> warned_funcs;
+            if (warned_funcs.find(func) == warned_funcs.end()) {
+                warned_funcs.insert(func);
+                std::cerr << "[XIOS PORT] Unknown function 0x" << std::hex << (int)func << std::dec
+                          << " (further occurrences suppressed)\n";
+            }
             break;
     }
 
