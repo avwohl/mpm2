@@ -2,6 +2,8 @@
 
 A Z80-based MP/M II emulator with SSH terminal access. Multiple users can connect simultaneously to run CP/M-compatible software.
 
+**[MP/M II Command Reference](docs/mpm2_summary.pdf)** - Complete guide to all commands and utilities
+
 ## Quick Start
 
 ```bash
@@ -164,6 +166,7 @@ GPL-3.0-or-later
 
 ## References
 
-- [MP/M II System Guide](mpm2_external/docs/)
+- [MP/M II Command Reference](docs/mpm2_summary.pdf) - Quick reference for all commands
+- [MP/M II System Guide](mpm2_external/docs/) - Original Digital Research documentation
 - [RomWBW](https://github.com/wwarthen/RomWBW) - hd1k disk format
 - [cpmemu](https://github.com/avwohl/cpmemu) - Z80 emulator with cpm_disk.py utility
