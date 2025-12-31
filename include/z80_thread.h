@@ -77,6 +77,10 @@ private:
     int timeout_seconds_ = 0;  // 0 = no timeout
     std::chrono::steady_clock::time_point start_time_;
     std::atomic<bool> timed_out_{false};
+
+    // System configuration (from SYSDAT)
+    int num_consoles_ = 8;   // Number of consoles (from SYSDAT offset 1)
+    int num_mem_segs_ = 8;   // Number of memory segments (from SYSDAT offset 15)
 };
 
 #endif // Z80_THREAD_H

@@ -108,19 +108,6 @@ void MpmCpu::halt(void) {
 }
 
 void MpmCpu::execute(void) {
-    uint16_t pc = regs.PC.get_pair16();
-
-    // Trace interrupt handler entry (INTHND at C437)
-    static int inthnd_entry_count = 0;
-    if (pc == 0xC437) {
-        inthnd_entry_count++;
-        if (inthnd_entry_count <= 20 || (inthnd_entry_count % 60) == 0) {
-            uint8_t tickn = mem->fetch_mem(0xC463);  // TICKN location in BNKXIOS
-            std::cerr << "[INTHND] #" << inthnd_entry_count
-                      << " TICKN=0x" << std::hex << (int)tickn << std::dec << "\n";
-        }
-    }
-
     // Call the base class execute
     qkz80::execute();
 }

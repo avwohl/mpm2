@@ -93,6 +93,157 @@ void XIOS::do_ret() {
 // If D is invalid (>=8), default to console 0 (workaround for possible XDOS issue)
 void XIOS::do_const() {
     uint8_t console = cpu_->regs.DE.get_high();  // D = console number
+
+    // Debug: trace RLR and process descriptor when console is invalid
+    static int const_call_count = 0;
+    const_call_count++;
+
+    // Only debug trace for invalid console numbers
+    if (console >= 8) {
+        uint16_t de = cpu_->regs.DE.get_pair16();
+        uint16_t pc = cpu_->regs.PC.get_pair16();
+        uint16_t sp = cpu_->regs.SP.get_pair16();
+
+        std::cerr << "[CONST #" << const_call_count << "] DE=0x" << std::hex << de
+                  << " (D=" << (int)(de >> 8) << ") PC=0x" << pc
+                  << " SP=0x" << sp << std::dec << "\n";
+
+        // Try to find RLR via SYSDAT structure
+        // SYSDAT is at 0xFF00, offset 252 points to DATAPG base
+        // DATAPG+5 contains RLR (pointer to current process descriptor)
+        uint16_t sysdat = 0xFF00;
+        uint16_t datapg_ptr_lo = mem_->read_common(sysdat + 252);
+        uint16_t datapg_ptr_hi = mem_->read_common(sysdat + 253);
+        uint16_t datapg = datapg_ptr_lo | (datapg_ptr_hi << 8);
+
+        std::cerr << "  SYSDAT+252=0x" << std::hex << datapg << std::dec << "\n";
+
+        // Dump first 32 bytes of SYSDAT to understand structure
+        if (const_call_count == 1) {
+            std::cerr << "  SYSDAT (FF00H) dump:\n";
+            for (int row = 0; row < 4; row++) {
+                std::cerr << "    " << std::hex << std::setfill('0') << std::setw(4)
+                          << (0xFF00 + row * 16) << ": ";
+                for (int col = 0; col < 16; col++) {
+                    std::cerr << std::setfill('0') << std::setw(2)
+                              << (int)mem_->read_common(0xFF00 + row * 16 + col) << " ";
+                }
+                std::cerr << std::dec << "\n";
+            }
+            // Dump key offsets
+            std::cerr << "  Key SYSDAT offsets:\n";
+            for (int off : {0, 1, 5, 10, 11, 245, 246, 252, 253}) {
+                uint8_t val = mem_->read_common(0xFF00 + off);
+                std::cerr << "    +" << off << " = 0x" << std::hex << (int)val << std::dec << "\n";
+            }
+        }
+
+        // Search for RLR by looking for pointers to TMPD area (FE00H)
+        // Also dump TMPD to see what process descriptors look like
+        if (const_call_count == 1) {
+            std::cerr << "  Searching for pointers to TMPD (FE00-FF00) in XDOS area:\n";
+            int found = 0;
+            for (uint16_t addr = 0xCE00; addr < 0xF000 && found < 10; addr += 2) {
+                uint16_t val = mem_->read_common(addr) | (mem_->read_common(addr + 1) << 8);
+                if (val >= 0xFE00 && val < 0xFF00) {
+                    std::cerr << "    0x" << std::hex << addr << " -> 0x" << val << std::dec << "\n";
+                    found++;
+                }
+            }
+
+            // Dump TMPD area (FE00H) - process descriptors should be here
+            std::cerr << "  TMPD (FE00H) dump - first 64 bytes:\n";
+            for (int row = 0; row < 4; row++) {
+                std::cerr << "    " << std::hex << std::setfill('0') << std::setw(4)
+                          << (0xFE00 + row * 16) << ": ";
+                for (int col = 0; col < 16; col++) {
+                    std::cerr << std::setfill('0') << std::setw(2)
+                              << (int)mem_->read_common(0xFE00 + row * 16 + col) << " ";
+                }
+                std::cerr << std::dec << "\n";
+            }
+
+            // Check if FE00 looks like a process descriptor
+            // PD structure: pl(2), status(1), priority(1), stkptr(2), name(8), console(1)...
+            uint8_t pd_console = mem_->read_common(0xFE00 + 0x0E);
+            std::cerr << "  FE00 as PD: console byte at offset 0x0E = 0x" << std::hex
+                      << (int)pd_console << " (console = " << (int)(pd_console & 0x0F) << ")\n";
+            std::cerr << "  FE00 name bytes (6-13): ";
+            for (int i = 6; i < 14; i++) {
+                uint8_t ch = mem_->read_common(0xFE00 + i);
+                if (ch >= 0x20 && ch < 0x7F) std::cerr << (char)ch;
+                else std::cerr << ".";
+            }
+            std::cerr << std::dec << "\n";
+        }
+
+        if (datapg != 0 && datapg < 0xFF00) {
+            // Read RLR from DATAPG+5
+            uint16_t rlr_lo = mem_->read_common(datapg + 5);
+            uint16_t rlr_hi = mem_->read_common(datapg + 6);
+            uint16_t rlr = rlr_lo | (rlr_hi << 8);
+
+            std::cerr << "  DATAPG=0x" << std::hex << datapg
+                      << " RLR=0x" << rlr << std::dec << "\n";
+
+            if (rlr != 0 && rlr < 0xFF00) {
+                // Read process descriptor console field at offset 0x0E
+                uint8_t pd_console = mem_->read_common(rlr + 0x0E);
+
+                // Dump first 20 bytes of process descriptor
+                std::cerr << "  PD at 0x" << std::hex << rlr << ": ";
+                for (int i = 0; i < 20; i++) {
+                    std::cerr << std::setfill('0') << std::setw(2)
+                              << (int)mem_->read_common(rlr + i) << " ";
+                }
+                std::cerr << std::dec << "\n";
+                std::cerr << "  PD.console (offset 0x0E) = 0x" << std::hex
+                          << (int)pd_console << std::dec << "\n";
+            }
+        }
+
+        // Dump stack (return addresses)
+        std::cerr << "  Stack: ";
+        for (int i = 0; i < 8; i++) {
+            uint16_t addr = sp + i * 2;
+            uint8_t lo = mem_->fetch_mem(addr);
+            uint8_t hi = mem_->fetch_mem(addr + 1);
+            std::cerr << std::hex << std::setfill('0') << std::setw(4)
+                      << ((hi << 8) | lo) << " ";
+        }
+        std::cerr << std::dec << "\n";
+
+        // On first call, dump the calling code
+        if (const_call_count == 1) {
+            uint16_t ret_addr = mem_->fetch_mem(sp) | (mem_->fetch_mem(sp + 1) << 8);
+            std::cerr << "  Code around return addr 0x" << std::hex << ret_addr << ":\n    ";
+            for (int i = -10; i <= 10; i++) {
+                if (i == 0) std::cerr << "[";
+                std::cerr << std::setfill('0') << std::setw(2)
+                          << (int)mem_->fetch_mem(ret_addr + i);
+                if (i == 0) std::cerr << "]";
+                std::cerr << " ";
+            }
+            std::cerr << std::dec << "\n";
+
+            // Dump code at FC06 (XIOSJMP CONST entry)
+            std::cerr << "  XIOSJMP+6 (FC06) - CONST entry:\n    ";
+            for (int i = 0; i < 10; i++) {
+                std::cerr << std::setfill('0') << std::setw(2) << std::hex
+                          << (int)mem_->fetch_mem(0xFC06 + i) << " ";
+            }
+            std::cerr << std::dec << "\n";
+
+            // Dump BNKXIOS jump table
+            std::cerr << "  BNKXIOS (C300) jump table:\n    ";
+            for (int i = 0; i < 20; i++) {
+                std::cerr << std::setfill('0') << std::setw(2) << std::hex
+                          << (int)mem_->fetch_mem(0xC300 + i) << " ";
+            }
+            std::cerr << std::dec << "\n";
+        }
+    }
+
     if (console >= 8) console = 0;  // Workaround: invalid console -> default to 0
     Console* con = ConsoleManager::instance().get(console);
 
@@ -319,52 +470,20 @@ void XIOS::do_systeminit() {
     // C = breakpoint RST number
     // DE = breakpoint handler address
     // HL = XIOS direct jump table address
+    //
+    // The real XIOS SYSINIT only sets up RST 38H interrupt vector and initializes
+    // hardware. It does NOT patch other banks - that's done by MP/M's process
+    // initialization code. See RESXIOS.ASM lines 583-585.
 
     // Initialize consoles
     ConsoleManager::instance().init();
 
-    // Set up address 0 (WBOOT entry) in all banks - jumps to XIOSJMP table
-    // SIMH XIOS does this: puts JP <HL> at address 0 where HL = XIOSJMP (FC00H)
-    uint16_t xiosjmp = 0xFC00;
-    for (int bank = 0; bank <= 4; bank++) {
-        mem_->write_bank(bank, 0x0000, 0xC3);  // JP opcode
-        mem_->write_bank(bank, 0x0001, xiosjmp & 0xFF);
-        mem_->write_bank(bank, 0x0002, (xiosjmp >> 8) & 0xFF);
-    }
+    // The Z80 code in bnkxios.asm DO_SYSINIT handles setting up RST 38H vector.
+    // We just need to enable the tick timer here.
 
-    // Set up address 5 (BDOS/XDOS entry) in all banks
-    // XDOS is at CE00H, entry point is CE06H
-    // This is normally done by CLI, but we need to ensure it's in all banks
-    uint16_t xdos_entry = 0xCE06;  // XDOS base (CE00) + 6
-    for (int bank = 0; bank <= 4; bank++) {
-        mem_->write_bank(bank, 0x0005, 0xC3);  // JP opcode
-        mem_->write_bank(bank, 0x0006, xdos_entry & 0xFF);
-        mem_->write_bank(bank, 0x0007, (xdos_entry >> 8) & 0xFF);
-    }
-
-    // Copy interrupt vector from current bank to all other banks
-    // The Z80 code wrote JP INTHND to 0x0038-0x003A, but only in the current bank.
-    // We need to replicate this to all banks so interrupts work regardless of bank.
-    uint8_t current_bank = mem_->current_bank();
-    uint8_t vec_0038 = mem_->fetch_mem(0x0038);
-    uint8_t vec_0039 = mem_->fetch_mem(0x0039);
-    uint8_t vec_003A = mem_->fetch_mem(0x003A);
-
-    // Copy interrupt vector to all other banks so interrupts work regardless of bank
-    for (int bank = 0; bank < 8; bank++) {
-        if (bank != current_bank) {
-            mem_->write_bank(bank, 0x0038, vec_0038);
-            mem_->write_bank(bank, 0x0039, vec_0039);
-            mem_->write_bank(bank, 0x003A, vec_003A);
-        }
-    }
-
-    // IMPORTANT: Enable the clock NOW to allow timer-based preemption.
-    //
-    // Enable timer interrupts from SYSINIT (per SIMH pattern: startTimerInterrupts
-    // is sent during SYSINIT via initsequence). The Z80 TICKN flag (set by
-    // STARTCLOCK) controls whether INTHND calls FLAGSET for process scheduling,
-    // but the timer runs regardless so PDISP is called on each tick.
+    // Enable timer interrupts (per SIMH pattern: startTimerInterrupts is sent
+    // during SYSINIT). The Z80 TICKN flag (set by STARTCLOCK) controls whether
+    // INTHND calls FLAGSET for process scheduling.
     tick_enabled_.store(true);
     do_ret();
 }

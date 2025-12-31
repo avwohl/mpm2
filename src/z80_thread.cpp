@@ -28,10 +28,11 @@ Z80Thread::~Z80Thread() {
 }
 
 bool Z80Thread::init(const std::string& boot_image) {
-    // Create memory (5 banks for MP/M II with 4 user segments plus system)
-    // Banks: 0=system, 1-4=user TMPs
-    // With 5 banks: 5 * 48KB banked + 16KB common = 256KB total
-    memory_ = std::make_unique<BankedMemory>(5);
+    // Create memory (8 banks for MP/M II with 7 user segments plus system)
+    // Banks: 0=system, 1-7=user TMPs
+    // MP/M II supports max 7 user memory segments
+    // With 8 banks: 8 * 48KB banked + 16KB common = 400KB total
+    memory_ = std::make_unique<BankedMemory>(8);
 
     // Create CPU with memory (MpmCpu extends qkz80 with I/O port handling)
     cpu_ = std::make_unique<MpmCpu>(memory_.get());
@@ -112,6 +113,11 @@ bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
     uint8_t bnkxios_base = sysdat[13];     // BNKXIOS base page
     uint8_t bnkbdos_base = sysdat[14];     // BNKBDOS base page
     uint8_t nmb_mem_seg = sysdat[15];      // Number of memory segments
+
+    // Store in member variables for later use
+    num_consoles_ = nmb_cns;
+    num_mem_segs_ = nmb_mem_seg;
+
     uint16_t nmb_records = sysdat[120] | (sysdat[121] << 8);
     uint8_t ticks_per_sec = sysdat[122];   // Ticks per second
     uint8_t system_drive = sysdat[123];    // System drive (1=A)
@@ -282,13 +288,8 @@ bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
               << std::setw(4) << std::setfill('0') << entry_point << "H\n"
               << std::dec << std::setfill(' ');
 
-    // Initialize address 5 in all banks with JMP to XDOS
-    uint16_t xdos_entry = xdos_base * 256;
-    for (int bank = 0; bank < 4; bank++) {
-        memory_->write_bank(bank, 0x0005, 0xC3);  // JP opcode
-        memory_->write_bank(bank, 0x0006, xdos_entry & 0xFF);
-        memory_->write_bank(bank, 0x0007, (xdos_entry >> 8) & 0xFF);
-    }
+    // NOTE: Address 5 (BDOS entry) is set up by CLI.ASM when loading user programs.
+    // We don't need to patch it here - MP/M's process initialization handles it.
 
     // NOTE: The COMMONBASE entries (PDISP at +9, XDOS at +12) are already
     // correctly patched in the loaded MPM.SYS file by GENSYS. The XDOS entry
@@ -319,11 +320,17 @@ bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
         }
     }
 
+    // Set PC to entry point for main execution
+    // (SYSINIT returned to 0x0000, we need to start at the real entry point)
+    cpu_->regs.PC.set_pair16(entry_point);
+    cpu_->regs.SP.set_pair16(sysdat_addr);  // Reset SP to a sensible value
+
     // Verify RST 38H is set up
     uint8_t rst38_op = memory_->read_bank(0, 0x0038);
     uint16_t rst38_addr = memory_->read_bank(0, 0x0039) | (memory_->read_bank(0, 0x003A) << 8);
     std::cerr << "[BOOT] RST 38H: " << (rst38_op == 0xC3 ? "JP" : "??")
               << " 0x" << std::hex << rst38_addr << std::dec << "\n";
+    std::cerr << "[BOOT] Starting at PC=0x" << std::hex << entry_point << std::dec << "\n";
 
     // Debug: show COMMONBASE entries after loading (only with DEBUG=1)
     if (g_debug_enabled) {
@@ -414,7 +421,9 @@ void Z80Thread::thread_func() {
             // MP/M II XDOS should call STARTCLOCK but doesn't seem to
             static bool auto_started = false;
             if (!auto_started && instruction_count_.load() > 5000000) {
-                std::cerr << "[CLOCK] Auto-starting clock after boot\n";
+                if (g_debug_enabled) {
+                    std::cerr << "[CLOCK] Auto-starting clock after boot\n";
+                }
                 xios_->start_clock();
                 auto_started = true;
             }
@@ -445,20 +454,11 @@ void Z80Thread::thread_func() {
                     iff_zero_count = 0;  // Reset counter
                     cpu_->request_rst(7);  // RST 38H
                     tick_delivered++;
-                    if (tick_delivered <= 10 || (tick_delivered % 60) == 0) {
-                        std::cerr << "[TICK-DELIVER] #" << tick_delivered
-                                  << " PC=0x" << std::hex << cpu_->regs.PC.get_pair16() << std::dec << "\n";
-                    }
                 } else {
                     iff_zero_count++;
                     // If IFF has been 0 for too many ticks, force-enable
                     // This works around XDOS not EI'ing when returning to process
                     if (iff_zero_count >= 5 && tick_count_local > 15) {
-                        if (iff_zero_count == 5) {
-                            std::cerr << "[TICK] Forcing IFF=1 after " << iff_zero_count
-                                      << " ticks with IFF=0, PC=0x" << std::hex
-                                      << cpu_->regs.PC.get_pair16() << std::dec << "\n";
-                        }
                         cpu_->regs.IFF1 = 1;
                         cpu_->regs.IFF2 = 1;
                         cpu_->request_rst(7);
@@ -469,7 +469,7 @@ void Z80Thread::thread_func() {
 
                 // Poll console input directly from C++ and set flags
                 // This bypasses the Z80 interrupt handler polling, which may not work correctly
-                for (int con = 0; con < 4; con++) {
+                for (int con = 0; con < num_consoles_; con++) {
                     Console* console = ConsoleManager::instance().get(con);
                     if (console && console->const_status()) {
                         // Console has input - set the corresponding flag via XDOS
@@ -498,7 +498,7 @@ void Z80Thread::thread_func() {
                 sec_count++;
                 if (g_debug_enabled && sec_count == 2) {
                     std::cerr << "[TICK] TMPD dump after 2 seconds:\n";
-                    for (int tmp = 0; tmp < 4; tmp++) {
+                    for (int tmp = 0; tmp < num_consoles_; tmp++) {
                         int base = 0xFE00 + (tmp * 64);
                         std::cerr << "  TMP" << tmp << " at 0x" << std::hex << base << ": ";
                         for (int i = 0; i < 16; i++) {
@@ -560,24 +560,26 @@ void Z80Thread::thread_func() {
         cpu_->execute();
         instruction_count_++;
 
-        // Periodic Z80 status log
-        static uint64_t last_log_count = 0;
-        uint64_t count = instruction_count_.load();
-        if (count >= last_log_count + 1000000) {
-            std::cerr << "[Z80] " << (count / 1000000) << "M instructions executed"
-                      << ", PC=0x" << std::hex << cpu_->regs.PC.get_pair16()
-                      << ", bank=" << std::dec << (int)memory_->current_bank() << "\n";
-            last_log_count = count;
+        // Periodic Z80 status log (only in debug mode)
+        if (g_debug_enabled) {
+            static uint64_t last_log_count = 0;
+            uint64_t count = instruction_count_.load();
+            if (count >= last_log_count + 1000000) {
+                std::cerr << "[Z80] " << (count / 1000000) << "M instructions executed"
+                          << ", PC=0x" << std::hex << cpu_->regs.PC.get_pair16()
+                          << ", bank=" << std::dec << (int)memory_->current_bank() << "\n";
+                last_log_count = count;
+            }
         }
 
-        // Trace XDOS calls
-        {
+        // Trace XDOS calls (only in debug mode)
+        if (g_debug_enabled) {
             uint16_t pc = cpu_->regs.PC.get_pair16();
             // Check if PC is at XDOS entry point
             if (pc == 0xCE00 || pc == 0xCE06) {
                 uint8_t func = cpu_->regs.BC.get_low();
 
-                // XDOS function 133 (0x85) = FLAGSET - log these always
+                // XDOS function 133 (0x85) = FLAGSET
                 if (func == 133) {  // FLAGSET
                     static int flagset_count = 0;
                     flagset_count++;
@@ -588,28 +590,26 @@ void Z80Thread::thread_func() {
                     }
                 }
 
-                if (g_debug_enabled) {
-                    static bool traced_creates = false;
-                    if (!traced_creates) {
-                        // XDOS function 144 (0x90) = CREATE PROCESS
-                        if (func == 0x90) {
-                            uint16_t pd_addr = cpu_->regs.DE.get_pair16();
-                            // Read process name from PD offset 6-13
-                            std::cerr << "[XDOS CREATE] PD=0x" << std::hex << pd_addr
-                                      << " name='";
-                            for (int i = 6; i < 14; i++) {
-                                uint8_t ch = memory_->read_common(pd_addr + i) & 0x7F;
-                                if (ch >= 0x20 && ch < 0x7F) {
-                                    std::cerr << (char)ch;
-                                }
+                static bool traced_creates = false;
+                if (!traced_creates) {
+                    // XDOS function 144 (0x90) = CREATE PROCESS
+                    if (func == 0x90) {
+                        uint16_t pd_addr = cpu_->regs.DE.get_pair16();
+                        // Read process name from PD offset 6-13
+                        std::cerr << "[XDOS CREATE] PD=0x" << std::hex << pd_addr
+                                  << " name='";
+                        for (int i = 6; i < 14; i++) {
+                            uint8_t ch = memory_->read_common(pd_addr + i) & 0x7F;
+                            if (ch >= 0x20 && ch < 0x7F) {
+                                std::cerr << (char)ch;
                             }
-                            std::cerr << "'" << std::dec << "\n";
                         }
-                        // XDOS function 143 (0x8F) = TERMINATE
-                        if (func == 0x8F) {
-                            std::cerr << "[XDOS TERMINATE] E=" << (int)cpu_->regs.DE.get_low() << "\n";
-                            traced_creates = true;  // Stop tracing after init terminates
-                        }
+                        std::cerr << "'" << std::dec << "\n";
+                    }
+                    // XDOS function 143 (0x8F) = TERMINATE
+                    if (func == 0x8F) {
+                        std::cerr << "[XDOS TERMINATE] E=" << (int)cpu_->regs.DE.get_low() << "\n";
+                        traced_creates = true;  // Stop tracing after init terminates
                     }
                 }
             }

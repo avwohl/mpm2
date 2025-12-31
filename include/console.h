@@ -31,7 +31,8 @@ public:
 
     // Local console mode (outputs to stdout)
     bool is_local() const { return local_mode_.load(); }
-    void set_local_mode(bool l) { local_mode_.store(l); connected_.store(l); }
+    bool is_local_mode() const { return local_mode_.load(); }
+    void set_local_mode(bool l) { local_mode_.store(l); }  // Don't set connected_!
 
     // Terminal info
     int term_width() const { return term_width_.load(); }

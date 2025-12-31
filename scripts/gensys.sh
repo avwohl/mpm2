@@ -26,10 +26,10 @@ CPMEMU="${CPMEMU:-$HOME/src/cpmemu/src/cpmemu}"
 WORK_DIR="/tmp/gensys_work"
 CPM_DISK="${CPM_DISK:-$HOME/src/cpmemu/util/cpm_disk.py}"
 
-# Number of consoles (default 4)
-# must match asm/bnkxio.asm:
-# NMBCNS:         EQU     4       ; consoles for SSH users
-NMBCNS=${1:-4}
+# Number of consoles (default 8)
+# must match asm/bnkxios.asm:
+# NMBCNS:         EQU     8       ; consoles for SSH users
+NMBCNS=${1:-8}
 
 echo "MP/M II System Generation"
 echo "========================="
@@ -82,7 +82,7 @@ fi
 cp "$SCRIPT_DIR/gensys.cfg" gensys.cfg
 
 # Run GENSYS under cpmemu using expect for readable prompt/response
-echo "Running GENSYS ($NMBCNS consoles, 4 banks, C0 common base)..."
+echo "Running GENSYS ($NMBCNS consoles, 7 user banks, C0 common base)..."
 
 # Check for expect
 if ! command -v expect &> /dev/null; then
@@ -114,14 +114,18 @@ expect "open files/process"       { send "\r" }
 expect "open files/system"        { send "\r" }
 
 # Memory configuration
+# Note: MP/M II supports max 7 user memory segments
 expect "Bank switched"            { send "\r" }
-expect "memory segments"          { send "4\r" }
+expect "memory segments"          { send "7\r" }
 expect "Common memory base"       { send "C0\r" }
 expect "Dayfile logging"          { send "\r" }
 
 # Accept generated tables
 expect "Accept new system data"   { send "\r" }
-# Memory segment table: bank 0 (common) + 4 user banks = 5 entries
+# Memory segment table: bank 0 (common) + 7 user banks = 8 entries
+expect "Base,size,attrib,bank"    { send "\r" }
+expect "Base,size,attrib,bank"    { send "\r" }
+expect "Base,size,attrib,bank"    { send "\r" }
 expect "Base,size,attrib,bank"    { send "\r" }
 expect "Base,size,attrib,bank"    { send "\r" }
 expect "Base,size,attrib,bank"    { send "\r" }
@@ -193,4 +197,4 @@ echo ""
 echo "Configuration:"
 echo "  - $NMBCNS consoles"
 echo "  - Common base at C000 (16KB common, 48KB user per bank)"
-echo "  - 4 user memory banks"
+echo "  - 7 user memory banks (MP/M II maximum)"
