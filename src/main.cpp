@@ -75,7 +75,7 @@ void print_usage(const char* prog) {
               << "\n"
               << "Options:\n"
               << "  -p, --port PORT       SSH listen port (default: 2222)\n"
-              << "  -k, --key FILE        Host key file in DER format (default: keys/ssh_host_rsa_key.der)\n"
+              << "  -k, --key FILE        Host key file in PEM format (default: keys/ssh_host_rsa_key)\n"
               << "  -d, --disk A:FILE     Mount disk image on drive A-P\n"
               << "  -b, --boot FILE       Boot image file (MPMLDR + MPM.SYS)\n"
               << "  -s, --sys FILE        Load MPM.SYS directly (bypass MPMLDR)\n"
@@ -103,7 +103,7 @@ int main(int argc, char* argv[]) {
 
     // Default options
     int ssh_port = 2222;
-    std::string host_key = "keys/ssh_host_rsa_key.der";
+    std::string host_key = "keys/ssh_host_rsa_key";
     std::string boot_image;
     std::string mpm_sys_file;  // Direct MPM.SYS loading (bypasses MPMLDR)
     bool local_console = false;
