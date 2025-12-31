@@ -29,7 +29,7 @@ MP/M II uses bank-switched memory:
 | XIOS | `xios.h/cpp` | Extended I/O System - MP/M II hardware abstraction |
 | Z80 | `z80_thread.h/cpp` | CPU emulation thread with timer interrupts |
 | Disk | `disk.h/cpp` | CP/M-compatible disk image I/O |
-| SSH | `ssh_session.h/cpp` | wolfSSH-based terminal access |
+| SSH | `ssh_session.h/cpp` | libssh-based terminal access |
 
 ## XIOS Entry Points
 
@@ -102,7 +102,7 @@ The build script (`build_asm.sh`) selects the correct LDRBIOS based on the targe
 
 - CMake 3.16+
 - C++17 compiler
-- wolfSSL and wolfSSH (optional, for SSH support)
+- libssh (optional, for SSH support): `brew install libssh`
 
 ### Build Commands
 
@@ -118,34 +118,25 @@ cmake ..
 make
 ```
 
-For SSH support, install wolfSSL and wolfSSH first:
+For SSH support, install libssh:
 ```bash
-# wolfSSL - must disable FORTIFY_SOURCE to avoid false positive buffer overflow detection in RSA
-git clone https://github.com/wolfSSL/wolfssl.git
-cd wolfssl && ./autogen.sh
-CFLAGS="-D_FORTIFY_SOURCE=0 -O2" ./configure --enable-ssh --prefix=$HOME/local
-make && make install
+# macOS
+brew install libssh
 
-# wolfSSH
-git clone https://github.com/wolfSSL/wolfssh.git
-cd wolfssh && ./autogen.sh
-./configure --with-wolfssl=$HOME/local --prefix=$HOME/local
-make && make install
+# Linux (Debian/Ubuntu)
+sudo apt install libssh-dev
 
-# Build mpm2 with wolfSSH
+# Build mpm2 with SSH support
 cd mpm2/build
-cmake -DCMAKE_PREFIX_PATH=$HOME/local ..
+cmake ..
 make
 ```
 
 ### Generate SSH Host Key
 
-wolfSSH requires DER format keys:
-
 ```bash
 mkdir -p keys
 ssh-keygen -t rsa -b 2048 -m PEM -f keys/ssh_host_rsa_key -N ''
-openssl rsa -in keys/ssh_host_rsa_key -outform DER -out keys/ssh_host_rsa_key.der
 ```
 
 ## Usage
@@ -414,7 +405,7 @@ mpm2/
 - **qkz80**: Z80 CPU emulator (symlinked from ../cpmemu/src/)
 - **cpm_disk.py**: Disk image utility (from ../cpmemu/util/)
 - **um80/ul80**: MACRO-80 compatible assembler/linker (from ../um80_and_friends/)
-- **wolfSSH**: SSH server library (optional)
+- **libssh**: SSH server library (optional, `brew install libssh`)
 - **mpm2_external/**: MP/M II distribution and documentation
 
 ## License
