@@ -93,6 +93,8 @@ void SSHSession::thread_func() {
                 std::cerr << "[SSH:" << console_id_ << "] Write error\n";
                 break;
             }
+            // Flush the session to ensure data is sent immediately
+            ssh_blocking_flush(session_, 100);
         }
 
         // Read input from SSH client (non-blocking)
