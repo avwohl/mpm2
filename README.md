@@ -24,7 +24,7 @@ ssh -p 2222 user@localhost
 | CMake 3.16+ | Build system | `brew install cmake` or `apt install cmake` |
 | C++17 compiler | Compile emulator | Xcode (macOS) or `apt install g++` |
 | Python 3 | Build scripts, um80/ul80 | Usually pre-installed |
-| cpmtools | CP/M disk image tools | `brew install cpmtools` or `apt install cpmtools` |
+| cpmemu | Z80 CPU emulator + disk tools | Clone from github.com/avwohl/cpmemu |
 
 ### External Repositories (must be cloned separately)
 
@@ -50,19 +50,11 @@ cd ..
 For network access via SSH (recommended for multi-user):
 
 ```bash
-# wolfSSL
-git clone https://github.com/wolfSSL/wolfssl.git
-cd wolfssl && ./autogen.sh
-CFLAGS="-D_FORTIFY_SOURCE=0 -O2" ./configure --enable-ssh --prefix=$HOME/local
-make && make install
-cd ..
+# macOS
+brew install libssh
 
-# wolfSSH
-git clone https://github.com/wolfSSL/wolfssh.git
-cd wolfssh && ./autogen.sh
-./configure --with-wolfssl=$HOME/local --prefix=$HOME/local
-make && make install
-cd ..
+# Linux (Debian/Ubuntu)
+sudo apt install libssh-dev
 ```
 
 ## Building
@@ -82,13 +74,9 @@ This runs three steps:
 ### Manual Build Steps
 
 ```bash
-# Just build C++ emulator
+# Build C++ emulator (auto-detects libssh if installed)
 mkdir build && cd build
 cmake ..
-make
-
-# With SSH support
-cmake -DCMAKE_PREFIX_PATH=$HOME/local ..
 make
 ```
 
@@ -97,7 +85,6 @@ make
 ```bash
 mkdir -p keys
 ssh-keygen -t rsa -b 2048 -m PEM -f keys/ssh_host_rsa_key -N ''
-openssl rsa -in keys/ssh_host_rsa_key -outform DER -out keys/ssh_host_rsa_key.der
 ```
 
 ## Running
@@ -179,4 +166,4 @@ GPL-3.0-or-later
 
 - [MP/M II System Guide](mpm2_external/docs/)
 - [RomWBW](https://github.com/wwarthen/RomWBW) - hd1k disk format
-- [cpmtools](https://github.com/lipro-cpm4l/cpmtools) - CP/M disk utilities
+- [cpmemu](https://github.com/avwohl/cpmemu) - Z80 emulator with cpm_disk.py utility
