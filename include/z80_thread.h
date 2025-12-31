@@ -56,6 +56,7 @@ public:
 
 private:
     void thread_func();
+    void create_missing_tmps();  // Create TMPs for consoles that don't have one
 
     std::unique_ptr<MpmCpu> cpu_;
     std::unique_ptr<BankedMemory> memory_;

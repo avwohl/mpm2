@@ -80,10 +80,10 @@ Console* ConsoleManager::get(int id) {
 }
 
 Console* ConsoleManager::find_free() {
-    // MP/M II typically has 4 consoles (0-3), with TMP running on console 3
-    // Assign from highest down so first connection gets console 3 where TMP is active
-    constexpr int MPM_MAX_CONSOLES = 4;  // MP/M II typically uses 4 consoles
-    for (int i = MPM_MAX_CONSOLES - 1; i >= 0; i--) {
+    // MP/M II creates TMP on console (MAXCONSOLE - 1)
+    // With 8 consoles, the TMP runs on console 7
+    // Assign from highest down so first connection gets the active TMP console
+    for (int i = MAX_CONSOLES - 1; i >= 0; i--) {
         if (consoles_[i] && !consoles_[i]->is_connected()) {
             return consoles_[i].get();
         }

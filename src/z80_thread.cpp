@@ -10,6 +10,7 @@
 #include <fstream>
 #include <cstring>
 #include <iostream>
+#include <set>
 #include <iomanip>
 
 extern bool g_debug_enabled;
@@ -336,17 +337,28 @@ bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
     if (g_debug_enabled) {
         uint16_t commonbase = bnkxios_base * 256 + 0x4B;
         std::cerr << "COMMONBASE at " << std::hex << commonbase << ":\n";
-        for (int i = 0; i < 18; i += 3) {
+        // First 5 entries are JP instructions (3 bytes each)
+        for (int i = 0; i < 15; i += 3) {
             uint8_t op = memory_->read_common(commonbase + i);
             uint16_t addr = memory_->read_common(commonbase + i + 1) |
                            (memory_->read_common(commonbase + i + 2) << 8);
-            const char* names[] = {"COLDBOOT", "SWTUSER", "SWTSYS", "PDISP", "XDOS", "SYSDAT"};
+            const char* names[] = {"COLDBOOT", "SWTUSER", "SWTSYS", "PDISP", "XDOS"};
             std::cerr << "  " << names[i/3] << ": ";
             if (op == 0xC3) {
                 std::cerr << "JP " << std::setw(4) << std::setfill('0') << addr << "H\n";
             } else {
                 std::cerr << "?? (" << (int)op << ")\n";
             }
+        }
+        // SYSDAT is a DW (2 bytes), not a JP instruction
+        uint16_t sysdat_addr = memory_->read_common(commonbase + 15) |
+                              (memory_->read_common(commonbase + 16) << 8);
+        std::cerr << "  SYSDAT: " << std::setw(4) << std::setfill('0') << sysdat_addr << "H\n";
+
+        // Verify SYSDAT content - byte 1 should be number of consoles
+        if (sysdat_addr != 0) {
+            uint8_t nmb_cns = memory_->read_common(sysdat_addr + 1);
+            std::cerr << "  SYSDAT[1] (nmb consoles): " << std::dec << (int)nmb_cns << "\n";
         }
         std::cerr << std::dec << std::setfill(' ');
     }
@@ -466,26 +478,6 @@ void Z80Thread::thread_func() {
                     }
                 }
                 xios_->tick();
-
-                // Poll console input directly from C++ and set flags
-                // This bypasses the Z80 interrupt handler polling, which may not work correctly
-                for (int con = 0; con < num_consoles_; con++) {
-                    Console* console = ConsoleManager::instance().get(con);
-                    if (console && console->const_status()) {
-                        // Console has input - set the corresponding flag via XDOS
-                        // Flags 3,4,5,6 correspond to consoles 0,1,2,3
-                        // XDOS FLAGSET (function 133/0x85 -> 33/0x21)
-                        // We'll set it directly in memory at the flag table
-                        // For now, just log that we would set a flag
-                        static int flag_log_count = 0;
-                        flag_log_count++;
-                        if (flag_log_count <= 20 || (flag_log_count % 100) == 0) {
-                            std::cerr << "[POLL-DIRECT] con=" << con
-                                      << " has input, should set flag " << (con + 3)
-                                      << " count=" << flag_log_count << "\n";
-                        }
-                    }
-                }
             }
 
             // Check for one-second tick
@@ -493,34 +485,57 @@ void Z80Thread::thread_func() {
                 tick_count_ = 0;
                 xios_->one_second_tick();
 
-                // Dump TMPD area once after 2 seconds (only in debug mode)
+                // Create missing TMPs and dump TMPD area after boot
                 static int sec_count = 0;
                 sec_count++;
+
+                // NOTE: TMP creation fix is DISABLED because it breaks the ready list.
+                // The system works for console 7 as-is (XDOS creates TMP7 at slot 0).
+                // TODO: Find a better approach that properly links TMPs into the scheduler.
+                // if (sec_count == 1) {
+                //     create_missing_tmps();
+                // }
+
                 if (g_debug_enabled && sec_count == 2) {
-                    std::cerr << "[TICK] TMPD dump after 2 seconds:\n";
+                    // TMPD is at FD00H per GENSYS memory layout
+                    uint16_t tmpd_addr = 0xFD00;
+                    std::cerr << "[TICK] TMPD at 0x" << std::hex << tmpd_addr
+                              << " dump after 2 seconds:\n";
                     for (int tmp = 0; tmp < num_consoles_; tmp++) {
-                        int base = 0xFE00 + (tmp * 64);
+                        int base = tmpd_addr + (tmp * 64);
                         std::cerr << "  TMP" << tmp << " at 0x" << std::hex << base << ": ";
-                        for (int i = 0; i < 16; i++) {
+                        for (int i = 0; i < 32; i++) {
                             std::cerr << std::setw(2) << std::setfill('0')
                                       << (int)memory_->read_common(base + i) << " ";
                         }
-                        std::cerr << "\n";
+                        // Show name at offset 6
+                        std::cerr << " name='";
+                        for (int i = 6; i < 14; i++) {
+                            uint8_t ch = memory_->read_common(base + i);
+                            std::cerr << (ch >= 0x20 && ch < 0x7F ? (char)ch : '.');
+                        }
+                        std::cerr << "' con=" << (int)memory_->read_common(base + 0x0E);
+                        std::cerr << "\n" << std::dec;
                     }
-                    // Also dump process descriptors by looking for active ones
-                    std::cerr << "[TICK] Looking for active process descriptors E900-EA00:\n";
-                    for (int pd = 0; pd < 16; pd++) {
-                        int addr = 0xE900 + pd * 16;
-                        // Check if this looks like a valid PD (non-zero link or status)
-                        uint8_t first = memory_->read_common(addr);
-                        uint8_t second = memory_->read_common(addr + 1);
-                        if (first != 0 || second != 0) {
-                            std::cerr << "  0x" << std::hex << addr << ": ";
-                            for (int i = 0; i < 16; i++) {
+                    // Search for "Tmp" process names in common memory (C000-FFFF)
+                    std::cerr << "[TICK] Searching for 'Tmp' process descriptors in common memory:\n";
+                    for (uint16_t addr = 0xC000; addr < 0xFF00; addr++) {
+                        // Look for "Tmp" at offset 6 (name field in process descriptor)
+                        if (memory_->read_common(addr + 6) == 'T' &&
+                            memory_->read_common(addr + 7) == 'm' &&
+                            memory_->read_common(addr + 8) == 'p') {
+                            std::cerr << "  PD at 0x" << std::hex << addr << ": ";
+                            for (int i = 0; i < 24; i++) {
                                 std::cerr << std::setw(2) << std::setfill('0')
                                           << (int)memory_->read_common(addr + i) << " ";
                             }
-                            std::cerr << "\n";
+                            std::cerr << " name='";
+                            for (int i = 6; i < 14; i++) {
+                                uint8_t ch = memory_->read_common(addr + i);
+                                std::cerr << (ch >= 0x20 && ch < 0x7F ? (char)ch : '.');
+                            }
+                            std::cerr << "' con=" << (int)memory_->read_common(addr + 0x0E);
+                            std::cerr << "\n" << std::dec;
                         }
                     }
                     std::cerr << std::dec;
@@ -575,10 +590,39 @@ void Z80Thread::thread_func() {
         // Trace XDOS calls (only in debug mode)
         if (g_debug_enabled) {
             uint16_t pc = cpu_->regs.PC.get_pair16();
-            // Check if PC is at XDOS entry point
-            if (pc == 0xCE00 || pc == 0xCE06) {
-                uint8_t func = cpu_->regs.BC.get_low();
 
+            // Detect XDOS entry by looking for calls in common memory with C=133 (FLAGSET)
+            // and IFF1=0 (interrupts disabled = we're in interrupt handler)
+            uint8_t func = cpu_->regs.BC.get_low();
+            if (func == 133 && pc >= 0xC000 && pc < 0xFF00) {  // Potential XDOS call with FLAGSET
+                static int flagset_trace_count = 0;
+                flagset_trace_count++;
+                if (flagset_trace_count <= 50) {
+                    uint8_t flag = cpu_->regs.DE.get_low();
+                    std::cerr << "[FLAGSET DETECT] PC=0x" << std::hex << pc
+                              << " flag=" << std::dec << (int)flag
+                              << " IFF1=" << (int)cpu_->regs.IFF1
+                              << " #" << flagset_trace_count << "\n";
+                }
+            }
+
+            // Dump SYSDAT console count on first XDOS call
+            static bool dumped_sysdat = false;
+            if (!dumped_sysdat && pc >= 0xC000 && pc < 0xFF00) {
+                dumped_sysdat = true;
+                uint8_t nmb_cns = memory_->read_common(0xFF01);
+                std::cerr << "[SYSDAT] Console count at 0xFF01 = " << (int)nmb_cns << "\n";
+            }
+
+            // Check if we're at an XDOS entry point
+            // XDOS entry is in the range E000-EF00, check every 3 bytes for JP pattern
+            // Simplify: just check for XDOS function codes in common memory range
+            // Check for XDOS calls - include all common memory ranges
+            bool at_xdos = (pc >= 0xE000 && pc <= 0xEF00) ||
+                           (pc >= 0xCC00 && pc <= 0xD000) ||
+                           (pc >= 0xFC00 && pc <= 0xFF00) ||  // XIOSJMP area
+                           (pc >= 0xC100 && pc <= 0xCB00);    // BNKXIOS area
+            if (at_xdos) {
                 // XDOS function 133 (0x85) = FLAGSET
                 if (func == 133) {  // FLAGSET
                     static int flagset_count = 0;
@@ -590,29 +634,194 @@ void Z80Thread::thread_func() {
                     }
                 }
 
-                static bool traced_creates = false;
-                if (!traced_creates) {
-                    // XDOS function 144 (0x90) = CREATE PROCESS
-                    if (func == 0x90) {
-                        uint16_t pd_addr = cpu_->regs.DE.get_pair16();
-                        // Read process name from PD offset 6-13
-                        std::cerr << "[XDOS CREATE] PD=0x" << std::hex << pd_addr
-                                  << " name='";
-                        for (int i = 6; i < 14; i++) {
-                            uint8_t ch = memory_->read_common(pd_addr + i) & 0x7F;
-                            if (ch >= 0x20 && ch < 0x7F) {
-                                std::cerr << (char)ch;
-                            }
+                // XDOS function 144 (0x90) = CREATE PROCESS
+                // Just trace CREATE calls - the post-boot workaround handles TMP fixes
+                if (func == 0x90) {
+                    static int create_count = 0;
+                    create_count++;
+                    uint16_t pd_addr = cpu_->regs.DE.get_pair16();
+
+                    std::string name;
+                    for (int i = 6; i < 14; i++) {
+                        uint8_t ch = memory_->read_common(pd_addr + i) & 0x7F;
+                        if (ch >= 0x20 && ch < 0x7F) {
+                            name += (char)ch;
                         }
-                        std::cerr << "'" << std::dec << "\n";
                     }
-                    // XDOS function 143 (0x8F) = TERMINATE
-                    if (func == 0x8F) {
-                        std::cerr << "[XDOS TERMINATE] E=" << (int)cpu_->regs.DE.get_low() << "\n";
-                        traced_creates = true;  // Stop tracing after init terminates
+                    if (create_count <= 30 || name.substr(0, 2) == "Tm") {
+                        std::cerr << "[XDOS CREATE] #" << create_count
+                                  << " PD=0x" << std::hex << pd_addr
+                                  << " name='" << name << "'"
+                                  << " console=" << std::dec << (int)memory_->read_common(pd_addr + 0x0E)
+                                  << "\n";
+                    }
+                }
+                // XDOS function 143 (0x8F) = TERMINATE - trace first few
+                static int terminate_count = 0;
+                if (func == 0x8F) {
+                    terminate_count++;
+                    if (terminate_count <= 5) {
+                        std::cerr << "[XDOS TERMINATE] #" << terminate_count
+                                  << " E=" << (int)cpu_->regs.DE.get_low() << "\n";
                     }
                 }
             }
         }
     }
+}
+
+void Z80Thread::create_missing_tmps() {
+    // Workaround for XDOS bug: it only creates one TMP (the highest numbered console).
+    // This function creates the missing TMP process descriptors after boot.
+    //
+    // XDOS bug: It creates TMP7 (console 7) but puts it in slot 0 (FD00) instead of slot 7 (FEC0).
+    // We need to:
+    // 1. Find the existing TMP and copy it as a template
+    // 2. Move it to its correct slot if necessary
+    // 3. Create missing TMPs for other consoles
+    //
+    // TMPD area layout (at 0xFD00, 64 bytes per TMP):
+    //   Slot 0: 0xFD00, Slot 1: 0xFD40, Slot 2: 0xFD80, Slot 3: 0xFDC0
+    //   Slot 4: 0xFE00, Slot 5: 0xFE40, Slot 6: 0xFE80, Slot 7: 0xFEC0
+    //
+    // Process Descriptor structure (relevant fields):
+    //   Offset 0-1:  Link to next PD
+    //   Offset 2:    Status
+    //   Offset 3:    Priority (0xC6 = 198 for TMP)
+    //   Offset 4-5:  Stack pointer
+    //   Offset 6-13: Process name (8 bytes, last byte often has bit 7 set)
+    //   Offset 14:   Console number
+
+    const uint16_t TMPD_BASE = 0xFD00;
+    const int TMP_SIZE = 64;
+
+    // Find the existing TMP (XDOS puts it at slot 0 regardless of console number)
+    uint16_t existing_tmp_addr = TMPD_BASE;
+    int existing_console = memory_->read_common(existing_tmp_addr + 0x0E);
+
+    // Check if TMP exists (name should contain 'mp' at offset 7-8)
+    uint8_t name_byte1 = memory_->read_common(existing_tmp_addr + 7);  // Should be 'm'
+    uint8_t name_byte2 = memory_->read_common(existing_tmp_addr + 8);  // Should be 'p'
+    std::cerr << "[TMP FIX] Checking FD00: byte7=0x" << std::hex << (int)name_byte1
+              << " byte8=0x" << (int)name_byte2 << std::dec
+              << " (expecting 'm'=0x6d, 'p'=0x70)\n";
+    if (name_byte1 != 'm' || name_byte2 != 'p') {
+        std::cerr << "[TMP FIX] No valid TMP found at " << std::hex << existing_tmp_addr
+                  << ", skipping TMP creation\n" << std::dec;
+        return;
+    }
+
+    std::cerr << "[TMP FIX] Found existing TMP" << existing_console
+              << " in slot 0 (0x" << std::hex << existing_tmp_addr << ")" << std::dec << "\n";
+
+    // Copy the existing TMP structure as a template
+    uint8_t tmp_template[TMP_SIZE];
+    for (int i = 0; i < TMP_SIZE; i++) {
+        tmp_template[i] = memory_->read_common(existing_tmp_addr + i);
+    }
+
+    // Calculate correct slot for the existing TMP
+    uint16_t correct_slot_addr = TMPD_BASE + (existing_console * TMP_SIZE);
+
+    // If the existing TMP is in the wrong slot, copy it to the correct slot
+    if (existing_tmp_addr != correct_slot_addr) {
+        std::cerr << "[TMP FIX] Moving TMP" << existing_console
+                  << " from slot 0 to slot " << existing_console
+                  << " (0x" << std::hex << correct_slot_addr << ")" << std::dec << "\n";
+        for (int i = 0; i < TMP_SIZE; i++) {
+            memory_->write_common(correct_slot_addr + i, tmp_template[i]);
+        }
+    }
+
+    // CONSOLE.DAT area: each console has stack/buffer space
+    // The existing TMP has a valid stack pointer, use it to calculate base
+    uint16_t existing_stack = memory_->read_common(existing_tmp_addr + 4) |
+                              (memory_->read_common(existing_tmp_addr + 5) << 8);
+    // Stack is typically in USERSYS.STK area, allocated per console
+
+    // Create TMPs for all consoles
+    for (int con = 0; con < num_consoles_; con++) {
+        uint16_t tmp_addr = TMPD_BASE + (con * TMP_SIZE);
+
+        // Skip the console that already has a valid TMP
+        if (con == existing_console) {
+            // Already exists and was moved to correct slot
+            continue;
+        }
+
+        // Check if this slot already has a valid TMP for THIS console
+        uint8_t check_m = memory_->read_common(tmp_addr + 7);
+        uint8_t check_p = memory_->read_common(tmp_addr + 8);
+        int check_con = memory_->read_common(tmp_addr + 0x0E);
+        if (check_m == 'm' && check_p == 'p' && check_con == con) {
+            std::cerr << "[TMP FIX] TMP" << con << " already exists at 0x"
+                      << std::hex << tmp_addr << std::dec << "\n";
+            continue;
+        }
+
+        std::cerr << "[TMP FIX] Creating TMP" << con
+                  << " at 0x" << std::hex << tmp_addr << std::dec << "\n";
+
+        // Copy template
+        for (int i = 0; i < TMP_SIZE; i++) {
+            memory_->write_common(tmp_addr + i, tmp_template[i]);
+        }
+
+        // Set console number
+        memory_->write_common(tmp_addr + 0x0E, con);
+
+        // Set process name: "Tmpn    " where n is console number
+        memory_->write_common(tmp_addr + 6, 'T');
+        memory_->write_common(tmp_addr + 7, 'm');
+        memory_->write_common(tmp_addr + 8, 'p');
+        memory_->write_common(tmp_addr + 9, '0' + con);  // Console number as digit
+        memory_->write_common(tmp_addr + 10, ' ');
+        memory_->write_common(tmp_addr + 11, ' ');
+        memory_->write_common(tmp_addr + 12, ' ');
+        memory_->write_common(tmp_addr + 13, 0xA0);  // Space with bit 7 set (MP/M convention)
+
+        // Set up stack pointer: use same offset from existing TMP's stack
+        // This is a simplification - ideally each TMP has unique stack space
+        // For now, offset by console number to avoid conflicts
+        uint16_t stack_offset = (existing_console - con) * 256;
+        uint16_t new_stack = existing_stack + stack_offset;
+        memory_->write_common(tmp_addr + 4, new_stack & 0xFF);
+        memory_->write_common(tmp_addr + 5, (new_stack >> 8) & 0xFF);
+
+        // Clear link pointer (will be set when added to ready list)
+        memory_->write_common(tmp_addr + 0, 0);
+        memory_->write_common(tmp_addr + 1, 0);
+    }
+
+    // Clear slot 0 if it was the original location of a misplaced TMP
+    if (existing_tmp_addr != correct_slot_addr && existing_console != 0) {
+        // Slot 0 should now contain TMP0, not the old TMP7
+        // The loop above already created TMP0 in slot 0
+    }
+
+    std::cerr << "[TMP FIX] Created TMPs for " << num_consoles_ << " consoles\n";
+
+    // Dump the TMPD area to verify
+    std::cerr << "[TMP FIX] TMPD dump after creation:\n";
+    for (int tmp = 0; tmp < num_consoles_; tmp++) {
+        uint16_t base = TMPD_BASE + (tmp * TMP_SIZE);
+        std::cerr << "  TMP" << tmp << " at 0x" << std::hex << base << ": ";
+        // Show first 16 bytes
+        for (int i = 0; i < 16; i++) {
+            std::cerr << std::setw(2) << std::setfill('0')
+                      << (int)memory_->read_common(base + i) << " ";
+        }
+        std::cerr << " name='";
+        for (int i = 6; i < 14; i++) {
+            uint8_t ch = memory_->read_common(base + i);
+            std::cerr << (ch >= 0x20 && ch < 0x7F ? (char)ch : '.');
+        }
+        std::cerr << "' con=" << (int)memory_->read_common(base + 0x0E);
+        std::cerr << "\n" << std::dec;
+    }
+
+    // TODO: The created TMPs are not yet on the ready list.
+    // They need to be registered with XDOS. For now, we've populated
+    // the TMPD area so the structures exist. The TMPs still need to
+    // be started via XDOS CREATE or direct ready list manipulation.
 }

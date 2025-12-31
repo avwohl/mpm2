@@ -137,30 +137,28 @@ DO_CONST:
 DO_CONIN:
         ; Console input - D = console number
         ; Returns A = character
-        ; Per MP/M II spec: WAIT until character is available
-        ; Note: Using PDISP instead of POLL for better interrupt handling
-CONIN_LOOP:
-        ; First check if character is ready (CONST)
-        LD      A, FUNC_CONST
-        OUT     (XIOS_DISPATCH), A      ; Dispatch function
-        IN      A, (XIOS_DISPATCH)      ; Get result in A
-        OR      A
-        JR      NZ, CONIN_READY
+        ; Wait for character using POLL on the console's input device.
+        ; POLL takes device number, not flag number!
+        ; Device numbering: input = 2*console + 1 (odd devices are input)
+        PUSH    BC
+        PUSH    DE
 
-        ; No character ready - yield to dispatcher
-        ; This allows other processes to run without blocking
-        PUSH    DE              ; Save console number
-        CALL    PDISP           ; Yield to other processes
-        POP     DE              ; Restore console number
+        ; Calculate device number: 2*console + 1 for input
+        ; D already has console number
+        LD      A, D
+        ADD     A, A            ; A = 2*console
+        INC     A               ; A = 2*console + 1 (input device)
+        LD      E, A            ; E = device number for POLL
+        LD      C, POLL         ; POLL function (131)
+        CALL    XDOS            ; Wait for input device to be ready
 
-        ; Check again
-        JR      CONIN_LOOP
+        POP     DE              ; Restore console number in D
+        POP     BC
 
-CONIN_READY:
-        ; Character is ready - get it
+        ; Now read the character
         LD      A, FUNC_CONIN
-        OUT     (XIOS_DISPATCH), A      ; Dispatch function
-        IN      A, (XIOS_DISPATCH)      ; Get character in A
+        OUT     (XIOS_DISPATCH), A
+        IN      A, (XIOS_DISPATCH)
         RET
 
 DO_CONOUT:
@@ -319,7 +317,12 @@ DO_EXITRGN:
 
 DO_MAXCON:
         ; Max console - returns A = number of consoles
-        LD      A, NMBCNS
+        ; Sample XIOS code returns nmbcns directly, not nmbcns-1
+        ; For 8 consoles, return 8
+        ; DEBUG: Use FUNC_MAXCON to let emulator trace the call
+        LD      A, FUNC_MAXCON
+        OUT     (XIOS_DISPATCH), A
+        IN      A, (XIOS_DISPATCH)      ; Get result from emulator
         RET
 
 DO_SYSINIT:
@@ -402,9 +405,9 @@ INTHND:
 
 NOTICK:
         ; Check console input devices and set flags if input ready
-        ; Device 1,3,5,7 -> Console 0,1,2,3 -> Flags 3,4,5,6
+        ; Device 1,3,5,7,9,11,13,15 -> Console 0-7 -> Flags 3-10
         ; (Flags 1,2 are reserved for tick and 1-second)
-        LD      B, 4            ; Console count
+        LD      B, NMBCNS       ; Number of consoles (8)
         LD      D, 1            ; Start with device 1 (console 0 input)
         LD      E, 3            ; Start with flag 3 (console 0)
 CHKCON:
@@ -538,18 +541,170 @@ DPB_SSSD:
         DW      16              ; CKS - checksum vector size
         DW      2               ; OFF - reserved tracks
 
-; Buffers
-DIRBUF: DS      128             ; Directory buffer (shared)
-ALV0:   DS      256             ; Allocation vector drive A
-ALV1:   DS      256             ; Allocation vector drive B
-ALV2:   DS      256             ; Allocation vector drive C
-ALV3:   DS      256             ; Allocation vector drive D
-; CSV buffers - size = (DRM/4)+1 = (1023/4)+1 = 256 bytes each
-; Even with CKS=0 in DPB, BNKBDOS may still use this area
-; SIMH XIOS uses this formula for all drives
-CSV0:   DS      256             ; Checksum vector drive A
-CSV1:   DS      256             ; Checksum vector drive B
-CSV2:   DS      256             ; Checksum vector drive C
-CSV3:   DS      256             ; Checksum vector drive D
+; Buffers - use explicit DB 0 instead of DS so bytes are included in SPR output
+; (ul80 --prl doesn't include DS sections, causing truncated SPR files)
+
+; DIRBUF: 128 bytes
+DIRBUF:
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 16
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 32
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 48
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 64
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 80
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 96
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 112
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 128
+
+; ALV0: 256 bytes - Allocation vector drive A
+ALV0:
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 16
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 32
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 48
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 64
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 80
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 96
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 112
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 128
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 144
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 160
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 176
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 192
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 208
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 224
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 240
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 256
+
+; ALV1: 256 bytes - Allocation vector drive B
+ALV1:
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 16
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 32
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 48
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 64
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 80
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 96
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 112
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 128
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 144
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 160
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 176
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 192
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 208
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 224
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 240
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 256
+
+; ALV2: 256 bytes - Allocation vector drive C
+ALV2:
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 16
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 32
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 48
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 64
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 80
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 96
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 112
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 128
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 144
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 160
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 176
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 192
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 208
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 224
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 240
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 256
+
+; ALV3: 256 bytes - Allocation vector drive D
+ALV3:
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 16
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 32
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 48
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 64
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 80
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 96
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 112
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 128
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 144
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 160
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 176
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 192
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 208
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 224
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 240
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 256
+
+; CSV0: 256 bytes - Checksum vector drive A
+CSV0:
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 16
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 32
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 48
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 64
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 80
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 96
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 112
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 128
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 144
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 160
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 176
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 192
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 208
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 224
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 240
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 256
+
+; CSV1: 256 bytes - Checksum vector drive B
+CSV1:
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 16
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 32
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 48
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 64
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 80
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 96
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 112
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 128
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 144
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 160
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 176
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 192
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 208
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 224
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 240
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 256
+
+; CSV2: 256 bytes - Checksum vector drive C
+CSV2:
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 16
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 32
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 48
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 64
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 80
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 96
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 112
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 128
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 144
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 160
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 176
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 192
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 208
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 224
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 240
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 256
+
+; CSV3: 256 bytes - Checksum vector drive D
+CSV3:
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 16
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 32
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 48
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 64
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 80
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 96
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 112
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 128
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 144
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 160
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 176
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 192
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 208
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 224
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 240
+        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 256
 
         END

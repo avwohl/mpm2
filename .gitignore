@@ -33,15 +33,17 @@ cmake_install.cmake
 compile_commands.json
 Makefile
 
-# wolfSSL and wolfSSH libraries
-# These must be downloaded separately by developers due to:
+# SSH libraries (external dependencies)
+# These must be installed separately by developers due to:
 # - Copyright restrictions
 # - Cryptographic export control regulations
-# Developers should install these system-wide or in a local prefix
+# Install via: brew install libssh (preferred) or build wolfSSH
 wolfssl/
 wolfssh/
 wolfssl-*/
 wolfssh-*/
+libssh/
+libssh-*/
 
 # Temporary files
 *.tmp

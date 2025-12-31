@@ -52,6 +52,16 @@ qkz80_uint8 MpmCpu::port_in(qkz80_uint8 port) {
             // Return the result from the last XIOS dispatch
             // This is used with IN A, (0xE0) after OUT (0xE0), A to get return values
             value = last_xios_result_;
+            // Trace IN results for debugging interrupt handler
+            if (g_debug_enabled && value == 0xFF) {
+                static int in_ready_count = 0;
+                in_ready_count++;
+                if (in_ready_count <= 30) {
+                    std::cerr << "[IN 0xE0] returning READY (0xFF) PC=0x"
+                              << std::hex << regs.PC.get_pair16() << std::dec
+                              << " #" << in_ready_count << "\n";
+                }
+            }
             break;
 
         case MpmPorts::SIGNAL:
@@ -86,6 +96,18 @@ void MpmCpu::handle_xios_dispatch() {
     // Save the result for IN A, (port) to read later
     // The XIOS handler sets the result in A register via set_high()
     last_xios_result_ = regs.AF.get_high();
+
+    // Debug trace for POLLDEVICE calls that return READY
+    if (g_debug_enabled && func == 0x36 && last_xios_result_ == 0xFF) {  // POLLDEVICE
+        static int polldev_ready_count = 0;
+        polldev_ready_count++;
+        if (polldev_ready_count <= 30) {
+            std::cerr << "[XIOS DISPATCH] POLLDEVICE returning READY, dev="
+                      << (int)regs.BC.get_low() << " PC=0x" << std::hex
+                      << regs.PC.get_pair16() << " E=" << (int)regs.DE.get_low()
+                      << std::dec << " #" << polldev_ready_count << "\n";
+        }
+    }
 }
 
 void MpmCpu::handle_bank_select(uint8_t bank) {
