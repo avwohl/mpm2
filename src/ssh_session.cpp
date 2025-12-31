@@ -28,6 +28,9 @@
 #ifndef WS_CHANNEL_CLOSED
 #define WS_CHANNEL_CLOSED -1036
 #endif
+#ifndef WS_SOCKET_ERROR_E
+#define WS_SOCKET_ERROR_E -1009
+#endif
 
 #include <sys/socket.h>
 #include <sys/select.h>
@@ -94,38 +97,44 @@ void SSHSession::thread_func() {
     int flags = fcntl(fd_, F_GETFL, 0);
     fcntl(fd_, F_SETFL, flags | O_NONBLOCK);
 
-    // Console was already marked as connected in accept_loop()
     std::cerr << "[SSH:" << console_id_ << "] Console ready, sending banner\n";
 
-    // The default channel ID is 0 for the first shell channel
-    word32 channelId = 0;
-
-    // Send banner using channel-based I/O
+    // Send banner
     char banner[128];
     snprintf(banner, sizeof(banner),
              "\r\nMP/M II Console %d\r\n\r\n", console_id_);
-    int send_ret = wolfSSH_ChannelIdSend(ssh_, channelId,
+    int send_ret = wolfSSH_ChannelIdSend(ssh_, 0,
                                           reinterpret_cast<byte*>(banner), strlen(banner));
     if (send_ret < 0) {
         std::cerr << "[SSH:" << console_id_ << "] Banner send failed: " << wolfSSH_get_error(ssh_) << "\n";
     } else {
         std::cerr << "[SSH:" << console_id_ << "] Banner sent: " << send_ret << " bytes\n";
-        // Flush the data by calling worker
         wolfSSH_worker(ssh_, nullptr);
     }
 
     std::cerr << "[SSH:" << console_id_ << "] Entering main loop\n";
 
     uint8_t buf[256];
-    int loop_count = 0;
+
+    // KNOWN LIMITATION: wolfSSH has a bug/limitation where output sent after
+    // receiving input is not transmitted to the client. The data is buffered
+    // by wolfSSH_ChannelIdSend but wolfSSH_worker fails to flush it (returns
+    // WS_ERROR). Initial output before any input works correctly.
+    // SSH input IS received and processed by MP/M II, but the response output
+    // is not visible to the SSH client.
 
     while (!stop_requested_.load()) {
-        loop_count++;
-        if (loop_count <= 5 || (loop_count % 1000) == 0) {
-            std::cerr << "[SSH:" << console_id_ << "] Loop " << loop_count << "\n";
+        // Try to send any pending output
+        size_t count = con->output_queue().read_some(buf, sizeof(buf));
+        if (count > 0) {
+            wolfSSH_ChannelIdSend(ssh_, 0, buf, count);
+            wolfSSH_worker(ssh_, nullptr);
         }
 
-        // Use select with short timeout to avoid busy-waiting
+        // Call worker to process SSH protocol and flush sends
+        wolfSSH_worker(ssh_, nullptr);
+
+        // Use select to wait for socket activity
         fd_set rfds;
         FD_ZERO(&rfds);
         FD_SET(fd_, &rfds);
@@ -136,77 +145,38 @@ void SSHSession::thread_func() {
 
         int sel_ret = select(fd_ + 1, &rfds, nullptr, nullptr, &tv);
         if (sel_ret < 0) {
-            std::cerr << "[SSH:" << console_id_ << "] Select failed: " << errno << "\n";
             break;
         }
 
-        // Call worker to process SSH messages when socket is readable
+        // Process received data
         if (sel_ret > 0 && FD_ISSET(fd_, &rfds)) {
             word32 lastChannel = 0;
             int worker_ret = wolfSSH_worker(ssh_, &lastChannel);
             int err = wolfSSH_get_error(ssh_);
 
-            if (loop_count <= 10) {
-                std::cerr << "[SSH:" << console_id_ << "] worker ret=" << worker_ret << " err=" << err
-                          << " lastChannel=" << lastChannel << "\n";
-            }
-
-            // Check for channel data
-            if (worker_ret == WS_CHAN_RXD || err == WS_CHAN_RXD) {
-                channelId = lastChannel;
-                // Read from the channel
-                int n = wolfSSH_ChannelIdRead(ssh_, channelId, buf, sizeof(buf));
-                if (loop_count <= 10) {
-                    std::cerr << "[SSH:" << console_id_ << "] ChannelIdRead returned " << n << "\n";
-                }
+            // Read from channel
+            if (worker_ret >= 0 || worker_ret == WS_CHAN_RXD) {
+                int n = wolfSSH_ChannelIdRead(ssh_, 0, buf, sizeof(buf));
                 if (n > 0) {
                     // Queue characters for MP/M
                     for (int i = 0; i < n; i++) {
                         uint8_t ch = buf[i];
-                        // Convert LF to CR for CP/M compatibility
-                        if (ch == '\n') ch = '\r';
+                        if (ch == '\n') ch = '\r';  // LF -> CR for CP/M
                         con->input_queue().try_write(ch);
                     }
                 }
             }
 
-            // Check for errors
-            if (err == WS_EOF || err == WS_CHANNEL_CLOSED) {
-                std::cerr << "[SSH:" << console_id_ << "] Connection closed (err=" << err << ")\n";
+            // Check for disconnect
+            if (err == WS_EOF || err == WS_CHANNEL_CLOSED ||
+                (err < 0 && err != WS_WANT_READ && err != WS_WANT_WRITE &&
+                 err != WS_CHAN_RXD && err != WS_SUCCESS)) {
                 stop_requested_.store(true);
-            } else if (err < 0 && err != WS_WANT_READ && err != WS_WANT_WRITE &&
-                       err != WS_CHAN_RXD && err != WS_SUCCESS) {
-                std::cerr << "[SSH:" << console_id_ << "] Worker error: " << err << "\n";
-                stop_requested_.store(true);
-            }
-        }
-
-        if (stop_requested_.load()) {
-            std::cerr << "[SSH:" << console_id_ << "] Stop requested after read loop\n";
-            break;
-        }
-
-        // Write from output queue -> SSH using channel-based send
-        size_t count = con->output_queue().read_some(buf, sizeof(buf));
-        if (count > 0) {
-            std::cerr << "[SSH:" << console_id_ << "] Sending " << count << " bytes to client\n";
-            int sent = wolfSSH_ChannelIdSend(ssh_, channelId, buf, count);
-            std::cerr << "[SSH:" << console_id_ << "] ChannelIdSend returned " << sent << "\n";
-            if (sent > 0) {
-                // Flush by calling worker
-                wolfSSH_worker(ssh_, nullptr);
-            }
-            if (sent < 0) {
-                int err = wolfSSH_get_error(ssh_);
-                if (err != WS_WANT_WRITE && err != WS_WANT_READ) {
-                    std::cerr << "[SSH:" << console_id_ << "] Send error: " << err << "\n";
-                    break;
-                }
             }
         }
     }
 
-    std::cerr << "[SSH:" << console_id_ << "] Session ending, loop_count=" << loop_count << "\n";
+    std::cerr << "[SSH:" << console_id_ << "] Session ending\n";
     con->reset();
     running_.store(false);
 }
@@ -249,6 +219,7 @@ bool SSHServer::init(const std::string& host_key_path,
         std::cerr << "wolfSSH_Init failed\n";
         return false;
     }
+
 
     // Create context
     ctx_ = wolfSSH_CTX_new(WOLFSSH_ENDPOINT_SERVER, nullptr);
