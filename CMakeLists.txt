@@ -51,24 +51,45 @@ if(NOT QKZ80_FOUND)
         "  3. Set QKZ80_ROOT to the qkz80 installation directory")
 endif()
 
-# wolfSSL and wolfSSH paths (adjust as needed)
-set(WOLFSSL_ROOT "/usr/local" CACHE PATH "wolfSSL installation directory")
-set(WOLFSSH_ROOT "/usr/local" CACHE PATH "wolfSSH installation directory")
+# SSH library options - prefer libssh over wolfSSH
+option(USE_LIBSSH "Use libssh for SSH support (preferred)" ON)
+option(USE_WOLFSSH "Use wolfSSH for SSH support (fallback)" OFF)
 
-# Check for wolfSSH (optional - build without SSH if not found)
-find_library(WOLFSSH_LIB wolfssh HINTS ${WOLFSSH_ROOT}/lib)
-find_library(WOLFSSL_LIB wolfssl HINTS ${WOLFSSL_ROOT}/lib)
-find_path(WOLFSSH_INCLUDE wolfssh/ssh.h HINTS ${WOLFSSH_ROOT}/include)
-find_path(WOLFSSL_INCLUDE wolfssl/ssl.h HINTS ${WOLFSSL_ROOT}/include)
+set(HAVE_SSH FALSE)
 
-if(WOLFSSH_LIB AND WOLFSSL_LIB AND WOLFSSH_INCLUDE AND WOLFSSL_INCLUDE)
-    set(HAVE_WOLFSSH TRUE)
-    message(STATUS "Found wolfSSH: ${WOLFSSH_LIB}")
-    message(STATUS "Found wolfSSL: ${WOLFSSL_LIB}")
-else()
-    set(HAVE_WOLFSSH FALSE)
-    message(WARNING "wolfSSH not found - building without SSH support")
-    message(STATUS "  To enable SSH, install wolfSSL with --enable-ssh and wolfSSH")
+# Try libssh first (preferred - better non-blocking support)
+if(USE_LIBSSH)
+    find_library(LIBSSH_LIB ssh HINTS /opt/homebrew/lib /usr/local/lib)
+    find_path(LIBSSH_INCLUDE libssh/libssh.h HINTS /opt/homebrew/include /usr/local/include)
+
+    if(LIBSSH_LIB AND LIBSSH_INCLUDE)
+        set(HAVE_SSH TRUE)
+        set(HAVE_LIBSSH TRUE)
+        message(STATUS "Found libssh: ${LIBSSH_LIB}")
+    endif()
+endif()
+
+# Fall back to wolfSSH if libssh not found
+if(NOT HAVE_SSH AND USE_WOLFSSH)
+    set(WOLFSSL_ROOT "/usr/local" CACHE PATH "wolfSSL installation directory")
+    set(WOLFSSH_ROOT "/usr/local" CACHE PATH "wolfSSH installation directory")
+
+    find_library(WOLFSSH_LIB wolfssh HINTS ${WOLFSSH_ROOT}/lib)
+    find_library(WOLFSSL_LIB wolfssl HINTS ${WOLFSSL_ROOT}/lib)
+    find_path(WOLFSSH_INCLUDE wolfssh/ssh.h HINTS ${WOLFSSH_ROOT}/include)
+    find_path(WOLFSSL_INCLUDE wolfssl/ssl.h HINTS ${WOLFSSL_ROOT}/include)
+
+    if(WOLFSSH_LIB AND WOLFSSL_LIB AND WOLFSSH_INCLUDE AND WOLFSSL_INCLUDE)
+        set(HAVE_SSH TRUE)
+        set(HAVE_WOLFSSH TRUE)
+        message(STATUS "Found wolfSSH: ${WOLFSSH_LIB}")
+        message(STATUS "Found wolfSSL: ${WOLFSSL_LIB}")
+    endif()
+endif()
+
+if(NOT HAVE_SSH)
+    message(WARNING "No SSH library found - building without SSH support")
+    message(STATUS "  Install libssh: brew install libssh")
 endif()
 
 # Source files
@@ -82,7 +103,9 @@ set(SOURCES
     src/disk.cpp
 )
 
-if(HAVE_WOLFSSH)
+if(HAVE_LIBSSH)
+    list(APPEND SOURCES src/ssh_session_libssh.cpp)
+elseif(HAVE_WOLFSSH)
     list(APPEND SOURCES src/ssh_session.cpp)
 endif()
 
@@ -103,7 +126,11 @@ target_link_libraries(mpm2_emu PRIVATE
     ${QKZ80_LIBRARIES}
 )
 
-if(HAVE_WOLFSSH)
+if(HAVE_LIBSSH)
+    target_compile_definitions(mpm2_emu PRIVATE HAVE_LIBSSH)
+    target_include_directories(mpm2_emu PRIVATE ${LIBSSH_INCLUDE})
+    target_link_libraries(mpm2_emu PRIVATE ${LIBSSH_LIB})
+elseif(HAVE_WOLFSSH)
     target_compile_definitions(mpm2_emu PRIVATE HAVE_WOLFSSH)
     target_include_directories(mpm2_emu PRIVATE ${WOLFSSH_INCLUDE} ${WOLFSSL_INCLUDE})
     target_link_libraries(mpm2_emu PRIVATE ${WOLFSSH_LIB} ${WOLFSSL_LIB})

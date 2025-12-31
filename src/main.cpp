@@ -6,8 +6,9 @@
 #include "z80_thread.h"
 #include "disk.h"
 
-#ifdef HAVE_WOLFSSH
+#if defined(HAVE_LIBSSH) || defined(HAVE_WOLFSSH)
 #include "ssh_session.h"
+#define HAVE_SSH
 #endif
 
 #include <iostream>
@@ -259,7 +260,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-#ifdef HAVE_WOLFSSH
+#ifdef HAVE_SSH
     // Initialize SSH server (skip if only using local console)
     SSHServer ssh_server;
     bool ssh_enabled = false;
@@ -313,7 +314,7 @@ int main(int argc, char* argv[]) {
     // Main loop
     std::cout << "\nPress Ctrl+C to shutdown\n\n";
 
-#ifdef HAVE_WOLFSSH
+#ifdef HAVE_SSH
     if (ssh_enabled) {
         // Run SSH accept loop in main thread (blocks until shutdown)
         ssh_server.accept_loop();
@@ -364,10 +365,16 @@ int main(int argc, char* argv[]) {
                     ssize_t n = read(STDIN_FILENO, &ch, 1);
                     if (n > 0) {
                         // Broadcast to all local consoles - MP/M II may use any console
+                        std::cerr << "[INPUT] char=0x" << std::hex << (int)(unsigned char)ch
+                                  << std::dec << " '" << (ch >= 0x20 && ch < 0x7F ? ch : '.') << "'\n";
                         for (int i = 0; i < MAX_CONSOLES; i++) {
                             Console* con = ConsoleManager::instance().get(i);
                             if (con && con->is_local()) {
-                                con->input_queue().try_write(static_cast<uint8_t>(ch));
+                                bool ok = con->input_queue().try_write(static_cast<uint8_t>(ch));
+                                if (i == 3 || i == 7) {
+                                    std::cerr << "[INPUT] console " << i << " queue size=" << con->input_queue().available()
+                                              << " write=" << (ok ? "ok" : "FAIL") << "\n";
+                                }
                             }
                         }
                     } else if (n == 0) {
@@ -392,10 +399,16 @@ int main(int argc, char* argv[]) {
                     break;
                 }
                 // Broadcast to all local consoles - MP/M II may use any console
+                std::cerr << "[INPUT] char=0x" << std::hex << (int)(unsigned char)ch
+                          << std::dec << " '" << (ch >= 0x20 && ch < 0x7F ? ch : '.') << "'\n";
                 for (int i = 0; i < MAX_CONSOLES; i++) {
                     Console* con = ConsoleManager::instance().get(i);
                     if (con && con->is_local()) {
-                        con->input_queue().try_write(static_cast<uint8_t>(ch));
+                        bool ok = con->input_queue().try_write(static_cast<uint8_t>(ch));
+                        if (i == 3 || i == 7) {
+                            std::cerr << "[INPUT] console " << i << " queue size=" << con->input_queue().available()
+                                      << " write=" << (ok ? "ok" : "FAIL") << "\n";
+                        }
                     }
                 }
             } else {
@@ -451,7 +464,7 @@ int main(int argc, char* argv[]) {
     // Stop Z80
     z80.stop();
 
-#ifdef HAVE_WOLFSSH
+#ifdef HAVE_SSH
     // Stop SSH server
     ssh_server.stop();
 #endif

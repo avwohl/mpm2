@@ -5,7 +5,7 @@
 #ifndef SSH_SESSION_H
 #define SSH_SESSION_H
 
-#ifdef HAVE_WOLFSSH
+#if defined(HAVE_LIBSSH) || defined(HAVE_WOLFSSH)
 
 #include <thread>
 #include <atomic>
@@ -14,44 +14,50 @@
 #include <memory>
 #include <functional>
 
+class Console;
+
+#ifdef HAVE_LIBSSH
+// Forward declarations for libssh types
+typedef struct ssh_session_struct* ssh_session;
+typedef struct ssh_bind_struct* ssh_bind;
+typedef struct ssh_channel_struct* ssh_channel;
+typedef struct ssh_event_struct* ssh_event;
+#else
 // Forward declarations for wolfSSH types
 struct WOLFSSH_CTX;
 struct WOLFSSH;
 struct WOLFSSH_CHANNEL;
 struct WS_UserAuthData;
-
-// wolfSSH uses 'byte' type
 using byte = unsigned char;
-
-class Console;
+#endif
 
 // SSH session - handles one SSH connection
 class SSHSession {
 public:
+#ifdef HAVE_LIBSSH
+    SSHSession(int console_id, ssh_session session, ssh_channel channel);
+#else
     SSHSession(int console_id, WOLFSSH* ssh, int fd);
+#endif
     ~SSHSession();
 
-    // Start the session thread
     void start();
-
-    // Stop the session (non-blocking request)
     void stop();
-
-    // Wait for session to finish
     void join();
-
-    // Check if running
     bool is_running() const { return running_.load(); }
-
-    // Get console ID
     int console_id() const { return console_id_; }
 
 private:
     void thread_func();
 
     int console_id_;
+#ifdef HAVE_LIBSSH
+    ssh_session session_;
+    ssh_channel channel_;
+#else
     WOLFSSH* ssh_;
     int fd_;
+#endif
     std::thread thread_;
     std::atomic<bool> running_;
     std::atomic<bool> stop_requested_;
@@ -63,40 +69,29 @@ public:
     SSHServer();
     ~SSHServer();
 
-    // Initialize the server
-    // Returns false on failure
     bool init(const std::string& host_key_path,
               const std::string& authorized_keys_path = "");
 
-    // Set authentication callback (username, password) -> bool
     using AuthCallback = std::function<bool(const std::string&, const std::string&)>;
     void set_auth_callback(AuthCallback cb) { auth_callback_ = cb; }
 
-    // Start listening on port
     bool listen(int port);
-
-    // Stop the server
     void stop();
-
-    // Accept loop - call from main thread or spawn a thread
     void accept_loop();
-
-    // Check if running
     bool is_running() const { return running_.load(); }
-
-    // Get number of active sessions
     size_t session_count() const;
 
 private:
-    // Cleanup finished sessions
     void cleanup_sessions();
 
-    // wolfSSH callbacks
+#ifdef HAVE_LIBSSH
+    ssh_bind sshbind_;
+#else
     static int user_auth_callback(byte auth_type, WS_UserAuthData* auth_data, void* ctx);
     static int channel_shell_callback(WOLFSSH_CHANNEL* channel, void* ctx);
-
     WOLFSSH_CTX* ctx_;
     int listen_fd_;
+#endif
     int port_;
 
     std::vector<std::unique_ptr<SSHSession>> sessions_;
@@ -106,6 +101,6 @@ private:
     std::atomic<bool> stop_requested_;
 };
 
-#endif // HAVE_WOLFSSH
+#endif // HAVE_LIBSSH || HAVE_WOLFSSH
 
 #endif // SSH_SESSION_H
