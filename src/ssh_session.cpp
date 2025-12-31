@@ -116,25 +116,20 @@ void SSHSession::thread_func() {
 
     uint8_t buf[256];
 
-    // KNOWN LIMITATION: wolfSSH has a bug/limitation where output sent after
-    // receiving input is not transmitted to the client. The data is buffered
-    // by wolfSSH_ChannelIdSend but wolfSSH_worker fails to flush it (returns
-    // WS_ERROR). Initial output before any input works correctly.
-    // SSH input IS received and processed by MP/M II, but the response output
-    // is not visible to the SSH client.
+    // KNOWN LIMITATION: wolfSSH non-blocking bidirectional I/O does not work
+    // correctly. Initial output (before any input) is sent successfully, but
+    // after receiving input from the client, wolfSSH_worker() fails to flush
+    // subsequent output (returns WS_ERROR with WS_SOCKET_ERROR_E).
+    //
+    // This appears to be related to how wolfSSH handles internal state after
+    // receiving channel data. The echoserver example works because it uses
+    // blocking sockets and a different I/O pattern.
+    //
+    // For now, SSH connections receive the initial MP/M banner but cannot
+    // interact bidirectionally. Consider using libssh as an alternative.
 
     while (!stop_requested_.load()) {
-        // Try to send any pending output
-        size_t count = con->output_queue().read_some(buf, sizeof(buf));
-        if (count > 0) {
-            wolfSSH_ChannelIdSend(ssh_, 0, buf, count);
-            wolfSSH_worker(ssh_, nullptr);
-        }
-
-        // Call worker to process SSH protocol and flush sends
-        wolfSSH_worker(ssh_, nullptr);
-
-        // Use select to wait for socket activity
+        // Use select to avoid busy-waiting
         fd_set rfds;
         FD_ZERO(&rfds);
         FD_SET(fd_, &rfds);
@@ -148,13 +143,20 @@ void SSHSession::thread_func() {
             break;
         }
 
-        // Process received data
+        // Send any pending output from MP/M
+        size_t count = con->output_queue().read_some(buf, sizeof(buf));
+        if (count > 0) {
+            wolfSSH_ChannelIdSend(ssh_, 0, buf, count);
+            wolfSSH_worker(ssh_, nullptr);
+        }
+
+        // Process SSH protocol when socket is readable
         if (sel_ret > 0 && FD_ISSET(fd_, &rfds)) {
             word32 lastChannel = 0;
             int worker_ret = wolfSSH_worker(ssh_, &lastChannel);
             int err = wolfSSH_get_error(ssh_);
 
-            // Read from channel
+            // Read any available channel data
             if (worker_ret >= 0 || worker_ret == WS_CHAN_RXD) {
                 int n = wolfSSH_ChannelIdRead(ssh_, 0, buf, sizeof(buf));
                 if (n > 0) {
@@ -168,9 +170,7 @@ void SSHSession::thread_func() {
             }
 
             // Check for disconnect
-            if (err == WS_EOF || err == WS_CHANNEL_CLOSED ||
-                (err < 0 && err != WS_WANT_READ && err != WS_WANT_WRITE &&
-                 err != WS_CHAN_RXD && err != WS_SUCCESS)) {
+            if (err == WS_EOF || err == WS_CHANNEL_CLOSED) {
                 stop_requested_.store(true);
             }
         }
