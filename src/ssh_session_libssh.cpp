@@ -11,6 +11,7 @@
 #include <libssh/server.h>
 #include <libssh/callbacks.h>
 
+#include <algorithm>
 #include <cstring>
 #include <iostream>
 

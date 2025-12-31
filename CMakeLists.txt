@@ -89,7 +89,8 @@ endif()
 
 if(NOT HAVE_SSH)
     message(WARNING "No SSH library found - building without SSH support")
-    message(STATUS "  Install libssh: brew install libssh")
+    message(STATUS "  macOS: brew install libssh")
+    message(STATUS "  Linux: sudo apt install libssh-dev")
 endif()
 
 # Source files
