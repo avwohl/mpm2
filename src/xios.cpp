@@ -90,21 +90,15 @@ void XIOS::do_ret() {
 }
 
 // Console I/O - D register contains console number (MP/M II XIOS convention)
+// If D is invalid (>=8), default to console 0 (workaround for possible XDOS issue)
 void XIOS::do_const() {
     uint8_t console = cpu_->regs.DE.get_high();  // D = console number
+    if (console >= 8) console = 0;  // Workaround: invalid console -> default to 0
     Console* con = ConsoleManager::instance().get(console);
 
     uint8_t status = 0x00;
     if (con) {
         status = con->const_status();
-    }
-
-    static int const_count = 0;
-    const_count++;
-    if (g_debug_enabled && (status || (const_count % 5000) == 0)) {
-        std::cerr << "[CONST] con=" << (int)console << " status=" << (status ? "READY" : "wait")
-                  << " local=" << (con ? con->is_local() : 0)
-                  << " connected=" << (con ? con->is_connected() : 0) << "\n";
     }
 
     cpu_->regs.AF.set_high(status);
@@ -113,15 +107,12 @@ void XIOS::do_const() {
 
 void XIOS::do_conin() {
     uint8_t console = cpu_->regs.DE.get_high();  // D = console number
+    if (console >= 8) console = 0;  // Workaround: invalid console -> default to 0
     Console* con = ConsoleManager::instance().get(console);
 
     uint8_t ch = 0x1A;  // EOF default
     if (con) {
         ch = con->read_char();
-    }
-
-    if (g_debug_enabled && ch != 0) {
-        std::cerr << "[CONIN] con=" << (int)console << " ch=0x" << std::hex << (int)ch << std::dec << "\n";
     }
 
     cpu_->regs.AF.set_high(ch);
@@ -131,11 +122,8 @@ void XIOS::do_conin() {
 void XIOS::do_conout() {
     // D = console number (MP/M II XIOS convention), C = character
     uint8_t console = cpu_->regs.DE.get_high();  // D = console number
+    if (console >= 8) console = 0;  // Workaround: invalid console -> default to 0
     uint8_t ch = cpu_->regs.BC.get_low();        // C = character
-
-    if (g_debug_enabled && ch >= 0x20 && ch < 0x7F) {
-        std::cerr << "[CONOUT] con=" << (int)console << " ch='" << (char)ch << "'\n";
-    }
 
     // Get the specified console
     Console* con = ConsoleManager::instance().get(console);
@@ -281,18 +269,7 @@ void XIOS::do_polldevice() {
     uint8_t device = cpu_->regs.BC.get_low();
     uint8_t result = 0x00;
 
-    static int poll_counts[8] = {0};
-    static bool first_poll_logged[8] = {false};
-
     if (device < 8) {
-        poll_counts[device]++;
-
-        // Log first poll for each device
-        if (g_debug_enabled && !first_poll_logged[device]) {
-            first_poll_logged[device] = true;
-            std::cerr << "[POLL-FIRST] dev=" << (int)device << "\n";
-        }
-
         int console = device / 2;
         bool is_input = (device & 1) != 0;
 
@@ -301,9 +278,6 @@ void XIOS::do_polldevice() {
             Console* con = ConsoleManager::instance().get(console);
             if (con && con->const_status()) {
                 result = 0xFF;
-                if (g_debug_enabled) {
-                    std::cerr << "[POLL] dev=" << (int)device << " con=" << console << " READY\n";
-                }
             }
         } else {
             // Console output - always ready
@@ -316,13 +290,6 @@ void XIOS::do_polldevice() {
 }
 
 void XIOS::do_startclock() {
-    static int startclock_count = 0;
-    startclock_count++;
-    if (g_debug_enabled) {
-        std::cerr << "[STARTCLOCK] call #" << startclock_count
-                  << " IFF=" << (int)cpu_->regs.IFF1
-                  << " PC=0x" << std::hex << cpu_->regs.PC.get_pair16() << std::dec << "\n";
-    }
     tick_enabled_.store(true);
     do_ret();
 }
@@ -336,12 +303,6 @@ void XIOS::do_exitregion() {
     // Exit mutual exclusion region
     // NOTE: Do NOT enable interrupts here - the Z80 EXITRGN code handles it
     // It checks PREEMP flag and only does EI if not preempted
-    // (Per SIMH XIOS pattern)
-    static int exitregion_count = 0;
-    exitregion_count++;
-    if (g_debug_enabled && (exitregion_count % 100) == 0) {
-        std::cerr << "[EXITREGION] count=" << exitregion_count << " IFF=" << (int)cpu_->regs.IFF1 << "\n";
-    }
     do_ret();
 }
 
@@ -358,21 +319,6 @@ void XIOS::do_systeminit() {
     // C = breakpoint RST number
     // DE = breakpoint handler address
     // HL = XIOS direct jump table address
-
-    static int sysinit_count = 0;
-    sysinit_count++;
-    if (g_debug_enabled) {
-        std::cerr << "[SYSINIT] call #" << sysinit_count
-                  << " IFF=" << (int)cpu_->regs.IFF1
-                  << " PC=0x" << std::hex << cpu_->regs.PC.get_pair16()
-                  << " SP=0x" << cpu_->regs.SP.get_pair16() << std::dec << "\n";
-        // Dump TMPD at 0xFE00 (TMP configuration)
-        std::cerr << "  TMPD[FE00-FE40]=";
-        for (int i = 0; i < 64; i++) {
-            std::cerr << std::hex << std::setw(2) << std::setfill('0') << (int)mem_->read_common(0xFE00 + i) << " ";
-        }
-        std::cerr << std::dec << "\n";
-    }
 
     // Initialize consoles
     ConsoleManager::instance().init();
@@ -454,11 +400,6 @@ void XIOS::do_pdisp() {
     // Process dispatcher entry point - called at end of interrupt handler
     // The Z80 code does EI then JP PDISP, but EI's effect is delayed
     // Re-enable interrupts here to ensure they stay enabled
-    static int pdisp_count = 0;
-    pdisp_count++;
-    if (g_debug_enabled && (pdisp_count % 100) == 0) {
-        std::cerr << "[PDISP] count=" << pdisp_count << "\n";
-    }
     cpu_->regs.IFF1 = 1;
     cpu_->regs.IFF2 = 1;
     do_ret();

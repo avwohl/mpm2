@@ -83,86 +83,46 @@ void SSHSession::join() {
 void SSHSession::thread_func() {
     Console* con = ConsoleManager::instance().get(console_id_);
     if (!con) {
+        std::cerr << "[SSH:" << console_id_ << "] No console, exiting\n";
         running_.store(false);
         return;
     }
 
-    // Wait for channel to be ready by processing worker until we get WS_CHAN_RXD
-    // wolfSSH needs to process channel open requests before stream I/O works
-    // The client sends: channel open, PTY request, shell request
-    // We need to keep calling worker until the channel is fully set up
-    int ret;
-    int attempts = 0;
-    std::cerr << "[SSH] Waiting for channel...\n";
-    bool got_chan_rxd = false;
-    while (attempts++ < 500 && !got_chan_rxd) {  // More attempts, wait for CHAN_RXD
-        // Wait for socket to be readable
-        fd_set rfds;
-        FD_ZERO(&rfds);
-        FD_SET(fd_, &rfds);
-        struct timeval tv = {0, 50000};  // 50ms timeout
-        int sel = select(fd_ + 1, &rfds, nullptr, nullptr, &tv);
+    std::cerr << "[SSH:" << console_id_ << "] Session starting\n";
 
-        ret = wolfSSH_worker(ssh_, nullptr);
-        int err = wolfSSH_get_error(ssh_);
-
-        if (attempts <= 10 || (attempts % 50) == 0) {
-            std::cerr << "[SSH] worker attempt " << attempts << ": ret=" << ret << " err=" << err << "\n";
-        }
-
-        if (ret == WS_CHAN_RXD || err == WS_CHAN_RXD) {
-            std::cerr << "[SSH] Channel data ready after " << attempts << " attempts\n";
-            got_chan_rxd = true;
-            break;
-        }
-        if (ret > 0) {
-            std::cerr << "[SSH] Got " << ret << " bytes after " << attempts << " attempts\n";
-            got_chan_rxd = true;
-            break;
-        }
-        if (err == WS_EOF || err == WS_CHANNEL_CLOSED) {
-            std::cerr << "[SSH] Connection closed during setup\n";
-            running_.store(false);
-            return;
-        }
-        if (err < 0 && err != WS_WANT_READ && err != WS_WANT_WRITE && err != WS_SUCCESS) {
-            std::cerr << "[SSH] Unexpected error during setup: " << err << "\n";
-            running_.store(false);
-            return;
-        }
-    }
-    if (!got_chan_rxd) {
-        std::cerr << "[SSH] Timeout waiting for channel after " << attempts << " attempts\n";
-    }
+    // Set socket to non-blocking for select-based I/O
+    int flags = fcntl(fd_, F_GETFL, 0);
+    fcntl(fd_, F_SETFL, flags | O_NONBLOCK);
 
     // Console was already marked as connected in accept_loop()
-    std::cerr << "[SSH] Console " << console_id_ << " ready, sending banner\n";
+    std::cerr << "[SSH:" << console_id_ << "] Console ready, sending banner\n";
 
     // The default channel ID is 0 for the first shell channel
-    word32 bannerChannelId = 0;
+    word32 channelId = 0;
 
     // Send banner using channel-based I/O
     char banner[128];
     snprintf(banner, sizeof(banner),
              "\r\nMP/M II Console %d\r\n\r\n", console_id_);
-    int send_ret = wolfSSH_ChannelIdSend(ssh_, bannerChannelId,
+    int send_ret = wolfSSH_ChannelIdSend(ssh_, channelId,
                                           reinterpret_cast<byte*>(banner), strlen(banner));
     if (send_ret < 0) {
-        std::cerr << "[SSH] Banner send failed: " << wolfSSH_get_error(ssh_) << "\n";
+        std::cerr << "[SSH:" << console_id_ << "] Banner send failed: " << wolfSSH_get_error(ssh_) << "\n";
     } else {
-        std::cerr << "[SSH] Banner sent: " << send_ret << " bytes\n";
+        std::cerr << "[SSH:" << console_id_ << "] Banner sent: " << send_ret << " bytes\n";
         // Flush the data by calling worker
         wolfSSH_worker(ssh_, nullptr);
     }
 
-    uint8_t buf[256];
-    word32 channelId = 0;  // Default shell channel
+    std::cerr << "[SSH:" << console_id_ << "] Entering main loop\n";
 
-    static int loop_count = 0;
+    uint8_t buf[256];
+    int loop_count = 0;
+
     while (!stop_requested_.load()) {
         loop_count++;
-        if (loop_count <= 5 || (loop_count % 100) == 0) {
-            std::cerr << "[SSH] Loop " << loop_count << "\n";
+        if (loop_count <= 5 || (loop_count % 1000) == 0) {
+            std::cerr << "[SSH:" << console_id_ << "] Loop " << loop_count << "\n";
         }
 
         // Use select with short timeout to avoid busy-waiting
@@ -172,11 +132,11 @@ void SSHSession::thread_func() {
 
         struct timeval tv;
         tv.tv_sec = 0;
-        tv.tv_usec = 10000;  // 10ms timeout
+        tv.tv_usec = 50000;  // 50ms timeout
 
         int sel_ret = select(fd_ + 1, &rfds, nullptr, nullptr, &tv);
         if (sel_ret < 0) {
-            std::cerr << "[SSH] Select failed: " << errno << "\n";
+            std::cerr << "[SSH:" << console_id_ << "] Select failed: " << errno << "\n";
             break;
         }
 
@@ -187,7 +147,7 @@ void SSHSession::thread_func() {
             int err = wolfSSH_get_error(ssh_);
 
             if (loop_count <= 10) {
-                std::cerr << "[SSH] worker ret=" << worker_ret << " err=" << err
+                std::cerr << "[SSH:" << console_id_ << "] worker ret=" << worker_ret << " err=" << err
                           << " lastChannel=" << lastChannel << "\n";
             }
 
@@ -197,7 +157,7 @@ void SSHSession::thread_func() {
                 // Read from the channel
                 int n = wolfSSH_ChannelIdRead(ssh_, channelId, buf, sizeof(buf));
                 if (loop_count <= 10) {
-                    std::cerr << "[SSH] ChannelIdRead returned " << n << "\n";
+                    std::cerr << "[SSH:" << console_id_ << "] ChannelIdRead returned " << n << "\n";
                 }
                 if (n > 0) {
                     // Queue characters for MP/M
@@ -212,38 +172,41 @@ void SSHSession::thread_func() {
 
             // Check for errors
             if (err == WS_EOF || err == WS_CHANNEL_CLOSED) {
-                std::cerr << "[SSH] Connection closed (err=" << err << ")\n";
+                std::cerr << "[SSH:" << console_id_ << "] Connection closed (err=" << err << ")\n";
                 stop_requested_.store(true);
             } else if (err < 0 && err != WS_WANT_READ && err != WS_WANT_WRITE &&
                        err != WS_CHAN_RXD && err != WS_SUCCESS) {
-                std::cerr << "[SSH] Worker error: " << err << "\n";
+                std::cerr << "[SSH:" << console_id_ << "] Worker error: " << err << "\n";
                 stop_requested_.store(true);
             }
         }
 
         if (stop_requested_.load()) {
-            std::cerr << "[SSH] Stop requested after read loop\n";
+            std::cerr << "[SSH:" << console_id_ << "] Stop requested after read loop\n";
             break;
         }
 
         // Write from output queue -> SSH using channel-based send
         size_t count = con->output_queue().read_some(buf, sizeof(buf));
         if (count > 0) {
+            std::cerr << "[SSH:" << console_id_ << "] Sending " << count << " bytes to client\n";
             int sent = wolfSSH_ChannelIdSend(ssh_, channelId, buf, count);
-            if (loop_count <= 10) {
-                std::cerr << "[SSH] ChannelIdSend(" << count << ") returned " << sent << "\n";
+            std::cerr << "[SSH:" << console_id_ << "] ChannelIdSend returned " << sent << "\n";
+            if (sent > 0) {
+                // Flush by calling worker
+                wolfSSH_worker(ssh_, nullptr);
             }
             if (sent < 0) {
                 int err = wolfSSH_get_error(ssh_);
                 if (err != WS_WANT_WRITE && err != WS_WANT_READ) {
-                    std::cerr << "[SSH] Send error: " << err << "\n";
+                    std::cerr << "[SSH:" << console_id_ << "] Send error: " << err << "\n";
                     break;
                 }
             }
         }
     }
 
-    std::cerr << "[SSH] Session ending, loop_count=" << loop_count << "\n";
+    std::cerr << "[SSH:" << console_id_ << "] Session ending, loop_count=" << loop_count << "\n";
     con->reset();
     running_.store(false);
 }
@@ -461,11 +424,10 @@ int SSHServer::user_auth_callback(byte auth_type, WS_UserAuthData* auth_data, vo
     (void)ctx;
     (void)auth_data;
 
-    // Accept any authentication - no password verification
     // This is an emulator for testing, not a production system
+    // Accept any authentication method - no real verification
     if (auth_type == WOLFSSH_USERAUTH_PASSWORD ||
-        auth_type == WOLFSSH_USERAUTH_PUBLICKEY ||
-        auth_type == WOLFSSH_USERAUTH_NONE) {
+        auth_type == WOLFSSH_USERAUTH_PUBLICKEY) {
         return WOLFSSH_USERAUTH_SUCCESS;
     }
 

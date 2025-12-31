@@ -6,6 +6,7 @@
 #include "mpm_cpu.h"
 #include "banked_mem.h"
 #include "xios.h"
+#include "console.h"
 #include <fstream>
 #include <cstring>
 #include <iostream>
@@ -294,6 +295,36 @@ bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
     // at C757 should jump to E79C (the real XDOS BDOS entry), NOT to CE00.
     // DO NOT overwrite these - they are correct as loaded!
 
+    // Set up RST 38H interrupt vector to call BNKXIOS SYSINIT entry point
+    // SYSINIT is at offset 0x45 in the XIOS jump table
+    // When called, DO_SYSINIT writes JP INTHND to 0x0038, sets IM1, enables EI
+    // We'll execute SYSINIT before starting the main Z80 code
+    uint16_t sysinit_addr = bnkxios_base * 256 + 0x45;
+
+    // Save CPU state, call SYSINIT, restore
+    // Push return address (we'll set PC to entry_point after)
+    cpu_->regs.SP.set_pair16(entry_point);  // Use entry_point as temp stack
+    memory_->write_bank(0, entry_point - 2, 0x00);  // Return address low
+    memory_->write_bank(0, entry_point - 1, 0x00);  // Return address high
+    cpu_->regs.SP.set_pair16(entry_point - 2);
+
+    // Execute SYSINIT
+    cpu_->regs.PC.set_pair16(sysinit_addr);
+    std::cerr << "[BOOT] Executing SYSINIT at 0x" << std::hex << sysinit_addr << std::dec << "\n";
+    for (int i = 0; i < 100; i++) {  // Run up to 100 instructions
+        cpu_->execute();
+        if (cpu_->regs.PC.get_pair16() == 0x0000) {
+            std::cerr << "[BOOT] SYSINIT completed\n";
+            break;
+        }
+    }
+
+    // Verify RST 38H is set up
+    uint8_t rst38_op = memory_->read_bank(0, 0x0038);
+    uint16_t rst38_addr = memory_->read_bank(0, 0x0039) | (memory_->read_bank(0, 0x003A) << 8);
+    std::cerr << "[BOOT] RST 38H: " << (rst38_op == 0xC3 ? "JP" : "??")
+              << " 0x" << std::hex << rst38_addr << std::dec << "\n";
+
     // Debug: show COMMONBASE entries after loading (only with DEBUG=1)
     if (g_debug_enabled) {
         uint16_t commonbase = bnkxios_base * 256 + 0x4B;
@@ -379,6 +410,15 @@ void Z80Thread::thread_func() {
         if (now >= next_tick_) {
             next_tick_ += TICK_INTERVAL;
 
+            // Auto-start clock after boot completes (5M instructions)
+            // MP/M II XDOS should call STARTCLOCK but doesn't seem to
+            static bool auto_started = false;
+            if (!auto_started && instruction_count_.load() > 5000000) {
+                std::cerr << "[CLOCK] Auto-starting clock after boot\n";
+                xios_->start_clock();
+                auto_started = true;
+            }
+
             // Request tick interrupt if clock is enabled
             if (xios_->clock_enabled()) {
                 static int tick_count_local = 0;
@@ -400,15 +440,21 @@ void Z80Thread::thread_func() {
                 // If IFF stays 0 after first interrupt, XDOS isn't EI'ing properly
                 // In that case, we need to force-enable to keep the system running.
                 static int iff_zero_count = 0;
+                static int tick_delivered = 0;
                 if (cpu_->regs.IFF1) {
                     iff_zero_count = 0;  // Reset counter
                     cpu_->request_rst(7);  // RST 38H
+                    tick_delivered++;
+                    if (tick_delivered <= 10 || (tick_delivered % 60) == 0) {
+                        std::cerr << "[TICK-DELIVER] #" << tick_delivered
+                                  << " PC=0x" << std::hex << cpu_->regs.PC.get_pair16() << std::dec << "\n";
+                    }
                 } else {
                     iff_zero_count++;
                     // If IFF has been 0 for too many ticks, force-enable
                     // This works around XDOS not EI'ing when returning to process
                     if (iff_zero_count >= 5 && tick_count_local > 15) {
-                        if (g_debug_enabled && iff_zero_count == 5) {
+                        if (iff_zero_count == 5) {
                             std::cerr << "[TICK] Forcing IFF=1 after " << iff_zero_count
                                       << " ticks with IFF=0, PC=0x" << std::hex
                                       << cpu_->regs.PC.get_pair16() << std::dec << "\n";
@@ -416,9 +462,30 @@ void Z80Thread::thread_func() {
                         cpu_->regs.IFF1 = 1;
                         cpu_->regs.IFF2 = 1;
                         cpu_->request_rst(7);
+                        tick_delivered++;
                     }
                 }
                 xios_->tick();
+
+                // Poll console input directly from C++ and set flags
+                // This bypasses the Z80 interrupt handler polling, which may not work correctly
+                for (int con = 0; con < 4; con++) {
+                    Console* console = ConsoleManager::instance().get(con);
+                    if (console && console->const_status()) {
+                        // Console has input - set the corresponding flag via XDOS
+                        // Flags 3,4,5,6 correspond to consoles 0,1,2,3
+                        // XDOS FLAGSET (function 133/0x85 -> 33/0x21)
+                        // We'll set it directly in memory at the flag table
+                        // For now, just log that we would set a flag
+                        static int flag_log_count = 0;
+                        flag_log_count++;
+                        if (flag_log_count <= 20 || (flag_log_count % 100) == 0) {
+                            std::cerr << "[POLL-DIRECT] con=" << con
+                                      << " has input, should set flag " << (con + 3)
+                                      << " count=" << flag_log_count << "\n";
+                        }
+                    }
+                }
             }
 
             // Check for one-second tick
@@ -493,31 +560,57 @@ void Z80Thread::thread_func() {
         cpu_->execute();
         instruction_count_++;
 
-        // Trace XDOS calls (only in debug mode)
-        static bool traced_creates = false;
-        if (g_debug_enabled && !traced_creates) {
+        // Periodic Z80 status log
+        static uint64_t last_log_count = 0;
+        uint64_t count = instruction_count_.load();
+        if (count >= last_log_count + 1000000) {
+            std::cerr << "[Z80] " << (count / 1000000) << "M instructions executed"
+                      << ", PC=0x" << std::hex << cpu_->regs.PC.get_pair16()
+                      << ", bank=" << std::dec << (int)memory_->current_bank() << "\n";
+            last_log_count = count;
+        }
+
+        // Trace XDOS calls
+        {
             uint16_t pc = cpu_->regs.PC.get_pair16();
             // Check if PC is at XDOS entry point
             if (pc == 0xCE00 || pc == 0xCE06) {
                 uint8_t func = cpu_->regs.BC.get_low();
-                // XDOS function 144 (0x90) = CREATE PROCESS
-                if (func == 0x90) {
-                    uint16_t pd_addr = cpu_->regs.DE.get_pair16();
-                    // Read process name from PD offset 6-13
-                    std::cerr << "[XDOS CREATE] PD=0x" << std::hex << pd_addr
-                              << " name='";
-                    for (int i = 6; i < 14; i++) {
-                        uint8_t ch = memory_->read_common(pd_addr + i) & 0x7F;
-                        if (ch >= 0x20 && ch < 0x7F) {
-                            std::cerr << (char)ch;
+
+                // XDOS function 133 (0x85) = FLAGSET - log these always
+                if (func == 133) {  // FLAGSET
+                    static int flagset_count = 0;
+                    flagset_count++;
+                    uint8_t flag = cpu_->regs.DE.get_low();
+                    if (flag == 6 || flagset_count <= 20 || (flagset_count % 100) == 0) {
+                        std::cerr << "[XDOS FLAGSET] count=" << flagset_count
+                                  << " flag=" << (int)flag << "\n";
+                    }
+                }
+
+                if (g_debug_enabled) {
+                    static bool traced_creates = false;
+                    if (!traced_creates) {
+                        // XDOS function 144 (0x90) = CREATE PROCESS
+                        if (func == 0x90) {
+                            uint16_t pd_addr = cpu_->regs.DE.get_pair16();
+                            // Read process name from PD offset 6-13
+                            std::cerr << "[XDOS CREATE] PD=0x" << std::hex << pd_addr
+                                      << " name='";
+                            for (int i = 6; i < 14; i++) {
+                                uint8_t ch = memory_->read_common(pd_addr + i) & 0x7F;
+                                if (ch >= 0x20 && ch < 0x7F) {
+                                    std::cerr << (char)ch;
+                                }
+                            }
+                            std::cerr << "'" << std::dec << "\n";
+                        }
+                        // XDOS function 143 (0x8F) = TERMINATE
+                        if (func == 0x8F) {
+                            std::cerr << "[XDOS TERMINATE] E=" << (int)cpu_->regs.DE.get_low() << "\n";
+                            traced_creates = true;  // Stop tracing after init terminates
                         }
                     }
-                    std::cerr << "'" << std::dec << "\n";
-                }
-                // XDOS function 143 (0x8F) = TERMINATE
-                if (func == 0x8F) {
-                    std::cerr << "[XDOS TERMINATE] E=" << (int)cpu_->regs.DE.get_low() << "\n";
-                    traced_creates = true;  // Stop tracing after init terminates
                 }
             }
         }

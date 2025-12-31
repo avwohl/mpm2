@@ -16,37 +16,28 @@ Console::Console(int id)
 }
 
 uint8_t Console::const_status() {
-    // Check if input available - works for both connected and local mode
-    if (!connected_.load() && !local_mode_.load()) return 0x00;
+    // Check if input available - always check queue regardless of connection state
+    // (Matches SIMH approach: status based on queue content, not connection flag)
+    // This allows detecting input as soon as SSH queues it, before connected_ is set
     return input_queue_.available() > 0 ? 0xFF : 0x00;
 }
 
 uint8_t Console::read_char() {
-    // For non-connected, non-local consoles, return 0x00 (no input)
-    // MP/M should use CONST to poll first; CONIN returning 0 means no char
-    if (!connected_.load() && !local_mode_.load()) return 0x00;
-
+    // Read from queue regardless of connection state
+    // (Matches SIMH approach: I/O based on queue content, not connection flag)
     // Brief wait - MP/M should poll with CONST first
     int ch = input_queue_.read(10);  // 10ms timeout
-    if (ch < 0) return 0x00;  // No character available
-
-    return static_cast<uint8_t>(ch);
+    return ch >= 0 ? static_cast<uint8_t>(ch) : 0x00;
 }
 
 void Console::write_char(uint8_t ch) {
-    if (local_mode_.load()) {
-        // Local mode - output directly to stdout
-        std::cout.put(static_cast<char>(ch));
-        std::cout.flush();
-        return;
-    }
-
     // Always queue output for SSH transmission (even before connect)
     // This allows boot messages to be read when SSH connects
     output_queue_.try_write(ch);
 
-    // Console 0: also echo to stdout for boot messages
-    if (id_ == 0 && !connected_.load()) {
+    // In local mode AND not connected: also echo to stdout
+    // Once SSH connects, output only goes through the queue
+    if (local_mode_.load() && !connected_.load()) {
         std::cout.put(static_cast<char>(ch));
         std::cout.flush();
     }
@@ -54,8 +45,11 @@ void Console::write_char(uint8_t ch) {
 
 void Console::reset() {
     connected_.store(false);
-    input_queue_.clear();
-    output_queue_.clear();
+    // Don't clear input_queue - allow pending input to be processed even after disconnect
+    // This matches SIMH behavior where input in the queue is preserved
+    // input_queue_.clear();
+
+    // Don't clear output_queue - preserve pending output for next connection
     term_width_.store(80);
     term_height_.store(24);
     {

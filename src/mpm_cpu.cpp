@@ -18,8 +18,8 @@ MpmCpu::MpmCpu(qkz80_cpu_mem* memory)
 void MpmCpu::port_out(qkz80_uint8 port, qkz80_uint8 value) {
     switch (port) {
         case MpmPorts::XIOS_DISPATCH:
-            // XIOS dispatch: B register contains function offset
-            // Protocol: LD B, function; OUT (0xE0), A; RET
+            // XIOS dispatch: A register contains function offset
+            // Protocol: LD A, function; OUT (0xE0), A; IN A, (0xE0); RET
             handle_xios_dispatch();
             break;
 
@@ -48,6 +48,12 @@ qkz80_uint8 MpmCpu::port_in(qkz80_uint8 port) {
     uint8_t value = 0xFF;
 
     switch (port) {
+        case MpmPorts::XIOS_DISPATCH:
+            // Return the result from the last XIOS dispatch
+            // This is used with IN A, (0xE0) after OUT (0xE0), A to get return values
+            value = last_xios_result_;
+            break;
+
         case MpmPorts::SIGNAL:
             // Could return status here
             value = 0x00;
@@ -72,23 +78,14 @@ void MpmCpu::handle_xios_dispatch() {
     // Function offset is in A register (from OUT (port), A instruction)
     uint8_t func = regs.AF.get_high();
 
-    static int dispatch_count = 0;
-    dispatch_count++;
-    // Check if we're in interrupt handler range (C832-C870 approximately)
-    uint16_t pc = regs.PC.get_pair16();
-    bool in_inthnd = (pc >= 0xC832 && pc <= 0xC870);
-    if (g_debug_enabled && (in_inthnd || dispatch_count <= 50 || (dispatch_count % 1000) == 0)) {
-        std::cerr << "[DISPATCH] func=0x" << std::hex << (int)func
-                  << " PC=0x" << pc << std::dec
-                  << " count=" << dispatch_count;
-        if (in_inthnd) std::cerr << " <INTHND>";
-        std::cerr << "\n";
-    }
-
     // Dispatch to XIOS handler
     // The handler will set result registers (A, HL, etc.)
     // The Z80 code has its own RET instruction, so we don't simulate RET here
     xios_->handle_port_dispatch(func);
+
+    // Save the result for IN A, (port) to read later
+    // The XIOS handler sets the result in A register via set_high()
+    last_xios_result_ = regs.AF.get_high();
 }
 
 void MpmCpu::handle_bank_select(uint8_t bank) {
@@ -108,6 +105,24 @@ void MpmCpu::halt(void) {
     // Z80 HALT instruction - CPU waits for interrupt
     // In MP/M II context, this is the normal idle loop
     halted_ = true;
+}
+
+void MpmCpu::execute(void) {
+    uint16_t pc = regs.PC.get_pair16();
+
+    // Trace interrupt handler entry (INTHND at C437)
+    static int inthnd_entry_count = 0;
+    if (pc == 0xC437) {
+        inthnd_entry_count++;
+        if (inthnd_entry_count <= 20 || (inthnd_entry_count % 60) == 0) {
+            uint8_t tickn = mem->fetch_mem(0xC463);  // TICKN location in BNKXIOS
+            std::cerr << "[INTHND] #" << inthnd_entry_count
+                      << " TICKN=0x" << std::hex << (int)tickn << std::dec << "\n";
+        }
+    }
+
+    // Call the base class execute
+    qkz80::execute();
 }
 
 void MpmCpu::unimplemented_opcode(qkz80_uint8 opcode, qkz80_uint16 pc) {

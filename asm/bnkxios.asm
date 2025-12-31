@@ -130,7 +130,8 @@ DO_CONST:
         ; Console status - D = console number
         ; Returns A = 0FFH if char ready, 00H if not
         LD      A, FUNC_CONST
-        OUT     (XIOS_DISPATCH), A
+        OUT     (XIOS_DISPATCH), A      ; Dispatch function
+        IN      A, (XIOS_DISPATCH)      ; Get result in A
         RET
 
 DO_CONIN:
@@ -141,7 +142,8 @@ DO_CONIN:
 CONIN_LOOP:
         ; First check if character is ready (CONST)
         LD      A, FUNC_CONST
-        OUT     (XIOS_DISPATCH), A
+        OUT     (XIOS_DISPATCH), A      ; Dispatch function
+        IN      A, (XIOS_DISPATCH)      ; Get result in A
         OR      A
         JR      NZ, CONIN_READY
 
@@ -157,7 +159,8 @@ CONIN_LOOP:
 CONIN_READY:
         ; Character is ready - get it
         LD      A, FUNC_CONIN
-        OUT     (XIOS_DISPATCH), A
+        OUT     (XIOS_DISPATCH), A      ; Dispatch function
+        IN      A, (XIOS_DISPATCH)      ; Get character in A
         RET
 
 DO_CONOUT:
@@ -242,20 +245,23 @@ DO_SETDMA:
 DO_READ:
         ; Read sector - returns A = 0 success, A = 1 error
         LD      A, FUNC_READ
-        OUT     (XIOS_DISPATCH), A
+        OUT     (XIOS_DISPATCH), A      ; Dispatch function
+        IN      A, (XIOS_DISPATCH)      ; Get result in A
         RET
 
 DO_WRITE:
         ; Write sector - C = deblocking code
         ; Returns A = 0 success, A = 1 error
         LD      A, FUNC_WRITE
-        OUT     (XIOS_DISPATCH), A
+        OUT     (XIOS_DISPATCH), A      ; Dispatch function
+        IN      A, (XIOS_DISPATCH)      ; Get result in A
         RET
 
 DO_LISTST:
         ; List status - returns A = 0FFH if ready
         LD      A, FUNC_LISTST
-        OUT     (XIOS_DISPATCH), A
+        OUT     (XIOS_DISPATCH), A      ; Dispatch function
+        IN      A, (XIOS_DISPATCH)      ; Get result in A
         RET
 
 DO_SECTRAN:
@@ -280,7 +286,8 @@ DO_POLLDEV:
         ; Poll device - C = device number
         ; Returns A = 0FFH if ready, 00H if not
         LD      A, FUNC_POLLDEV
-        OUT     (XIOS_DISPATCH), A
+        OUT     (XIOS_DISPATCH), A      ; Dispatch function
+        IN      A, (XIOS_DISPATCH)      ; Get result in A
         RET
 
 DO_STARTCLK:
@@ -395,17 +402,33 @@ INTHND:
 
 NOTICK:
         ; Check console input devices and set flags if input ready
-        ; Simplified: just poll devices without FLAGSET for now
-        ; Device 1,3,5,7 -> Console 0,1,2,3
+        ; Device 1,3,5,7 -> Console 0,1,2,3 -> Flags 3,4,5,6
+        ; (Flags 1,2 are reserved for tick and 1-second)
         LD      B, 4            ; Console count
         LD      D, 1            ; Start with device 1 (console 0 input)
+        LD      E, 3            ; Start with flag 3 (console 0)
 CHKCON:
+        PUSH    BC
+        PUSH    DE
         LD      C, D            ; C = device number for POLLDEVICE
         LD      A, FUNC_POLLDEV
-        OUT     (XIOS_DISPATCH), A
-        ; Result in A - we're just polling to trigger wakeup check
-        INC     D               ; Next device (skip by 2 to get odd numbers: 1,3,5,7)
+        OUT     (XIOS_DISPATCH), A      ; Dispatch function
+        IN      A, (XIOS_DISPATCH)      ; Get result in A (0xFF if ready)
+        POP     DE
+        POP     BC
+        OR      A               ; Check if device is ready
+        JR      Z, CHKCON_NEXT  ; Skip if not ready
+        ; Device is ready - set flag to wake up waiting process
+        PUSH    BC
+        PUSH    DE
+        LD      C, FLAGSET
+        CALL    XDOS
+        POP     DE
+        POP     BC
+CHKCON_NEXT:
+        INC     D               ; Next device (skip by 2: 1,3,5,7)
         INC     D
+        INC     E               ; Next flag (3,4,5,6)
         DJNZ    CHKCON
 
         ; Update 1-second counter (60 ticks = 1 second)

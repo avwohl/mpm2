@@ -79,6 +79,7 @@ public:
 
     // Clock control (STARTCLOCK/STOPCLOCK)
     bool clock_enabled() const { return tick_enabled_.load(); }
+    void start_clock() { tick_enabled_.store(true); }
 
     // PREEMPT flag for interrupt handling
     bool is_preempted() const { return preempted_.load(); }
