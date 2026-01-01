@@ -67,14 +67,17 @@ void SSHSession::thread_func() {
 
     std::cerr << "[SSH:" << console_id_ << "] Session starting\n";
 
-    // Set channel to non-blocking
+    // Set session and channel to non-blocking
+    ssh_set_blocking(session_, 0);
     ssh_channel_set_blocking(channel_, 0);
 
-    // Send banner
+    // Send banner (blocking for initial output)
+    ssh_set_blocking(session_, 1);
     char banner[128];
     snprintf(banner, sizeof(banner),
              "\r\nMP/M II Console %d\r\n\r\n", console_id_);
     ssh_channel_write(channel_, banner, strlen(banner));
+    ssh_set_blocking(session_, 0);
 
     std::cerr << "[SSH:" << console_id_ << "] Entering main loop\n";
 
@@ -86,16 +89,28 @@ void SSHSession::thread_func() {
             break;
         }
 
+        bool did_work = false;
+
         // Send any pending output from MP/M
         size_t count = con->output_queue().read_some(buf, sizeof(buf));
         if (count > 0) {
-            int written = ssh_channel_write(channel_, buf, count);
-            if (written < 0) {
-                std::cerr << "[SSH:" << console_id_ << "] Write error\n";
-                break;
+            size_t sent = 0;
+            while (sent < count) {
+                int written = ssh_channel_write(channel_, buf + sent, count - sent);
+                if (written == SSH_ERROR) {
+                    std::cerr << "[SSH:" << console_id_ << "] Write error: "
+                              << ssh_get_error(session_) << "\n";
+                    stop_requested_.store(true);
+                    break;
+                } else if (written == SSH_AGAIN) {
+                    // Would block - try again after a short delay
+                    struct timespec ts = {0, 1000000};  // 1ms
+                    nanosleep(&ts, nullptr);
+                } else if (written > 0) {
+                    sent += written;
+                    did_work = true;
+                }
             }
-            // Flush the session to ensure data is sent immediately
-            ssh_blocking_flush(session_, 100);
         }
 
         // Read input from SSH client (non-blocking)
@@ -107,14 +122,20 @@ void SSHSession::thread_func() {
                 if (ch == '\n') ch = '\r';  // LF -> CR for CP/M
                 con->input_queue().try_write(ch);
             }
+            did_work = true;
         } else if (n == SSH_ERROR) {
-            std::cerr << "[SSH:" << console_id_ << "] Read error\n";
+            std::cerr << "[SSH:" << console_id_ << "] Read error: "
+                      << ssh_get_error(session_) << "\n";
+            break;
+        } else if (n == SSH_EOF) {
             break;
         }
 
-        // Small sleep to avoid busy-waiting
-        struct timespec ts = {0, 10000000};  // 10ms
-        nanosleep(&ts, nullptr);
+        // Sleep only if we didn't do any work (avoid busy-waiting but stay responsive)
+        if (!did_work) {
+            struct timespec ts = {0, 10000000};  // 10ms
+            nanosleep(&ts, nullptr);
+        }
     }
 
     std::cerr << "[SSH:" << console_id_ << "] Session ending\n";
