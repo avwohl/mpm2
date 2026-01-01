@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstring>
 #include <iostream>
+#include <poll.h>
 
 // SSHSession implementation
 
@@ -102,7 +103,7 @@ void SSHSession::thread_func() {
                               << ssh_get_error(session_) << "\n";
                     stop_requested_.store(true);
                     break;
-                } else if (written == SSH_AGAIN) {
+                } else if (written == SSH_AGAIN || written == 0) {
                     // Would block - try again after a short delay
                     struct timespec ts = {0, 1000000};  // 1ms
                     nanosleep(&ts, nullptr);
@@ -131,10 +132,18 @@ void SSHSession::thread_func() {
             break;
         }
 
-        // Sleep only if we didn't do any work (avoid busy-waiting but stay responsive)
+        // Sleep if idle - use poll on SSH socket to wake on activity
         if (!did_work) {
-            struct timespec ts = {0, 10000000};  // 10ms
-            nanosleep(&ts, nullptr);
+            socket_t sock = ssh_get_fd(session_);
+            if (sock != SSH_INVALID_SOCKET) {
+                struct pollfd pfd;
+                pfd.fd = sock;
+                pfd.events = POLLIN | POLLOUT;
+                poll(&pfd, 1, 10);  // 10ms timeout
+            } else {
+                struct timespec ts = {0, 10000000};  // 10ms
+                nanosleep(&ts, nullptr);
+            }
         }
     }
 
