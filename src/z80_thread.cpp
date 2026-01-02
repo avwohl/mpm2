@@ -615,7 +615,7 @@ bool Z80Thread::run_polled() {
 
         // Check for timer interrupt (60Hz tick)
         if (now >= next_tick_) {
-            next_tick_ += TICK_INTERVAL;
+            next_tick_ = now + TICK_INTERVAL;  // Never catch up - prevents rapid-fire interrupts
 
             // Auto-start clock after boot completes (5M instructions)
             static bool auto_started = false;
@@ -825,7 +825,7 @@ void Z80Thread::thread_func() {
 
         // Check for timer interrupt (60Hz tick)
         if (now >= next_tick_) {
-            next_tick_ += TICK_INTERVAL;
+            next_tick_ = now + TICK_INTERVAL;  // Never catch up - prevents rapid-fire interrupts
 
             // Auto-start clock after boot completes (5M instructions)
             // MP/M II XDOS should call STARTCLOCK but doesn't seem to
