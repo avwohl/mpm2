@@ -32,6 +32,10 @@ public:
     void start();
     void stop();
 
+    // Single-threaded polling mode - call this in a loop instead of start()
+    // Returns false when should exit (shutdown requested or timeout)
+    bool run_polled();
+
     // Check if running
     bool is_running() const { return running_.load(); }
 
@@ -57,6 +61,8 @@ public:
 private:
     void thread_func();
     void create_missing_tmps();  // Create TMPs for consoles that don't have one
+    void fix_uninitialized_tmps();  // Fix TMPs with invalid stack pointers
+    void fix_bad_process_descriptor(uint16_t addr);  // Fix a bad process descriptor
 
     std::unique_ptr<MpmCpu> cpu_;
     std::unique_ptr<BankedMemory> memory_;

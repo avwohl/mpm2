@@ -12,6 +12,7 @@
 #include <set>
 
 extern bool g_debug_enabled;
+extern int last_polldevice_device;
 
 XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
     : cpu_(cpu)
@@ -28,6 +29,34 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
 }
 
 void XIOS::handle_port_dispatch(uint8_t func) {
+    // DEBUG: log ALL port dispatch calls after POLL15 returns ready
+    extern int last_polldevice_device;
+    extern bool last_polldevice_ready;
+    static bool logging_after_poll15 = false;
+    static int logged_funcs = 0;
+
+    if (last_polldevice_device == 15 && last_polldevice_ready) {
+        logging_after_poll15 = true;
+        logged_funcs = 0;  // Reset counter
+    }
+
+    if (logging_after_poll15 && logged_funcs < 100) {
+        logged_funcs++;
+        std::cerr << "[PORT_AFTER_POLL15] Function 0x" << std::hex << (int)func
+                  << " console=" << std::dec << (int)cpu_->regs.DE.get_high() << "\n";
+        if (func == XIOS_CONIN) {
+            logging_after_poll15 = false;  // Stop after seeing CONIN
+        }
+    }
+
+    // Debug: suppress verbose function call logging
+    // Uncomment below for debugging
+    // static int func_counts[256] = {0};
+    // func_counts[func]++;
+    // if (func_counts[func] <= 5) {
+    //     std::cerr << "[PORT] Function 0x" << std::hex << (int)func << std::dec << "\n";
+    // }
+
     // Temporarily set skip_ret flag so handlers don't do RET
     skip_ret_ = true;
 
@@ -99,6 +128,12 @@ void XIOS::do_const() {
     Console* con = ConsoleManager::instance().get(console);
     uint8_t status = con ? con->const_status() : 0x00;
 
+    // Verbose logging disabled - uncomment for debugging
+    // static int const_calls[8] = {0};
+    // if (console < 8 && (con && con->input_queue().available() > 0)) {
+    //     const_calls[console]++;
+    //     std::cerr << "[CONST" << (int)console << "] queue has data\n";
+    // }
 
     cpu_->regs.AF.set_high(status);
     do_ret();
@@ -110,6 +145,8 @@ void XIOS::do_conin() {
 
     Console* con = ConsoleManager::instance().get(console);
     uint8_t ch = con ? con->read_char() : 0x1A;  // EOF default if no console
+
+    // Verbose CR debugging disabled
     cpu_->regs.AF.set_high(ch);
     do_ret();
 }
@@ -120,6 +157,12 @@ void XIOS::do_conout() {
     if (console >= 8) console = 0;  // Workaround: invalid console -> default to 0
     uint8_t ch = cpu_->regs.BC.get_low();        // C = character
 
+    // DEBUG: trace console output
+    if (g_debug_enabled) {
+        std::cerr << "[CONOUT" << (int)console << "] char=0x" << std::hex << (int)ch << std::dec;
+        if (ch >= 0x20 && ch < 0x7f) std::cerr << " '" << (char)ch << "'";
+        std::cerr << " PC=0x" << std::hex << cpu_->regs.PC.get_pair16() << std::dec << "\n";
+    }
 
     Console* con = ConsoleManager::instance().get(console);
     if (con) {
@@ -269,9 +312,24 @@ void XIOS::do_selmemory() {
     uint16_t desc_addr = cpu_->regs.BC.get_pair16();
     uint8_t bank = mem_->fetch_mem(desc_addr + 3);
 
-    if (g_debug_enabled) {
+    // DEBUG: always log SELMEMORY calls when POLLDEVICE 15 returns ready
+    static int selmem_count = 0;
+    static bool poll15_was_ready = false;
+    selmem_count++;
+
+    // Check if we just had poll15 return ready
+    extern int last_polldevice_device;
+    extern bool last_polldevice_ready;
+    if (last_polldevice_device == 15 && last_polldevice_ready) {
+        poll15_was_ready = true;
+    }
+
+    if (g_debug_enabled && (selmem_count <= 50 || poll15_was_ready)) {
         std::cerr << "[SELMEMORY] desc=0x" << std::hex << desc_addr
-                  << " bank=" << std::dec << (int)bank << "\n";
+                  << " bank=" << std::dec << (int)bank
+                  << " SP=0x" << std::hex << cpu_->regs.SP.get_pair16()
+                  << std::dec << " #" << selmem_count
+                  << (poll15_was_ready ? " AFTER_POLL15" : "") << "\n";
     }
 
 
@@ -285,6 +343,8 @@ void XIOS::do_selmemory() {
     do_ret();
 }
 
+extern bool last_polldevice_ready;
+
 void XIOS::do_polldevice() {
     // C = device number to poll
     // Return 0xFF if ready, 0x00 if not
@@ -295,6 +355,10 @@ void XIOS::do_polldevice() {
     uint8_t device = cpu_->regs.BC.get_low();
     uint8_t result = 0x00;
 
+    // Track last polled device for debug tracing
+    last_polldevice_device = device;
+    last_polldevice_ready = false;
+
     if (device < 16) {
         int console = device / 2;
         bool is_input = (device & 1) != 0;
@@ -303,6 +367,7 @@ void XIOS::do_polldevice() {
             if (is_input) {
                 // Console input - check if character ready
                 Console* con = ConsoleManager::instance().get(console);
+
                 if (con && con->const_status()) {
                     result = 0xFF;
                 }
@@ -364,51 +429,7 @@ void XIOS::do_systeminit() {
     // Initialize consoles
     ConsoleManager::instance().init();
 
-    // SYSDAT is at 0xFF00. The actual DATAPG address is stored at SYSDAT+252 (0xFFFC-0xFFFD)
-    const uint16_t SYSDAT = 0xFF00;
-    uint16_t datapg_ptr = mem_->read_common(SYSDAT + 252) | (mem_->read_common(SYSDAT + 253) << 8);
-    std::cerr << "[SYSTEMINIT] SYSDAT at 0x" << std::hex << SYSDAT
-              << ", DATAPG pointer at SYSDAT+252 = 0x" << datapg_ptr << "\n";
-
-    // If datapg_ptr is valid, dump from there; otherwise show SYSDAT for debugging
-    uint16_t dump_addr = (datapg_ptr >= 0xC000 && datapg_ptr < 0xFF00) ? datapg_ptr : SYSDAT;
-    std::cerr << "[SYSTEMINIT] Dumping from 0x" << std::hex << dump_addr << ":\n";
-    std::cerr << "  Bytes: ";
-    for (int i = 0; i < 20; i++) {
-        std::cerr << std::hex << std::setw(2) << std::setfill('0')
-                  << (int)mem_->read_common(dump_addr + i) << " ";
-    }
-    std::cerr << "\n";
-
-    if (datapg_ptr >= 0xC000 && datapg_ptr < 0xFF00) {
-        uint16_t tod_day = mem_->read_common(datapg_ptr + 0) | (mem_->read_common(datapg_ptr + 1) << 8);
-        uint16_t rlr = mem_->read_common(datapg_ptr + 5) | (mem_->read_common(datapg_ptr + 6) << 8);
-        uint16_t dlr = mem_->read_common(datapg_ptr + 7) | (mem_->read_common(datapg_ptr + 8) << 8);
-        uint16_t drl = mem_->read_common(datapg_ptr + 9) | (mem_->read_common(datapg_ptr + 10) << 8);
-        uint16_t plr = mem_->read_common(datapg_ptr + 11) | (mem_->read_common(datapg_ptr + 12) << 8);
-        uint16_t slr = mem_->read_common(datapg_ptr + 13) | (mem_->read_common(datapg_ptr + 14) << 8);
-        uint16_t qlr = mem_->read_common(datapg_ptr + 15) | (mem_->read_common(datapg_ptr + 16) << 8);
-        uint16_t thrdrt = mem_->read_common(datapg_ptr + 17) | (mem_->read_common(datapg_ptr + 18) << 8);
-
-        std::cerr << "  DATAPG: tod_day=" << std::dec << tod_day
-                  << " rlr=0x" << std::hex << rlr
-                  << " dlr=0x" << dlr
-                  << " drl=0x" << drl
-                  << " plr=0x" << plr
-                  << " slr=0x" << slr
-                  << " qlr=0x" << qlr
-                  << " thrdrt=0x" << thrdrt
-                  << std::dec << "\n";
-    } else {
-        std::cerr << "  DATAPG pointer not yet initialized (value=0x" << std::hex << datapg_ptr << ")\n";
-    }
-
-    // The Z80 code in bnkxios.asm DO_SYSINIT handles setting up RST 38H vector.
-    // We just need to enable the tick timer here.
-
-    // Enable timer interrupts (per SIMH pattern: startTimerInterrupts is sent
-    // during SYSINIT). The Z80 TICKN flag (set by STARTCLOCK) controls whether
-    // INTHND calls FLAGSET for process scheduling.
+    // Enable timer interrupts
     tick_enabled_.store(true);
     do_ret();
 }

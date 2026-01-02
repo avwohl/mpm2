@@ -122,6 +122,9 @@ bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
     num_consoles_ = nmb_cns;
     num_mem_segs_ = nmb_mem_seg;
 
+    // Tell ConsoleManager how many consoles MP/M is configured for
+    ConsoleManager::instance().set_active_consoles(nmb_cns);
+
     uint16_t nmb_records = sysdat[120] | (sysdat[121] << 8);
     uint8_t ticks_per_sec = sysdat[122];   // Ticks per second
     uint8_t system_drive = sysdat[123];    // System drive (1=A)
@@ -390,6 +393,152 @@ bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
         std::cerr << std::dec << std::setfill(' ');
     }
 
+    // Always verify XIOS stubs are correctly patched (critical for poll handling)
+    // The XIOSPL stub in XDOS should JMP to XIOSJMP+0x36 (POLLDEVICE)
+    // If patched incorrectly (still JMP 0), it will cause stack corruption
+    uint16_t xiosjmp = xios_jmp_tbl_base * 256;
+    uint16_t expected_polldev_addr = xiosjmp + 0x36;
+
+    std::cerr << "[BOOT] XIOSJMP table at 0x" << std::hex << xiosjmp << std::dec << "\n";
+
+    // Check POLLDEVICE entry at XIOSJMP+0x36
+    uint8_t polldev_op = memory_->read_common(expected_polldev_addr);
+    uint16_t polldev_target = memory_->read_common(expected_polldev_addr + 1) |
+                              (memory_->read_common(expected_polldev_addr + 2) << 8);
+    std::cerr << "[BOOT] XIOSJMP+36 (POLLDEVICE): ";
+    if (polldev_op == 0xC3) {
+        std::cerr << "JP 0x" << std::hex << polldev_target << std::dec << "\n";
+        // Verify target is within BNKXIOS area
+        uint16_t bnkxios_start = bnkxios_base * 256;
+        uint16_t bnkxios_end = bnkxios_start + 0x0800;  // Assume max 2KB for BNKXIOS
+        if (polldev_target >= bnkxios_start && polldev_target < bnkxios_end) {
+            std::cerr << "[BOOT] POLLDEVICE target is in BNKXIOS range (OK)\n";
+        } else if (polldev_target == 0) {
+            std::cerr << "[BOOT] WARNING: POLLDEVICE target is 0 (stub not patched!)\n";
+        } else {
+            std::cerr << "[BOOT] WARNING: POLLDEVICE target 0x" << std::hex << polldev_target
+                      << " outside BNKXIOS (0x" << bnkxios_start << "-0x" << bnkxios_end << ")\n" << std::dec;
+        }
+    } else {
+        std::cerr << "??? opcode 0x" << std::hex << (int)polldev_op << std::dec
+                  << " (expected JP=0xC3)\n";
+    }
+
+    // Scan XDOS area for XIOSPL stub (should be in common memory, around E000-EF00)
+    // The stub is: C3 xx xx (JMP target) where target should be XIOSJMP+0x36
+    std::cerr << "[BOOT] Scanning XDOS for JMP stubs pointing to XIOSJMP or BNKXIOS...\n";
+    int xios_stubs_found = 0;
+    int jmp_zero_count = 0;
+    uint16_t bnkxios_start = bnkxios_base * 256;
+
+    for (uint16_t addr = xdos_base * 256; addr < resbdos_base * 256 && xios_stubs_found < 20; addr++) {
+        uint8_t op = memory_->read_common(addr);
+        if (op == 0xC3) {  // JMP instruction
+            uint16_t target = memory_->read_common(addr + 1) |
+                             (memory_->read_common(addr + 2) << 8);
+
+            // Check for JMP 0 (unpatched stub)
+            if (target == 0) {
+                jmp_zero_count++;
+                if (jmp_zero_count <= 5) {
+                    std::cerr << "  [UNPATCHED] XDOS 0x" << std::hex << addr
+                              << ": JMP 0 (stub not patched!)\n" << std::dec;
+                }
+            }
+            // Check if target is in XIOSJMP table (offsets 0x00-0x4B)
+            else if (target >= xiosjmp && target < xiosjmp + 0x50) {
+                uint8_t offset = target - xiosjmp;
+                const char* func_names[] = {"BOOT", "WBOOT", "CONST", "CONIN", "CONOUT",
+                    "LIST", "PUNCH", "READER", "HOME", "SELDSK", "SETTRK", "SETSEC",
+                    "SETDMA", "READ", "WRITE", "LISTST", "SECTRAN", "SELMEM", "POLLDEV"};
+                const char* name = (offset/3 < 19) ? func_names[offset/3] : "?";
+                std::cerr << "  XDOS 0x" << std::hex << addr << ": JMP XIOSJMP+0x"
+                          << (int)offset << " (" << name << ")\n" << std::dec;
+                xios_stubs_found++;
+            }
+            // Check if target is in BNKXIOS area (direct call, not via XIOSJMP)
+            else if (target >= bnkxios_start && target < bnkxios_start + 0x0800) {
+                uint16_t offset = target - bnkxios_start;
+                const char* func_names[] = {"BOOT", "WBOOT", "CONST", "CONIN", "CONOUT",
+                    "LIST", "PUNCH", "READER", "HOME", "SELDSK", "SETTRK", "SETSEC",
+                    "SETDMA", "READ", "WRITE", "LISTST", "SECTRAN", "SELMEM", "POLLDEV"};
+                const char* name = (offset/3 < 19) ? func_names[offset/3] : "?";
+                std::cerr << "  XDOS 0x" << std::hex << addr << ": JMP BNKXIOS+0x"
+                          << offset << " (" << name << ")\n" << std::dec;
+                xios_stubs_found++;
+
+                // Special check for POLLDEVICE (offset 0x36)
+                if (offset == 0x36) {
+                    std::cerr << "  XIOSPL stub points directly to BNKXIOS POLLDEV (OK)\n";
+                }
+            }
+        }
+    }
+    if (jmp_zero_count > 5) {
+        std::cerr << "  ... and " << (jmp_zero_count - 5) << " more unpatched JMP 0 stubs\n";
+    }
+    if (xios_stubs_found == 0 && jmp_zero_count == 0) {
+        std::cerr << "[BOOT] WARNING: No XIOS stubs found in XDOS area!\n";
+    }
+    if (jmp_zero_count > 0) {
+        std::cerr << "[BOOT] *** CRITICAL: Found " << jmp_zero_count
+                  << " unpatched JMP 0 stubs! Patching now... ***\n";
+
+        // Patch the XIOS stubs in XDOS to point to XIOSJMP table
+        // The stubs are at consecutive 3-byte JMP instructions
+        // Layout from CLBDOS.ASM:
+        //   xiosms:  JMP XIOSJMP+33h (SELMEMORY)
+        //   xiospl:  JMP XIOSJMP+36h (POLLDEVICE)
+        //   strclk:  JMP XIOSJMP+39h (STARTCLOCK)
+        //   stpclk:  JMP XIOSJMP+3Ch (STOPCLOCK)
+        //   exitregion: JMP XIOSJMP+3Fh (EXITREGION)
+        //   maxcns:  JMP XIOSJMP+42h (MAXCONSOLE)
+        //   sysinit: JMP XIOSJMP+45h (SYSTEMINIT)
+        //   xidle:   JMP XIOSJMP+48h (IDLE)
+
+        // Find the first unpatched stub
+        uint16_t first_stub = 0;
+        for (uint16_t addr = xdos_base * 256; addr < resbdos_base * 256; addr++) {
+            uint8_t op = memory_->read_common(addr);
+            if (op == 0xC3) {  // JMP
+                uint16_t target = memory_->read_common(addr + 1) |
+                                 (memory_->read_common(addr + 2) << 8);
+                if (target == 0) {
+                    first_stub = addr;
+                    break;
+                }
+            }
+        }
+
+        if (first_stub != 0) {
+            std::cerr << "[BOOT] First unpatched stub at 0x" << std::hex << first_stub << std::dec << "\n";
+
+            // Patch 8 stubs starting at first_stub
+            // Offsets: 0x33, 0x36, 0x39, 0x3C, 0x3F, 0x42, 0x45, 0x48
+            const uint8_t offsets[] = {0x33, 0x36, 0x39, 0x3C, 0x3F, 0x42, 0x45, 0x48};
+            const char* names[] = {"SELMEM", "POLLDEV", "STARTCLK", "STOPCLK",
+                                   "EXITRGN", "MAXCON", "SYSINIT", "IDLE"};
+
+            for (int i = 0; i < 8; i++) {
+                uint16_t stub_addr = first_stub + (i * 3);
+                uint16_t target = xiosjmp + offsets[i];
+
+                // Verify it's still JMP 0
+                uint8_t op = memory_->read_common(stub_addr);
+                uint16_t old_target = memory_->read_common(stub_addr + 1) |
+                                     (memory_->read_common(stub_addr + 2) << 8);
+                if (op == 0xC3 && old_target == 0) {
+                    // Patch it
+                    memory_->write_common(stub_addr + 1, target & 0xFF);
+                    memory_->write_common(stub_addr + 2, (target >> 8) & 0xFF);
+                    std::cerr << "[BOOT] Patched 0x" << std::hex << stub_addr
+                              << " (" << names[i] << "): JMP 0x" << target << std::dec << "\n";
+                }
+            }
+            std::cerr << "[BOOT] XIOS stub patching complete!\n";
+        }
+    }
+
     return true;
 }
 
@@ -432,6 +581,228 @@ void Z80Thread::enable_interrupts(bool enable) {
 
 uint64_t Z80Thread::cycles() const {
     return cpu_ ? cpu_->cycles : 0;
+}
+
+bool Z80Thread::run_polled() {
+    // Single-threaded polling mode - runs a batch of instructions
+    // Returns false when should exit (shutdown or timeout)
+
+    if (stop_requested_.load()) return false;
+
+    // Initialize timing on first call
+    static bool first_call = true;
+    if (first_call) {
+        start_time_ = std::chrono::steady_clock::now();
+        next_tick_ = start_time_;
+        tick_count_ = 0;
+        instruction_count_.store(0);
+        running_.store(true);
+        first_call = false;
+    }
+
+    // Run a batch of instructions (similar to thread_func but not in a loop)
+    for (int batch = 0; batch < 10000; batch++) {
+        // Check for timeout
+        auto now = std::chrono::steady_clock::now();
+        if (timeout_seconds_ > 0) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time_).count();
+            if (elapsed >= timeout_seconds_) {
+                std::cerr << "\n[TIMEOUT] Boot timed out after " << elapsed << " seconds\n";
+                timed_out_.store(true);
+                return false;
+            }
+        }
+
+        // Check for timer interrupt (60Hz tick)
+        if (now >= next_tick_) {
+            next_tick_ += TICK_INTERVAL;
+
+            // Auto-start clock after boot completes (5M instructions)
+            static bool auto_started = false;
+            if (!auto_started && instruction_count_.load() > 5000000) {
+                if (g_debug_enabled) std::cerr << "[CLOCK] Auto-starting clock after boot\n";
+                xios_->start_clock();
+                auto_started = true;
+            }
+
+            // Request tick interrupt if clock is enabled
+            if (xios_->clock_enabled()) {
+                static int tick_count_local = 0;
+                tick_count_local++;
+                if (tick_count_local >= 10) {
+                    static int tick_delivered = 0;
+                    if (cpu_->regs.IFF1) {
+                        cpu_->request_rst(7);  // RST 38H
+                        tick_delivered++;
+                        if (tick_delivered <= 10) {
+                            std::cerr << "[TICK-POLLED] Delivered RST38 #" << tick_delivered
+                                      << " IFF=" << (int)cpu_->regs.IFF1
+                                      << " PC=0x" << std::hex << cpu_->regs.PC.get_pair16() << std::dec << "\n";
+                        }
+                    }
+                    xios_->tick();
+                }
+            } else {
+                // Log every 60 ticks (once per second) if clock not enabled
+                static int not_enabled_count = 0;
+                not_enabled_count++;
+                if (not_enabled_count <= 5 || (not_enabled_count % 60) == 0) {
+                    std::cerr << "[TICK-POLLED] Clock not enabled, skip #" << not_enabled_count
+                              << " instructions=" << instruction_count_.load() << "\n";
+                }
+            }
+
+            // Check for one-second tick
+            if (++tick_count_ >= 60) {
+                tick_count_ = 0;
+                xios_->one_second_tick();
+
+                static int sec_count = 0;
+                sec_count++;
+                if (sec_count == 1) {
+                    fix_uninitialized_tmps();
+                }
+
+                // Debug: dump process list every 2 seconds, starting immediately
+                if (sec_count >= 1 && (sec_count % 2) == 0 && sec_count <= 15) {
+                    // Get DATAPG (process list pointers)
+                    uint16_t datapg = memory_->read_common(0xFFFC) | (memory_->read_common(0xFFFD) << 8);
+                    uint16_t rlr = memory_->read_common(datapg + 5) | (memory_->read_common(datapg + 6) << 8);
+                    uint16_t plr = memory_->read_common(datapg + 11) | (memory_->read_common(datapg + 12) << 8);
+
+                    // Also get flag list root at DATAPG+19 (word)
+                    uint16_t flr = memory_->read_common(datapg + 19) | (memory_->read_common(datapg + 20) << 8);
+
+                    std::cerr << "[PROC-DUMP] sec=" << sec_count
+                              << " RLR=0x" << std::hex << rlr
+                              << " PLR=0x" << plr
+                              << " FLR=0x" << flr << std::dec << "\n";
+
+                    // Check Tick's link field and fix self-loop if detected
+                    if (rlr >= 0xC000 && rlr < 0xFF00) {
+                        uint16_t tick_link = memory_->read_common(rlr) | (memory_->read_common(rlr + 1) << 8);
+                        std::cerr << "  Tick@0x" << std::hex << rlr << " link=0x" << tick_link << std::dec;
+                        if (tick_link == rlr) {
+                            std::cerr << " ***FIXING SELF-LOOP!***";
+                            // Set Tick's link to 0 (end of list) to break the loop
+                            memory_->write_common(rlr, 0);
+                            memory_->write_common(rlr + 1, 0);
+                            // Also try to link in Clock if it exists and has status=0
+                            uint16_t clock_addr = 0xEDE0;  // Known Clock address
+                            uint8_t clock_status = memory_->read_common(clock_addr + 2);
+                            if (clock_status == 0) {
+                                // Link Tick -> Clock
+                                memory_->write_common(rlr, clock_addr & 0xFF);
+                                memory_->write_common(rlr + 1, clock_addr >> 8);
+                                std::cerr << " (linked Clock)";
+                            }
+                        }
+                        std::cerr << "\n";
+                    }
+
+                    // Dump ready list (check for cycles)
+                    std::cerr << "  Ready: ";
+                    uint16_t p = rlr;
+                    std::set<uint16_t> seen;
+                    int count = 0;
+                    while (p >= 0xC000 && p < 0xFF00 && count++ < 15) {
+                        if (seen.count(p)) {
+                            std::cerr << "[CYCLE at 0x" << std::hex << p << std::dec << "] ";
+                            break;
+                        }
+                        seen.insert(p);
+                        char name[9];
+                        for (int i = 0; i < 8; i++) {
+                            uint8_t ch = memory_->read_common(p + 6 + i);
+                            name[i] = (ch >= 0x20 && ch < 0x7F) ? ch : '.';
+                        }
+                        name[8] = '\0';
+                        uint8_t status = memory_->read_common(p + 2);
+                        uint8_t priority = memory_->read_common(p + 3);
+                        std::cerr << name << "(s=" << (int)status << ",p=" << (int)priority << ")@" << std::hex << p << std::dec << " -> ";
+                        p = memory_->read_common(p) | (memory_->read_common(p + 1) << 8);
+                    }
+                    if (p == 0) std::cerr << "END";
+                    else if (p < 0xC000) std::cerr << "[0x" << std::hex << p << "]" << std::dec;
+                    std::cerr << "\n";
+
+                    // Dump poll list
+                    std::cerr << "  Poll:  ";
+                    p = plr;
+                    count = 0;
+                    while (p >= 0xC000 && p < 0xFF00 && count++ < 10) {
+                        char name[9];
+                        for (int i = 0; i < 8; i++) {
+                            uint8_t ch = memory_->read_common(p + 6 + i);
+                            name[i] = (ch >= 0x20 && ch < 0x7F) ? ch : '.';
+                        }
+                        name[8] = '\0';
+                        std::cerr << name << "(d=" << (int)memory_->read_common(p + 16) << ") ";
+                        p = memory_->read_common(p) | (memory_->read_common(p + 1) << 8);
+                    }
+                    std::cerr << "\n";
+
+                    // Dump flag wait list (FLR) - this is a list of flag structures
+                    // Each flag entry is 4 bytes: 2-byte link, 1-byte flag number, 1-byte count/status
+                    // The process waiting is at the flag structure's process list
+                    // Actually FLR points to array of flag structures, let's just show the pointer
+                    // The flags array in DATAPG starts at offset 19 and contains 32 flag structures
+                    std::cerr << "  FlagList@0x" << std::hex << flr << "\n" << std::dec;
+
+                    // Search for all processes in common memory (status 0-5 and priority < 255)
+                    std::cerr << "  All processes: ";
+                    for (uint16_t addr = 0xC000; addr < 0xFF00; addr += 32) {
+                        uint8_t status = memory_->read_common(addr + 2);
+                        uint8_t priority = memory_->read_common(addr + 3);
+                        // Valid process has status 0-5 and reasonable priority
+                        if (status <= 5 && priority > 0 && priority <= 255) {
+                            char name[9];
+                            for (int i = 0; i < 8; i++) {
+                                uint8_t ch = memory_->read_common(addr + 6 + i);
+                                name[i] = (ch >= 0x20 && ch < 0x7F) ? ch : '.';
+                            }
+                            name[8] = '\0';
+                            // Skip if name looks invalid (all dots or weird)
+                            if (name[0] >= 'A' && name[0] <= 'Z') {
+                                uint16_t link = memory_->read_common(addr) | (memory_->read_common(addr + 1) << 8);
+                                std::cerr << name << "@" << std::hex << addr
+                                          << "(s=" << (int)status << ",p=" << (int)priority
+                                          << ",lk=" << link << ") " << std::dec;
+                            }
+                        }
+                    }
+                    std::cerr << "\n";
+                }
+            }
+        }
+
+        // Handle HALT
+        if (cpu_->is_halted()) {
+            if (cpu_->check_interrupts()) {
+                cpu_->clear_halted();
+            } else {
+                break;  // Exit batch early if halted
+            }
+        }
+
+        // Deliver pending interrupts
+        uint8_t saved_bank = memory_->current_bank();
+        if (cpu_->int_pending) {
+            memory_->select_bank(0);
+        }
+        bool delivered = cpu_->check_interrupts();
+        if (!delivered && saved_bank != 0 && cpu_->int_pending) {
+            memory_->select_bank(saved_bank);
+        }
+
+        // Execute one instruction
+        g_debug_last_pc = cpu_->regs.PC.get_pair16();
+
+        cpu_->execute();
+        instruction_count_++;
+    }
+
+    return true;  // Continue running
 }
 
 void Z80Thread::thread_func() {
@@ -519,16 +890,17 @@ void Z80Thread::thread_func() {
                 static int sec_count = 0;
                 sec_count++;
 
-                // NOTE: TMP creation fix is DISABLED because it breaks the ready list.
-                // The system works for console 7 as-is (XDOS creates TMP7 at slot 0).
-                // TODO: Find a better approach that properly links TMPs into the scheduler.
-                // if (sec_count == 1) {
-                //     create_missing_tmps();
-                // }
+                // Fix TMPs with invalid stack pointers (0xFFFF = uninitialized)
+                // This happens when XDOS doesn't fully initialize all TMPs
+                if (sec_count == 1) {
+                    fix_uninitialized_tmps();
+                }
 
                 if (g_debug_enabled && sec_count == 2) {
-                    // TMPD is at FD00H per GENSYS memory layout
-                    uint16_t tmpd_addr = 0xFD00;
+                    // TMPD is at SYSDAT - TMPD_SIZE
+                    // TMPD_SIZE = ((nmb_cns-1)/4+1)*256
+                    uint16_t tmpd_size = ((num_consoles_ - 1) / 4 + 1) * 256;
+                    uint16_t tmpd_addr = 0xFF00 - tmpd_size;
                     std::cerr << "[TICK] TMPD at 0x" << std::hex << tmpd_addr
                               << " dump after 2 seconds:\n";
                     for (int tmp = 0; tmp < num_consoles_; tmp++) {
@@ -668,18 +1040,6 @@ void Z80Thread::thread_func() {
             }
         }
 
-        // Periodic Z80 status log (only in debug mode)
-        if (g_debug_enabled) {
-            static uint64_t last_log_count = 0;
-            uint64_t count = instruction_count_.load();
-            if (count >= last_log_count + 1000000) {
-                std::cerr << "[Z80] " << (count / 1000000) << "M instructions executed"
-                          << ", PC=0x" << std::hex << cpu_->regs.PC.get_pair16()
-                          << ", bank=" << std::dec << (int)memory_->current_bank() << "\n";
-                last_log_count = count;
-            }
-        }
-
         // Trace XDOS calls (only in debug mode)
         if (g_debug_enabled) {
             uint16_t pc = cpu_->regs.PC.get_pair16();
@@ -787,7 +1147,13 @@ void Z80Thread::create_missing_tmps() {
     //   Offset 6-13: Process name (8 bytes, last byte often has bit 7 set)
     //   Offset 14:   Console number
 
-    const uint16_t TMPD_BASE = 0xFD00;
+    // TMPD address is calculated: SYSDAT - TMPD_SIZE
+    // TMPD_SIZE = ((nmb_cns-1)/4+1)*256
+    // For 4 consoles: 0xFF00 - 0x100 = 0xFE00
+    // For 8 consoles: 0xFF00 - 0x200 = 0xFD00
+    const uint16_t SYSDAT = 0xFF00;
+    const uint16_t TMPD_SIZE = ((num_consoles_ - 1) / 4 + 1) * 256;
+    const uint16_t TMPD_BASE = SYSDAT - TMPD_SIZE;
     const int TMP_SIZE = 64;
 
     // Find the existing TMP (XDOS puts it at slot 0 regardless of console number)
@@ -797,17 +1163,9 @@ void Z80Thread::create_missing_tmps() {
     // Check if TMP exists (name should contain 'mp' at offset 7-8)
     uint8_t name_byte1 = memory_->read_common(existing_tmp_addr + 7);  // Should be 'm'
     uint8_t name_byte2 = memory_->read_common(existing_tmp_addr + 8);  // Should be 'p'
-    std::cerr << "[TMP FIX] Checking FD00: byte7=0x" << std::hex << (int)name_byte1
-              << " byte8=0x" << (int)name_byte2 << std::dec
-              << " (expecting 'm'=0x6d, 'p'=0x70)\n";
     if (name_byte1 != 'm' || name_byte2 != 'p') {
-        std::cerr << "[TMP FIX] No valid TMP found at " << std::hex << existing_tmp_addr
-                  << ", skipping TMP creation\n" << std::dec;
-        return;
+        return;  // No valid TMP found
     }
-
-    std::cerr << "[TMP FIX] Found existing TMP" << existing_console
-              << " in slot 0 (0x" << std::hex << existing_tmp_addr << ")" << std::dec << "\n";
 
     // Copy the existing TMP structure as a template
     uint8_t tmp_template[TMP_SIZE];
@@ -820,9 +1178,6 @@ void Z80Thread::create_missing_tmps() {
 
     // If the existing TMP is in the wrong slot, copy it to the correct slot
     if (existing_tmp_addr != correct_slot_addr) {
-        std::cerr << "[TMP FIX] Moving TMP" << existing_console
-                  << " from slot 0 to slot " << existing_console
-                  << " (0x" << std::hex << correct_slot_addr << ")" << std::dec << "\n";
         for (int i = 0; i < TMP_SIZE; i++) {
             memory_->write_common(correct_slot_addr + i, tmp_template[i]);
         }
@@ -849,13 +1204,8 @@ void Z80Thread::create_missing_tmps() {
         uint8_t check_p = memory_->read_common(tmp_addr + 8);
         int check_con = memory_->read_common(tmp_addr + 0x0E);
         if (check_m == 'm' && check_p == 'p' && check_con == con) {
-            std::cerr << "[TMP FIX] TMP" << con << " already exists at 0x"
-                      << std::hex << tmp_addr << std::dec << "\n";
-            continue;
+            continue;  // Already exists
         }
-
-        std::cerr << "[TMP FIX] Creating TMP" << con
-                  << " at 0x" << std::hex << tmp_addr << std::dec << "\n";
 
         // Copy template
         for (int i = 0; i < TMP_SIZE; i++) {
@@ -894,29 +1244,67 @@ void Z80Thread::create_missing_tmps() {
         // The loop above already created TMP0 in slot 0
     }
 
-    std::cerr << "[TMP FIX] Created TMPs for " << num_consoles_ << " consoles\n";
+}
 
-    // Dump the TMPD area to verify
-    std::cerr << "[TMP FIX] TMPD dump after creation:\n";
-    for (int tmp = 0; tmp < num_consoles_; tmp++) {
-        uint16_t base = TMPD_BASE + (tmp * TMP_SIZE);
-        std::cerr << "  TMP" << tmp << " at 0x" << std::hex << base << ": ";
-        // Show first 16 bytes
-        for (int i = 0; i < 16; i++) {
-            std::cerr << std::setw(2) << std::setfill('0')
-                      << (int)memory_->read_common(base + i) << " ";
-        }
-        std::cerr << " name='";
-        for (int i = 6; i < 14; i++) {
-            uint8_t ch = memory_->read_common(base + i);
-            std::cerr << (ch >= 0x20 && ch < 0x7F ? (char)ch : '.');
-        }
-        std::cerr << "' con=" << (int)memory_->read_common(base + 0x0E);
-        std::cerr << "\n" << std::dec;
+void Z80Thread::fix_uninitialized_tmps() {
+    // Fix process descriptors with invalid stack pointers (0xFFFF = uninitialized)
+    // These can be in TMPD or in the XDOS process table area.
+    //
+    // Process descriptor structure (first 16 bytes):
+    //   0-1: Link pointer (to next process)
+    //   2:   Status
+    //   3:   Priority
+    //   4-5: Stack pointer
+    //   6-13: Name (8 chars)
+    //   14:  Console number
+    //   15:  Reserved
+
+    // Scan TMPD area - address is calculated based on num_consoles
+    const uint16_t TMPD_SIZE = ((num_consoles_ - 1) / 4 + 1) * 256;
+    const uint16_t TMPD_BASE = 0xFF00 - TMPD_SIZE;
+    const int TMP_SIZE = 64;
+
+    for (int slot = 0; slot < num_consoles_; slot++) {
+        uint16_t tmp_addr = TMPD_BASE + (slot * TMP_SIZE);
+        fix_bad_process_descriptor(tmp_addr);
     }
 
-    // TODO: The created TMPs are not yet on the ready list.
-    // They need to be registered with XDOS. For now, we've populated
-    // the TMPD area so the structures exist. The TMPs still need to
-    // be started via XDOS CREATE or direct ready list manipulation.
+    // Also scan XDOS process table area (0xED00-0xEE00)
+    // This is where additional process descriptors may live
+    const uint16_t XDOS_PROC_BASE = 0xED00;
+    const uint16_t XDOS_PROC_END = 0xEE00;
+
+    for (uint16_t addr = XDOS_PROC_BASE; addr < XDOS_PROC_END; addr += 64) {
+        fix_bad_process_descriptor(addr);
+    }
+}
+
+void Z80Thread::fix_bad_process_descriptor(uint16_t addr) {
+    // Read stack pointer (offset 4-5)
+    uint16_t sp = memory_->read_common(addr + 4) |
+                 (memory_->read_common(addr + 5) << 8);
+
+    // Check for invalid SP values
+    if (sp == 0xFFFF || sp == 0x0000 || sp < 0x0100) {
+        // Read the link pointer to see if this is in the ready list
+        uint16_t link = memory_->read_common(addr + 0) |
+                       (memory_->read_common(addr + 1) << 8);
+        uint8_t status = memory_->read_common(addr + 2);
+
+        // Only fix if it appears to be an active descriptor (has non-zero link or status)
+        if (link != 0 || status != 0) {
+            // Clear the descriptor so it won't run:
+            // - Set link to 0 (removes from ready list)
+            // - Set status to 0 (not running)
+            // - Clear the name
+            memory_->write_common(addr + 0, 0);  // Link low
+            memory_->write_common(addr + 1, 0);  // Link high
+            memory_->write_common(addr + 2, 0);  // Status = 0
+            memory_->write_common(addr + 4, 0);  // SP low = 0
+            memory_->write_common(addr + 5, 0);  // SP high = 0
+            for (int i = 6; i < 14; i++) {
+                memory_->write_common(addr + i, 0);
+            }
+        }
+    }
 }
