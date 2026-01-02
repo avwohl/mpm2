@@ -130,27 +130,29 @@ void MpmCpu::execute(void) {
     uint16_t pc = regs.PC.get_pair16();
     uint8_t opcode = mem->fetch_mem(pc);
 
-    // FIX: Prevent self-loop in Tick process at exactly the write instruction
-    // The self-loop is created at PC=0xdc37 when writing pdadr to [BC]
-    // Only fix when BC points to Tick (0xed98) and DE=Tick (about to create self-loop)
+    // FIX: Prevent self-loop in Tick process
+    // The self-loop is created when insert_process writes [BC] = DE and BC == DE
     const uint16_t TICK_ADDR = 0xED98;
-    if (pc == 0xdc37 || pc == 0xdc38 || pc == 0xdc39) {
-        uint16_t bc = regs.BC.get_pair16();
-        uint16_t de = regs.DE.get_pair16();
-        if (bc == de && (bc == TICK_ADDR || bc == TICK_ADDR + 1)) {
-            // About to create a self-loop in Tick - skip by jumping to RET
-            static int insert_skip_count = 0;
-            insert_skip_count++;
-            if (insert_skip_count <= 5) {
-                std::cerr << "[SELF-LOOP SKIP] BC=DE=0x" << std::hex << bc
-                          << " at PC=0x" << pc << " - skipping self-loop write\n" << std::dec;
+
+    // FIX: If Tick.link becomes corrupted (points to itself), fix it immediately
+    // This prevents the scheduler from going into an infinite loop
+    {
+        uint16_t tick_link = mem->fetch_mem(TICK_ADDR) | (mem->fetch_mem(TICK_ADDR + 1) << 8);
+        if (tick_link == TICK_ADDR) {
+            // Self-loop detected! Fix it by setting Tick.link = 0 (end of list)
+            mem->store_mem(TICK_ADDR, 0);
+            mem->store_mem(TICK_ADDR + 1, 0);
+            static int fix_count = 0;
+            fix_count++;
+            if (fix_count <= 5) {
+                std::cerr << "[TICK SELF-LOOP FIXED #" << fix_count
+                          << "] Tick.link was 0x" << std::hex << TICK_ADDR
+                          << ", set to 0\n" << std::dec;
             }
-            // Skip to the RET at end of insert_process (0xdc44 approximately)
-            // Find and skip to the RET
-            regs.PC.set_pair16(0xdc44);  // Jump past the problematic writes
-            return;
         }
     }
+    // Note: We no longer try to prevent the self-loop before it happens.
+    // The post-hoc fix above catches and repairs it immediately after creation.
 
     // PRE-EXECUTE check: prevent LD SP,HL from setting SP to an invalid value
     // Opcode 0xF9 = LD SP,HL - the scheduler uses this to switch contexts

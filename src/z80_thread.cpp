@@ -854,29 +854,20 @@ void Z80Thread::thread_func() {
                 // an interrupt is acknowledged. The XDOS dispatcher should
                 // re-enable them with EI before resuming processes.
                 //
-                // If IFF stays 0 after first interrupt, XDOS isn't EI'ing properly
-                // In that case, we need to force-enable to keep the system running.
-                static int iff_zero_count = 0;
                 static int tick_delivered = 0;
                 if (cpu_->regs.IFF1) {
-                    iff_zero_count = 0;  // Reset counter
                     cpu_->request_rst(7);  // RST 38H
                     tick_delivered++;
                     if (g_debug_enabled && tick_delivered <= 5) {
                         std::cerr << "[TICK] Delivered RST38 #" << tick_delivered << "\n";
                     }
                 } else {
-                    iff_zero_count++;
-                    // If IFF has been 0 for too many ticks, force-enable
-                    // This works around XDOS not EI'ing when returning to process
-                    if (iff_zero_count >= 5 && tick_count_local > 15) {
-                        if (g_debug_enabled) std::cerr << "[TICK] Force-enabling interrupts\n";
-                        cpu_->regs.IFF1 = 1;
-                        cpu_->regs.IFF2 = 1;
-                        cpu_->request_rst(7);
-                        tick_delivered++;
-                        iff_zero_count = 0;  // Reset after force-enable
-                    }
+                    // IFF is 0 - interrupts disabled by DI or interrupt handler
+                    // DO NOT force-enable! MP/M II uses DI critical sections to protect
+                    // flag state and process list manipulation. Force-enabling would
+                    // violate these critical sections and cause race conditions
+                    // (e.g., double-insertion of Tick into the ready list).
+                    // Real hardware and SIMH respect DI until explicit EI.
                 }
                 xios_->tick();
             }
