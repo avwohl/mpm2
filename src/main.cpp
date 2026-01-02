@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <getopt.h>
 #include <termios.h>
+
 #include <unistd.h>
 #include <fcntl.h>
 
@@ -206,7 +207,7 @@ int main(int argc, char* argv[]) {
                 con->set_local_mode(true);
             }
         }
-        std::cout << "Local console enabled on all " << MAX_CONSOLES << " consoles (input to console 3)\n";
+        std::cout << "Local console enabled on all " << MAX_CONSOLES << " consoles (input to consoles 3-7)\n";
     }
 
     // Mount disks
@@ -319,7 +320,7 @@ int main(int argc, char* argv[]) {
         // Run SSH accept loop in main thread (blocks until shutdown)
         ssh_server.accept_loop();
     } else {
-        // Local console mode - read from stdin and broadcast to all local consoles
+        // Local console mode - read from stdin and send to consoles
         if (setup_raw_terminal()) {
             while (!g_shutdown_requested && !z80.timed_out()) {
                 // Poll stdin for input
@@ -331,12 +332,14 @@ int main(int argc, char* argv[]) {
                         g_shutdown_requested = 1;
                         break;
                     }
-                    // Send input to ALL consoles - let MP/M decide which TMP gets it
-                    for (int i = 0; i < MAX_CONSOLES; i++) {
-                        Console* con = ConsoleManager::instance().get(i);
-                        if (con && con->is_local()) {
-                            con->input_queue().try_write(static_cast<uint8_t>(ch));
-                        }
+                    // Send input to console 3 only
+                    // Note: MP/M II's XDOS has a poll table bug that prevents
+                    // interactive input from working correctly when multiple
+                    // TMPs share a poll table. Startup file commands work
+                    // because they bypass the poll mechanism.
+                    Console* con = ConsoleManager::instance().get(3);
+                    if (con && con->is_local()) {
+                        con->input_queue().try_write(static_cast<uint8_t>(ch));
                     }
                 } else {
                     // No input available - sleep briefly to avoid busy-wait
@@ -364,18 +367,15 @@ int main(int argc, char* argv[]) {
                     char ch;
                     ssize_t n = read(STDIN_FILENO, &ch, 1);
                     if (n > 0) {
-                        // Broadcast to all local consoles - MP/M II may use any console
-                        std::cerr << "[INPUT] char=0x" << std::hex << (int)(unsigned char)ch
-                                  << std::dec << " '" << (ch >= 0x20 && ch < 0x7F ? ch : '.') << "'\n";
-                        for (int i = 0; i < MAX_CONSOLES; i++) {
-                            Console* con = ConsoleManager::instance().get(i);
-                            if (con && con->is_local()) {
-                                bool ok = con->input_queue().try_write(static_cast<uint8_t>(ch));
-                                if (i == 3 || i == 7) {
-                                    std::cerr << "[INPUT] console " << i << " queue size=" << con->input_queue().available()
-                                              << " write=" << (ok ? "ok" : "FAIL") << "\n";
-                                }
-                            }
+                        // Convert LF to CR for CP/M compatibility
+                        if (ch == '\n') ch = '\r';
+                        // Send input to console 3 only
+                        // IMPORTANT: Don't send to all consoles 3-7 - that triggers
+                        // an XDOS poll table bug where the last iteration stores HL=0
+                        // when ALL devices are ready, wiping out the valid TMP address
+                        Console* con = ConsoleManager::instance().get(3);
+                        if (con && con->is_local()) {
+                            con->input_queue().try_write(static_cast<uint8_t>(ch));
                         }
                     } else if (n == 0) {
                         // EOF on stdin - stop reading but don't exit
@@ -386,7 +386,7 @@ int main(int argc, char* argv[]) {
         }
     }
 #else
-    // Local console mode - read from stdin and broadcast to all consoles
+    // Local console mode - read from stdin and send to console 3
     if (setup_raw_terminal()) {
         while (!g_shutdown_requested && !z80.timed_out()) {
             // Poll stdin for input
@@ -398,18 +398,13 @@ int main(int argc, char* argv[]) {
                     g_shutdown_requested = 1;
                     break;
                 }
-                // Broadcast to all local consoles - MP/M II may use any console
-                std::cerr << "[INPUT] char=0x" << std::hex << (int)(unsigned char)ch
-                          << std::dec << " '" << (ch >= 0x20 && ch < 0x7F ? ch : '.') << "'\n";
-                for (int i = 0; i < MAX_CONSOLES; i++) {
-                    Console* con = ConsoleManager::instance().get(i);
-                    if (con && con->is_local()) {
-                        bool ok = con->input_queue().try_write(static_cast<uint8_t>(ch));
-                        if (i == 3 || i == 7) {
-                            std::cerr << "[INPUT] console " << i << " queue size=" << con->input_queue().available()
-                                      << " write=" << (ok ? "ok" : "FAIL") << "\n";
-                        }
-                    }
+                // Send input to console 3 only
+                // IMPORTANT: Don't send to all consoles 3-7 - that triggers
+                // an XDOS poll table bug where the last iteration stores HL=0
+                // when ALL devices are ready, wiping out the valid TMP address
+                Console* con = ConsoleManager::instance().get(3);
+                if (con && con->is_local()) {
+                    con->input_queue().try_write(static_cast<uint8_t>(ch));
                 }
             } else {
                 // No input available - sleep briefly to avoid busy-wait
@@ -439,12 +434,12 @@ int main(int argc, char* argv[]) {
                 if (n > 0) {
                     // Convert LF to CR for CP/M compatibility
                     if (ch == '\n') ch = '\r';
-                    // Send input to ALL consoles - let MP/M decide which TMP gets it
-                    for (int i = 0; i < MAX_CONSOLES; i++) {
-                        Console* con = ConsoleManager::instance().get(i);
-                        if (con && con->is_local()) {
-                            con->input_queue().try_write(static_cast<uint8_t>(ch));
-                        }
+                    // Send input to console 3 only
+                    // Note: This means only TMP3's POLL will return ready.
+                    // Other TMPs polling will not see input.
+                    Console* con = ConsoleManager::instance().get(3);
+                    if (con && con->is_local()) {
+                        con->input_queue().try_write(static_cast<uint8_t>(ch));
                     }
                 } else if (n == 0) {
                     // EOF on stdin - stop reading but don't exit

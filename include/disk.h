@@ -124,9 +124,10 @@ public:
     // Track/sector operations on current disk
     void set_track(uint16_t track);
     void set_sector(uint16_t sector);
-    void set_dma(uint16_t addr) { dma_addr_ = addr; }
+    void set_dma(uint16_t addr, uint8_t bank = 0) { dma_addr_ = addr; dma_bank_ = bank; }
 
     uint16_t dma_addr() const { return dma_addr_; }
+    uint8_t dma_bank() const { return dma_bank_; }
 
     // Read/write using DMA address and banked memory
     int read(class BankedMemory* mem);
@@ -141,6 +142,7 @@ private:
     std::unique_ptr<Disk> disks_[MAX_DISKS];
     int current_drive_;
     uint16_t dma_addr_;
+    uint8_t dma_bank_;          // Target bank for DMA to banked addresses
 };
 
 #endif // DISK_H

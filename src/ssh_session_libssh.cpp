@@ -117,12 +117,15 @@ void SSHSession::thread_func() {
         // Read input from SSH client (non-blocking)
         int n = ssh_channel_read_nonblocking(channel_, buf, sizeof(buf), 0);
         if (n > 0) {
+            std::cerr << "[SSH:" << console_id_ << "] Read " << n << " bytes: ";
             // Queue characters for MP/M
             for (int i = 0; i < n; i++) {
                 uint8_t ch = buf[i];
+                std::cerr << "0x" << std::hex << (int)ch << " ";
                 if (ch == '\n') ch = '\r';  // LF -> CR for CP/M
                 con->input_queue().try_write(ch);
             }
+            std::cerr << std::dec << "\n";
             did_work = true;
         } else if (n == SSH_ERROR) {
             std::cerr << "[SSH:" << console_id_ << "] Read error: "

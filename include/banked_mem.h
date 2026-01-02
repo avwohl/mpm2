@@ -11,8 +11,8 @@
 #include <memory>
 
 // MP/M II memory model:
-// - Lower 32KB (0x0000-0x7FFF): Bank-switchable
-// - Upper 32KB (0x8000-0xFFFF): Common area (always visible)
+// - Lower 48KB (0x0000-0xBFFF): Bank-switchable per process
+// - Upper 16KB (0xC000-0xFFFF): Common area (shared by all processes)
 //
 // Banks are selected via SELMEMORY XIOS call.
 // Bank 0 is typically the system bank.
@@ -59,10 +59,10 @@ private:
     int num_banks_;
     uint8_t current_bank_;
 
-    // Memory storage: banks[i] is 32KB for bank i
+    // Memory storage: banks[i] is 48KB for bank i (0x0000-0xBFFF)
     std::vector<std::unique_ptr<uint8_t[]>> banks_;
 
-    // Common area: 32KB (0x8000-0xFFFF)
+    // Common area: 16KB (0xC000-0xFFFF)
     std::unique_ptr<uint8_t[]> common_;
 };
 

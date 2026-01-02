@@ -21,6 +21,7 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
     , current_track_(0)
     , current_sector_(0)
     , dma_addr_(0x0080)
+    , dma_bank_(0)
     , tick_enabled_(false)
     , preempted_(false)
 {
@@ -98,6 +99,7 @@ void XIOS::do_const() {
     Console* con = ConsoleManager::instance().get(console);
     uint8_t status = con ? con->const_status() : 0x00;
 
+
     cpu_->regs.AF.set_high(status);
     do_ret();
 }
@@ -108,7 +110,6 @@ void XIOS::do_conin() {
 
     Console* con = ConsoleManager::instance().get(console);
     uint8_t ch = con ? con->read_char() : 0x1A;  // EOF default if no console
-
     cpu_->regs.AF.set_high(ch);
     do_ret();
 }
@@ -118,6 +119,7 @@ void XIOS::do_conout() {
     uint8_t console = cpu_->regs.DE.get_high();  // D = console number
     if (console >= 8) console = 0;  // Workaround: invalid console -> default to 0
     uint8_t ch = cpu_->regs.BC.get_low();        // C = character
+
 
     Console* con = ConsoleManager::instance().get(console);
     if (con) {
@@ -200,7 +202,17 @@ void XIOS::do_read() {
     // Set up disk system with current parameters
     DiskSystem::instance().set_track(current_track_);
     DiskSystem::instance().set_sector(current_sector_);
-    DiskSystem::instance().set_dma(dma_addr_);
+    // Pass DMA address and target bank for banked memory writes
+    DiskSystem::instance().set_dma(dma_addr_, dma_bank_);
+
+    if (g_debug_enabled) {
+        std::cerr << "[READ] drv=" << (int)current_disk_
+                  << " trk=" << current_track_
+                  << " sec=" << current_sector_
+                  << " dma=0x" << std::hex << dma_addr_ << std::dec
+                  << " bank=" << (int)mem_->current_bank()
+                  << " target_bank=" << (int)dma_bank_ << "\n";
+    }
 
     // Perform read
     int result = DiskSystem::instance().read(mem_);
@@ -212,7 +224,17 @@ void XIOS::do_write() {
     // Set up disk system with current parameters
     DiskSystem::instance().set_track(current_track_);
     DiskSystem::instance().set_sector(current_sector_);
-    DiskSystem::instance().set_dma(dma_addr_);
+    // Pass DMA address and target bank for banked memory reads
+    DiskSystem::instance().set_dma(dma_addr_, dma_bank_);
+
+    if (g_debug_enabled) {
+        std::cerr << "[WRITE] drv=" << (int)current_disk_
+                  << " trk=" << current_track_
+                  << " sec=" << current_sector_
+                  << " dma=0x" << std::hex << dma_addr_ << std::dec
+                  << " bank=" << (int)mem_->current_bank()
+                  << " target_bank=" << (int)dma_bank_ << "\n";
+    }
 
     // Perform write
     int result = DiskSystem::instance().write(mem_);
@@ -246,6 +268,18 @@ void XIOS::do_selmemory() {
     // descriptor: base(1), size(1), attrib(1), bank(1)
     uint16_t desc_addr = cpu_->regs.BC.get_pair16();
     uint8_t bank = mem_->fetch_mem(desc_addr + 3);
+
+    if (g_debug_enabled) {
+        std::cerr << "[SELMEMORY] desc=0x" << std::hex << desc_addr
+                  << " bank=" << std::dec << (int)bank << "\n";
+    }
+
+
+    // Track last non-zero bank as the DMA target for user data
+    // When BNKBDOS switches to user bank, remember it for disk I/O
+    if (bank != 0) {
+        dma_bank_ = bank;
+    }
 
     mem_->select_bank(bank);
     do_ret();
@@ -309,11 +343,8 @@ void XIOS::do_maxconsole() {
     uint8_t num_consoles = mem_->read_common(0xFF01);  // Number of consoles from SYSDAT
     uint8_t result = num_consoles;
 
-    static int maxcon_count = 0;
-    maxcon_count++;
-    if (maxcon_count <= 20) {
-        std::cerr << "[MAXCONSOLE] #" << maxcon_count
-                  << " returning " << (int)result
+    if (g_debug_enabled) {
+        std::cerr << "[MAXCONSOLE] returning " << (int)result
                   << " (SYSDAT num_consoles=" << (int)num_consoles << ")\n";
     }
 
@@ -332,6 +363,45 @@ void XIOS::do_systeminit() {
 
     // Initialize consoles
     ConsoleManager::instance().init();
+
+    // SYSDAT is at 0xFF00. The actual DATAPG address is stored at SYSDAT+252 (0xFFFC-0xFFFD)
+    const uint16_t SYSDAT = 0xFF00;
+    uint16_t datapg_ptr = mem_->read_common(SYSDAT + 252) | (mem_->read_common(SYSDAT + 253) << 8);
+    std::cerr << "[SYSTEMINIT] SYSDAT at 0x" << std::hex << SYSDAT
+              << ", DATAPG pointer at SYSDAT+252 = 0x" << datapg_ptr << "\n";
+
+    // If datapg_ptr is valid, dump from there; otherwise show SYSDAT for debugging
+    uint16_t dump_addr = (datapg_ptr >= 0xC000 && datapg_ptr < 0xFF00) ? datapg_ptr : SYSDAT;
+    std::cerr << "[SYSTEMINIT] Dumping from 0x" << std::hex << dump_addr << ":\n";
+    std::cerr << "  Bytes: ";
+    for (int i = 0; i < 20; i++) {
+        std::cerr << std::hex << std::setw(2) << std::setfill('0')
+                  << (int)mem_->read_common(dump_addr + i) << " ";
+    }
+    std::cerr << "\n";
+
+    if (datapg_ptr >= 0xC000 && datapg_ptr < 0xFF00) {
+        uint16_t tod_day = mem_->read_common(datapg_ptr + 0) | (mem_->read_common(datapg_ptr + 1) << 8);
+        uint16_t rlr = mem_->read_common(datapg_ptr + 5) | (mem_->read_common(datapg_ptr + 6) << 8);
+        uint16_t dlr = mem_->read_common(datapg_ptr + 7) | (mem_->read_common(datapg_ptr + 8) << 8);
+        uint16_t drl = mem_->read_common(datapg_ptr + 9) | (mem_->read_common(datapg_ptr + 10) << 8);
+        uint16_t plr = mem_->read_common(datapg_ptr + 11) | (mem_->read_common(datapg_ptr + 12) << 8);
+        uint16_t slr = mem_->read_common(datapg_ptr + 13) | (mem_->read_common(datapg_ptr + 14) << 8);
+        uint16_t qlr = mem_->read_common(datapg_ptr + 15) | (mem_->read_common(datapg_ptr + 16) << 8);
+        uint16_t thrdrt = mem_->read_common(datapg_ptr + 17) | (mem_->read_common(datapg_ptr + 18) << 8);
+
+        std::cerr << "  DATAPG: tod_day=" << std::dec << tod_day
+                  << " rlr=0x" << std::hex << rlr
+                  << " dlr=0x" << dlr
+                  << " drl=0x" << drl
+                  << " plr=0x" << plr
+                  << " slr=0x" << slr
+                  << " qlr=0x" << qlr
+                  << " thrdrt=0x" << thrdrt
+                  << std::dec << "\n";
+    } else {
+        std::cerr << "  DATAPG pointer not yet initialized (value=0x" << std::hex << datapg_ptr << ")\n";
+    }
 
     // The Z80 code in bnkxios.asm DO_SYSINIT handles setting up RST 38H vector.
     // We just need to enable the tick timer here.
@@ -359,6 +429,10 @@ void XIOS::do_swtuser() {
     uint16_t desc_addr = cpu_->regs.BC.get_pair16();
     if (desc_addr != 0) {
         uint8_t bank = mem_->fetch_mem(desc_addr + 3);
+        if (g_debug_enabled) {
+            std::cerr << "[SWTUSER] desc=0x" << std::hex << desc_addr
+                      << " -> bank=" << std::dec << (int)bank << "\n";
+        }
         mem_->select_bank(bank);
     }
     do_ret();
@@ -366,6 +440,9 @@ void XIOS::do_swtuser() {
 
 void XIOS::do_swtsys() {
     // Switch to system bank (bank 0)
+    if (g_debug_enabled) {
+        std::cerr << "[SWTSYS] -> bank=0 (was " << (int)mem_->current_bank() << ")\n";
+    }
     mem_->select_bank(0);
     do_ret();
 }
@@ -412,9 +489,7 @@ void XIOS::do_wboot() {
 void XIOS::tick() {
     // Called from timer interrupt (60Hz)
     // Set flag #1 if clock is enabled
-    if (tick_enabled_.load()) {
-        // TODO: Set MP/M flag #1
-    }
+    // (The Z80 interrupt handler handles the actual flag setting via XDOS)
 }
 
 void XIOS::one_second_tick() {

@@ -148,6 +148,7 @@ DO_CONIN:
         LD      A, D
         ADD     A, A            ; A = 2*console
         INC     A               ; A = 2*console + 1 (input device)
+        LD      D, 0            ; D = 0 for simple poll (MUST be before LD E, A!)
         LD      E, A            ; E = device number for POLL
         LD      C, POLL         ; POLL function (131)
         CALL    XDOS            ; Wait for input device to be ready
@@ -384,6 +385,11 @@ DO_XDOSENT:
 ; =============================================================================
 
 INTHND:
+        ; CRITICAL: Switch to dedicated interrupt stack BEFORE pushing anything
+        ; This prevents corruption of SYSDAT if interrupted code had SP near 0xFFFF
+        LD      (SAVED_SP), SP          ; Save current SP (uses only HL')
+        LD      SP, INT_STACK           ; Use dedicated interrupt stack
+
         PUSH    AF
         PUSH    BC
         PUSH    DE
@@ -404,35 +410,9 @@ INTHND:
         CALL    XDOS
 
 NOTICK:
-        ; Check console input devices and set flags if input ready
-        ; Device 1,3,5,7,9,11,13,15 -> Console 0-7 -> Flags 3-10
-        ; (Flags 1,2 are reserved for tick and 1-second)
-        LD      B, NMBCNS       ; Number of consoles (8)
-        LD      D, 1            ; Start with device 1 (console 0 input)
-        LD      E, 3            ; Start with flag 3 (console 0)
-CHKCON:
-        PUSH    BC
-        PUSH    DE
-        LD      C, D            ; C = device number for POLLDEVICE
-        LD      A, FUNC_POLLDEV
-        OUT     (XIOS_DISPATCH), A      ; Dispatch function
-        IN      A, (XIOS_DISPATCH)      ; Get result in A (0xFF if ready)
-        POP     DE
-        POP     BC
-        OR      A               ; Check if device is ready
-        JR      Z, CHKCON_NEXT  ; Skip if not ready
-        ; Device is ready - set flag to wake up waiting process
-        PUSH    BC
-        PUSH    DE
-        LD      C, FLAGSET
-        CALL    XDOS
-        POP     DE
-        POP     BC
-CHKCON_NEXT:
-        INC     D               ; Next device (skip by 2: 1,3,5,7)
-        INC     D
-        INC     E               ; Next flag (3,4,5,6)
-        DJNZ    CHKCON
+        ; SIMH style: Don't poll consoles here - just set tick/second flags
+        ; Console polling from interrupt was causing XDOS reentrancy issues
+        ; The POLL mechanism should work via XDOS dispatcher rescheduling
 
         ; Update 1-second counter (60 ticks = 1 second)
         LD      HL, CNT60
@@ -457,6 +437,10 @@ NOTSEC:
         POP     DE
         POP     BC
         POP     AF
+
+        ; Restore original SP before dispatching
+        LD      SP, (SAVED_SP)
+
         ; Note: Do NOT enable interrupts here
         ; The dispatcher enables them when resuming a process
         JP      PDISP           ; Dispatch to next ready process
@@ -469,6 +453,16 @@ TICKN:  DB      0               ; Tick enable flag
 CNT60:  DB      60              ; 60 Hz counter (for 1-second flag)
 PREEMP: DB      0               ; Preempted flag
 CONST60: DB     60              ; Constant 60 for resetting CNT60
+
+; Interrupt stack (prevents corruption of SYSDAT if interrupted SP is near 0xFFFF)
+SAVED_SP: DW    0               ; Saved SP from interrupted code
+        ; 32 bytes of stack space for interrupt handler
+        ; (PUSH AF,BC,DE,HL = 8 bytes, plus XDOS call overhead)
+        DB      0,0,0,0,0,0,0,0
+        DB      0,0,0,0,0,0,0,0
+        DB      0,0,0,0,0,0,0,0
+        DB      0,0,0,0,0,0,0,0
+INT_STACK:      ; Stack grows down, so label is at top
 
 ; =============================================================================
 ; Disk Parameter Headers and DPBs

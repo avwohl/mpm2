@@ -85,6 +85,9 @@ public:
     bool is_preempted() const { return preempted_.load(); }
     void set_preempted(bool p) { preempted_.store(p); }
 
+    // Update DMA target bank (called when bank switching via port 0xE1)
+    void update_dma_bank(uint8_t bank) { if (bank != 0) dma_bank_ = bank; }
+
 private:
     // BIOS-compatible entries
     void do_boot();
@@ -137,6 +140,7 @@ private:
     uint16_t current_track_;
     uint16_t current_sector_;
     uint16_t dma_addr_;
+    uint8_t dma_bank_;          // Target bank for DMA to banked addresses
 
     // Clock control
     std::atomic<bool> tick_enabled_;

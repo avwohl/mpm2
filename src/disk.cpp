@@ -208,6 +208,7 @@ DiskSystem& DiskSystem::instance() {
 DiskSystem::DiskSystem()
     : current_drive_(0)
     , dma_addr_(0x0080)
+    , dma_bank_(0)
 {
 }
 
@@ -287,9 +288,17 @@ int DiskSystem::read(BankedMemory* mem) {
     disk->set_sector(logical_sector);
 
     if (result == 0) {
-        // Copy only 128 bytes (one CP/M record) to memory at DMA address
+        // Copy 128 bytes (one CP/M record) to memory at DMA address
+        // Use the target bank for addresses in banked memory (<C000H)
         for (uint16_t i = 0; i < 128; i++) {
-            mem->store_mem(dma_addr_ + i, buffer[offset_in_phys + i]);
+            uint16_t addr = dma_addr_ + i;
+            if (addr < 0xC000) {
+                // Banked address - write to the specified target bank
+                mem->write_bank(dma_bank_, addr, buffer[offset_in_phys + i]);
+            } else {
+                // Common area - bank doesn't matter
+                mem->store_mem(addr, buffer[offset_in_phys + i]);
+            }
         }
     }
 
@@ -322,8 +331,16 @@ int DiskSystem::write(BankedMemory* mem) {
     disk->read_sector(buffer);
 
     // Modify the 128-byte portion
+    // Use the target bank for addresses in banked memory (<C000H)
     for (uint16_t i = 0; i < 128; i++) {
-        buffer[offset_in_phys + i] = mem->fetch_mem(dma_addr_ + i);
+        uint16_t addr = dma_addr_ + i;
+        if (addr < 0xC000) {
+            // Banked address - read from the specified target bank
+            buffer[offset_in_phys + i] = mem->read_bank(dma_bank_, addr);
+        } else {
+            // Common area - bank doesn't matter
+            buffer[offset_in_phys + i] = mem->fetch_mem(addr);
+        }
     }
 
     // Write back the physical sector

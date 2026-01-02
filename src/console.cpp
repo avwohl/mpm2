@@ -19,7 +19,8 @@ uint8_t Console::const_status() {
     // Check if input available - always check queue regardless of connection state
     // (Matches SIMH approach: status based on queue content, not connection flag)
     // This allows detecting input as soon as SSH queues it, before connected_ is set
-    return input_queue_.available() > 0 ? 0xFF : 0x00;
+    size_t avail = input_queue_.available();
+    return avail > 0 ? 0xFF : 0x00;
 }
 
 uint8_t Console::read_char() {

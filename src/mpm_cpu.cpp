@@ -10,6 +10,11 @@
 
 extern bool g_debug_enabled;
 
+// Track POLLDEVICE for console 7 input (device 15)
+// These are not static so they can be accessed from xios.cpp
+int last_polldevice_device = -1;
+bool last_polldevice_ready = false;
+
 MpmCpu::MpmCpu(qkz80_cpu_mem* memory)
     : qkz80(memory)
 {
@@ -52,14 +57,15 @@ qkz80_uint8 MpmCpu::port_in(qkz80_uint8 port) {
             // Return the result from the last XIOS dispatch
             // This is used with IN A, (0xE0) after OUT (0xE0), A to get return values
             value = last_xios_result_;
-            // Trace IN results for debugging interrupt handler
-            if (g_debug_enabled && value == 0xFF) {
-                static int in_ready_count = 0;
-                in_ready_count++;
-                if (in_ready_count <= 30) {
-                    std::cerr << "[IN 0xE0] returning READY (0xFF) PC=0x"
-                              << std::hex << regs.PC.get_pair16() << std::dec
-                              << " #" << in_ready_count << "\n";
+            // Debug: log when returning 0xFF from POLLDEVICE
+            if (value == 0xFF) {
+                uint16_t pc = regs.PC.get_pair16();
+                // Check if this is after a POLLDEVICE call (PC around 0xC1E8)
+                if (pc >= 0xC1E0 && pc <= 0xC1F0) {
+                    static int polldev_in_ff_count = 0;
+                    polldev_in_ff_count++;
+                    // Suppress the per-POLLDEVICE trace to reduce noise
+                    // Tracing is now enabled by xios.cpp after all 5 devices return READY
                 }
             }
             break;
@@ -97,6 +103,35 @@ void MpmCpu::handle_xios_dispatch() {
     // The XIOS handler sets the result in A register via set_high()
     last_xios_result_ = regs.AF.get_high();
 
+    // Debug: trace when last_xios_result_ is set to 0xFF at CHKCON (PC=0xC262)
+    if (g_debug_enabled && (regs.PC.get_pair16() == 0xC262 || regs.PC.get_pair16() == 0xC263) && last_xios_result_ == 0xFF) {
+        static int set_result_ff_count = 0;
+        set_result_ff_count++;
+        if (set_result_ff_count <= 20) {
+            std::cerr << "[SET RESULT FF] PC=0x" << std::hex << regs.PC.get_pair16()
+                      << " func=0x" << (int)func
+                      << " A=" << (int)regs.AF.get_high()
+                      << " last_xios_result=0x" << (int)last_xios_result_
+                      << " #" << std::dec << set_result_ff_count << "\n";
+        }
+    }
+
+    // Debug: trace POLLDEVICE result for input devices that return READY
+    if (g_debug_enabled && func == 0x36) {  // POLLDEVICE
+        uint8_t device = regs.BC.get_low();
+        if ((device & 1) && last_xios_result_ == 0xFF) {  // Input device ready
+            static int poll_ready_count = 0;
+            poll_ready_count++;
+            if (poll_ready_count <= 20) {
+                std::cerr << "[POLLDEV] device=" << (int)device
+                          << " console=" << (device / 2)
+                          << " result=0x" << std::hex << (int)last_xios_result_
+                          << " PC=0x" << regs.PC.get_pair16() << std::dec
+                          << " #" << poll_ready_count << "\n";
+            }
+        }
+    }
+
     // Debug trace for POLLDEVICE calls that return READY
     if (g_debug_enabled && func == 0x36 && last_xios_result_ == 0xFF) {  // POLLDEVICE
         static int polldev_ready_count = 0;
@@ -116,11 +151,18 @@ void MpmCpu::handle_bank_select(uint8_t bank) {
         return;
     }
 
-    if (debug_io) {
-        std::cerr << "[BANK SELECT] bank=" << (int)bank << std::endl;
+    if (g_debug_enabled || debug_io) {
+        std::cerr << "[BANK SELECT] bank=" << (int)bank
+                  << " (was " << (int)banked_mem_->current_bank() << ")"
+                  << " PC=0x" << std::hex << regs.PC.get_pair16() << std::dec << "\n";
     }
 
     banked_mem_->select_bank(bank);
+
+    // Notify XIOS of bank change for DMA targeting
+    if (xios_) {
+        xios_->update_dma_bank(bank);
+    }
 }
 
 void MpmCpu::halt(void) {

@@ -1,0 +1,100 @@
+#!/usr/bin/expect -f
+#
+# SSH test harness for MP/M II emulator
+#
+# Usage: ./test_ssh.exp [port] [command...]
+#
+# Examples:
+#   ./test_ssh.exp                    # Interactive mode
+#   ./test_ssh.exp 2222 dir           # Run DIR command
+#   ./test_ssh.exp 2222 dir stat      # Run DIR then STAT
+#
+
+set timeout 30
+set port [lindex $argv 0]
+if {$port eq ""} {
+    set port 2222
+}
+
+# Get commands from remaining args
+set commands [lrange $argv 1 end]
+
+# Disable host key checking for testing
+set env(SSH_OPTIONS) "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+log_user 1
+
+puts "=== MP/M II SSH Test Harness ==="
+puts "Connecting to port $port..."
+
+# Spawn SSH connection with PTY
+spawn ssh -tt -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null user@localhost
+
+# Wait for MP/M II banner or prompt
+expect {
+    -re {MP/M II Console \d+} {
+        puts "\n>>> Saw console banner"
+        exp_continue
+    }
+    -re {MP/M II V2\.\d+} {
+        puts "\n>>> Saw MP/M version"
+        exp_continue
+    }
+    -re {\d+[A-P]>} {
+        puts "\n>>> Got prompt!"
+    }
+    timeout {
+        puts "\n>>> TIMEOUT waiting for prompt"
+        exit 1
+    }
+    eof {
+        puts "\n>>> Connection closed unexpectedly"
+        exit 1
+    }
+}
+
+# If no commands given, go interactive
+if {[llength $commands] == 0} {
+    puts "\n>>> Interactive mode - type commands, Ctrl+] to exit"
+    interact
+    exit 0
+}
+
+# Run each command
+foreach cmd $commands {
+    puts "\n>>> Sending command: $cmd"
+    send "$cmd\r"
+
+    # Wait for command to echo and then next prompt
+    expect {
+        -re {\d+[A-P]>} {
+            puts "\n>>> Got prompt after $cmd"
+        }
+        timeout {
+            puts "\n>>> TIMEOUT waiting for response to: $cmd"
+            exit 1
+        }
+        eof {
+            puts "\n>>> Connection closed after: $cmd"
+            exit 1
+        }
+    }
+}
+
+puts "\n>>> All commands completed successfully"
+
+# Send exit if the last command wasn't exit
+if {[lindex $commands end] ne "exit"} {
+    puts "\n>>> Sending EXIT to close session"
+    send "exit\r"
+    expect {
+        eof {
+            puts ">>> Session closed cleanly"
+        }
+        timeout {
+            puts ">>> Timeout waiting for session to close"
+        }
+    }
+}
+
+exit 0

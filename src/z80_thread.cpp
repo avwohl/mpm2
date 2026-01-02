@@ -15,6 +15,9 @@
 
 extern bool g_debug_enabled;
 
+// Global PC tracker for debugging memory writes
+uint16_t g_debug_last_pc = 0;
+
 
 Z80Thread::Z80Thread()
     : running_(false)
@@ -314,6 +317,7 @@ bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
     cpu_->regs.PC.set_pair16(sysinit_addr);
     std::cerr << "[BOOT] Executing SYSINIT at 0x" << std::hex << sysinit_addr << std::dec << "\n";
     for (int i = 0; i < 100; i++) {  // Run up to 100 instructions
+        g_debug_last_pc = cpu_->regs.PC.get_pair16();
         cpu_->execute();
         if (cpu_->regs.PC.get_pair16() == 0x0000) {
             std::cerr << "[BOOT] SYSINIT completed\n";
@@ -359,6 +363,29 @@ bool Z80Thread::load_mpm_sys(const std::string& mpm_sys_path) {
         if (sysdat_addr != 0) {
             uint8_t nmb_cns = memory_->read_common(sysdat_addr + 1);
             std::cerr << "  SYSDAT[1] (nmb consoles): " << std::dec << (int)nmb_cns << "\n";
+        }
+        std::cerr << std::dec << std::setfill(' ');
+
+        // Dump XIOSJMP table at 0xFA00 (first few entries)
+        std::cerr << "XIOSJMP table at FA00H:\n";
+        for (int i = 0; i < 0x50; i += 3) {
+            uint8_t op = memory_->read_common(0xFA00 + i);
+            uint16_t addr = memory_->read_common(0xFA00 + i + 1) |
+                           (memory_->read_common(0xFA00 + i + 2) << 8);
+            if (op == 0xC3) {
+                std::cerr << "  FA" << std::hex << std::setw(2) << std::setfill('0') << i
+                          << ": JP " << std::setw(4) << addr << "H\n";
+            }
+        }
+
+        // Dump low memory (0x00-0x40) in bank 0
+        std::cerr << "Low memory (0x0000-0x0040) in bank 0:\n";
+        for (int i = 0; i < 0x40; i += 16) {
+            std::cerr << "  " << std::hex << std::setw(4) << std::setfill('0') << i << ": ";
+            for (int j = 0; j < 16; j++) {
+                std::cerr << std::setw(2) << (int)memory_->read_bank(0, i + j) << " ";
+            }
+            std::cerr << "\n";
         }
         std::cerr << std::dec << std::setfill(' ');
     }
@@ -433,9 +460,7 @@ void Z80Thread::thread_func() {
             // MP/M II XDOS should call STARTCLOCK but doesn't seem to
             static bool auto_started = false;
             if (!auto_started && instruction_count_.load() > 5000000) {
-                if (g_debug_enabled) {
-                    std::cerr << "[CLOCK] Auto-starting clock after boot\n";
-                }
+                if (g_debug_enabled) std::cerr << "[CLOCK] Auto-starting clock after boot\n";
                 xios_->start_clock();
                 auto_started = true;
             }
@@ -446,8 +471,8 @@ void Z80Thread::thread_func() {
                 tick_count_local++;
                 // Skip first few ticks to let boot complete initial setup
                 if (tick_count_local < 10) continue;
-                // Log first 30 ticks and then every 60 (only in debug mode)
-                if (g_debug_enabled && (tick_count_local <= 30 || (tick_count_local % 60) == 0)) {
+                // Log ticks only with g_debug_enabled
+                if (g_debug_enabled && (tick_count_local <= 10 || (tick_count_local % 120) == 0)) {
                     std::cerr << "[TICK] #" << tick_count_local
                               << " IFF=" << (int)cpu_->regs.IFF1
                               << " bank=" << (int)memory_->current_bank()
@@ -466,15 +491,20 @@ void Z80Thread::thread_func() {
                     iff_zero_count = 0;  // Reset counter
                     cpu_->request_rst(7);  // RST 38H
                     tick_delivered++;
+                    if (g_debug_enabled && tick_delivered <= 5) {
+                        std::cerr << "[TICK] Delivered RST38 #" << tick_delivered << "\n";
+                    }
                 } else {
                     iff_zero_count++;
                     // If IFF has been 0 for too many ticks, force-enable
                     // This works around XDOS not EI'ing when returning to process
                     if (iff_zero_count >= 5 && tick_count_local > 15) {
+                        if (g_debug_enabled) std::cerr << "[TICK] Force-enabling interrupts\n";
                         cpu_->regs.IFF1 = 1;
                         cpu_->regs.IFF2 = 1;
                         cpu_->request_rst(7);
                         tick_delivered++;
+                        iff_zero_count = 0;  // Reset after force-enable
                     }
                 }
                 xios_->tick();
@@ -556,24 +586,87 @@ void Z80Thread::thread_func() {
         }
 
         // Deliver any pending interrupts before executing
+        // IMPORTANT: Switch to bank 0 before interrupt handling
+        // because the interrupt vector at 0x0038 is in bank 0's memory
+        // (banked area 0x0000-0xBFFF is per-bank, only common area is shared)
+        uint8_t saved_bank = memory_->current_bank();
+        if (cpu_->int_pending) {
+            memory_->select_bank(0);  // Switch to system bank for interrupt vector
+        }
+
         uint16_t pc_before = cpu_->regs.PC.get_pair16();
+
+        // Debug: log state before check_interrupts (only with g_debug_enabled)
+        static int chk_count = 0;
+        if (g_debug_enabled && cpu_->int_pending) {
+            chk_count++;
+            if (chk_count <= 10) {
+                std::cerr << "[CHK] #" << chk_count
+                          << " int_pending=" << cpu_->int_pending
+                          << " IFF1=" << (int)cpu_->regs.IFF1
+                          << " PC=0x" << std::hex << pc_before << std::dec << "\n";
+            }
+        }
+
         bool delivered = cpu_->check_interrupts();
         uint16_t pc_after = cpu_->regs.PC.get_pair16();
 
-        // Log when interrupt is actually delivered (only in debug mode)
+        // Log when interrupt is actually delivered (only with g_debug_enabled)
         if (g_debug_enabled && delivered) {
             static int int_count = 0;
             int_count++;
             if (int_count <= 10) {
                 std::cerr << "[INT] #" << int_count
-                          << " delivered, PC: 0x" << std::hex << pc_before
+                          << " PC: 0x" << std::hex << pc_before
                           << " -> 0x" << pc_after << std::dec << "\n";
             }
         }
+        if (!delivered && saved_bank != 0 && cpu_->int_pending) {
+            // Interrupt pending but not delivered (IFF1=0), restore bank
+            memory_->select_bank(saved_bank);
+        }
 
         // Execute one instruction
+        g_debug_last_pc = cpu_->regs.PC.get_pair16();
         cpu_->execute();
         instruction_count_++;
+
+        // Trace XDOS function calls - POLL (131), FLAGWAIT (132), FLAGSET (133)
+        if (g_debug_enabled) {
+            uint16_t pc = cpu_->regs.PC.get_pair16();
+            uint8_t c = cpu_->regs.BC.get_low();
+            uint8_t e = cpu_->regs.DE.get_low();
+            // Trace POLL calls (C=131)
+            if (c == 131) {
+                static int poll_xdos_count = 0;
+                poll_xdos_count++;
+                uint16_t de = cpu_->regs.DE.get_pair16();
+                // Always trace poll table calls (DE >= 256), limit simple polls
+                if (de >= 256 || poll_xdos_count <= 30) {
+                    std::cerr << "[POLL XDOS] PC=0x" << std::hex << pc
+                              << " DE=0x" << de;
+                    if (de < 256) {
+                        std::cerr << " (simple: console " << std::dec << (e/2)
+                                  << (e & 1 ? " input" : " output") << ")";
+                    } else {
+                        std::cerr << " (POLL TABLE at " << std::hex << de << ")";
+                    }
+                    std::cerr << std::dec << " #" << poll_xdos_count << "\n";
+                }
+            }
+            // When we're at a CALL instruction with C=133, trace it
+            if (c == 133 && e >= 3 && e <= 10) {  // Console input flags
+                static int flagset_call_count = 0;
+                flagset_call_count++;
+                if (flagset_call_count <= 30) {
+                    std::cerr << "[FLAGSET CALL] PC=0x" << std::hex << pc
+                              << " C=" << std::dec << (int)c
+                              << " E=" << (int)e
+                              << " (console " << (e-3) << " flag)"
+                              << " #" << flagset_call_count << "\n";
+                }
+            }
+        }
 
         // Periodic Z80 status log (only in debug mode)
         if (g_debug_enabled) {
@@ -623,14 +716,16 @@ void Z80Thread::thread_func() {
                            (pc >= 0xFC00 && pc <= 0xFF00) ||  // XIOSJMP area
                            (pc >= 0xC100 && pc <= 0xCB00);    // BNKXIOS area
             if (at_xdos) {
-                // XDOS function 133 (0x85) = FLAGSET
+                // Debug: track FLAGSET calls (these wake up waiting processes)
                 if (func == 133) {  // FLAGSET
+                    uint8_t flag = cpu_->regs.DE.get_low();
                     static int flagset_count = 0;
                     flagset_count++;
-                    uint8_t flag = cpu_->regs.DE.get_low();
-                    if (flag == 6 || flagset_count <= 20 || (flagset_count % 100) == 0) {
-                        std::cerr << "[XDOS FLAGSET] count=" << flagset_count
-                                  << " flag=" << (int)flag << "\n";
+                    // Log ALL flags
+                    if (flagset_count <= 30) {
+                        std::cerr << "[FLAGSET] flag=" << (int)flag
+                                  << " PC=0x" << std::hex << pc << std::dec
+                                  << " #" << flagset_count << "\n";
                     }
                 }
 
