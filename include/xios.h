@@ -125,9 +125,6 @@ private:
     void do_xdosent();   // XDOS entry point
     void do_sysdat();    // System data pointer
 
-    // Simulate RET instruction
-    void do_ret();
-
     qkz80* cpu_;
     BankedMemory* mem_;
     uint16_t xios_base_;
@@ -142,9 +139,6 @@ private:
     // Clock control
     std::atomic<bool> tick_enabled_;
     std::atomic<bool> preempted_;
-
-    // Skip RET flag for I/O port dispatch
-    bool skip_ret_ = false;
 };
 
 #endif // XIOS_H

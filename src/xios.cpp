@@ -25,8 +25,6 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
 }
 
 void XIOS::handle_port_dispatch(uint8_t func) {
-    skip_ret_ = true;
-
     switch (func) {
         case XIOS_BOOT:      do_boot(); break;
         case XIOS_WBOOT:     do_wboot(); break;
@@ -70,20 +68,6 @@ void XIOS::handle_port_dispatch(uint8_t func) {
             }
             break;
     }
-
-    skip_ret_ = false;
-}
-
-void XIOS::do_ret() {
-    // Skip RET when using I/O port dispatch (Z80 code has its own RET)
-    if (skip_ret_) return;
-    // Pop return address from stack and set PC
-    uint16_t sp = cpu_->regs.SP.get_pair16();
-    uint8_t lo = mem_->fetch_mem(sp);
-    uint8_t hi = mem_->fetch_mem(sp + 1);
-    uint16_t ret_addr = (hi << 8) | lo;
-    cpu_->regs.SP.set_pair16(sp + 2);
-    cpu_->regs.PC.set_pair16(ret_addr);
 }
 
 // Console I/O - D register contains console number (MP/M II XIOS convention)
@@ -95,7 +79,6 @@ void XIOS::do_const() {
     Console* con = ConsoleManager::instance().get(console);
     uint8_t status = con ? con->const_status() : 0x00;
     cpu_->regs.AF.set_high(status);
-    do_ret();
 }
 
 void XIOS::do_conin() {
@@ -106,7 +89,6 @@ void XIOS::do_conin() {
     uint8_t ch = con ? con->read_char() : 0x1A;  // EOF default if no console
 
     cpu_->regs.AF.set_high(ch);
-    do_ret();
 }
 
 void XIOS::do_conout() {
@@ -119,35 +101,29 @@ void XIOS::do_conout() {
     if (con) {
         con->write_char(ch);
     }
-    do_ret();
 }
 
 void XIOS::do_list() {
-    // List device (printer) - not implemented yet
-    do_ret();
+    // List device (printer) - not implemented
 }
 
 void XIOS::do_punch() {
     // Punch device - not implemented
-    do_ret();
 }
 
 void XIOS::do_reader() {
     // Reader device - return EOF
     cpu_->regs.AF.set_high(0x1A);
-    do_ret();
 }
 
 void XIOS::do_listst() {
     // List status - always ready
     cpu_->regs.AF.set_high(0xFF);
-    do_ret();
 }
 
-// Disk I/O - placeholder implementations
+// Disk I/O
 void XIOS::do_home() {
     current_track_ = 0;
-    do_ret();
 }
 
 void XIOS::do_seldsk() {
@@ -159,35 +135,26 @@ void XIOS::do_seldsk() {
     // DiskSystem::select() returns false if disk is out of range or unmounted
     if (!DiskSystem::instance().select(disk)) {
         cpu_->regs.AF.set_high(0xFF);  // Return error
-        do_ret();
         return;
     }
 
     current_disk_ = disk;
     cpu_->regs.AF.set_high(0);  // Return success
-    // Note: Z80 code sets HL to DPH address after this returns
-    do_ret();
 }
 
 void XIOS::do_settrk() {
-    // For port dispatch: assembly copies BC to HL before OUT
-    // For PC-based dispatch (legacy): BC = track number
-    current_track_ = skip_ret_ ? cpu_->regs.HL.get_pair16() : cpu_->regs.BC.get_pair16();
-    do_ret();
+    // Assembly copies BC to HL before OUT
+    current_track_ = cpu_->regs.HL.get_pair16();
 }
 
 void XIOS::do_setsec() {
-    // For port dispatch: assembly copies BC to HL before OUT
-    // For PC-based dispatch (legacy): BC = sector number
-    current_sector_ = skip_ret_ ? cpu_->regs.HL.get_pair16() : cpu_->regs.BC.get_pair16();
-    do_ret();
+    // Assembly copies BC to HL before OUT
+    current_sector_ = cpu_->regs.HL.get_pair16();
 }
 
 void XIOS::do_setdma() {
-    // For port dispatch: assembly copies BC to HL before OUT
-    // For PC-based dispatch (legacy): BC = DMA address
-    dma_addr_ = skip_ret_ ? cpu_->regs.HL.get_pair16() : cpu_->regs.BC.get_pair16();
-    do_ret();
+    // Assembly copies BC to HL before OUT
+    dma_addr_ = cpu_->regs.HL.get_pair16();
 }
 
 void XIOS::do_read() {
@@ -197,7 +164,6 @@ void XIOS::do_read() {
 
     int result = DiskSystem::instance().read(mem_);
     cpu_->regs.AF.set_high(result);
-    do_ret();
 }
 
 void XIOS::do_write() {
@@ -207,26 +173,21 @@ void XIOS::do_write() {
 
     int result = DiskSystem::instance().write(mem_);
     cpu_->regs.AF.set_high(result);
-    do_ret();
 }
 
 void XIOS::do_sectran() {
-    // Sector translation
-    // For port dispatch: assembly copies BC to HL before OUT, DE = translation table
-    // For PC-based dispatch (legacy): BC = logical sector, DE = translation table
-    uint16_t logical = skip_ret_ ? cpu_->regs.HL.get_pair16() : cpu_->regs.BC.get_pair16();
+    // Assembly copies BC to HL before OUT, DE = translation table
+    uint16_t logical = cpu_->regs.HL.get_pair16();
     uint16_t xlat_table = cpu_->regs.DE.get_pair16();
 
     uint16_t physical = logical;  // Default: no translation
 
     // If translation table is provided, use it
     if (xlat_table != 0) {
-        // Table contains physical sector numbers for each logical sector
         physical = mem_->fetch_mem(xlat_table + logical);
     }
 
     cpu_->regs.HL.set_pair16(physical);
-    do_ret();
 }
 
 // Extended XIOS entries
@@ -243,7 +204,6 @@ void XIOS::do_selmemory() {
     }
 
     mem_->select_bank(bank);
-    do_ret();
 }
 
 void XIOS::do_polldevice() {
@@ -274,51 +234,36 @@ void XIOS::do_polldevice() {
     }
 
     cpu_->regs.AF.set_high(result);
-    do_ret();
 }
 
 void XIOS::do_startclock() {
     tick_enabled_.store(true);
-    do_ret();
 }
 
 void XIOS::do_stopclock() {
     tick_enabled_.store(false);
-    do_ret();
 }
 
 void XIOS::do_exitregion() {
     // Exit mutual exclusion region
     // NOTE: Do NOT enable interrupts here - the Z80 EXITRGN code handles it
-    // It checks PREEMP flag and only does EI if not preempted
-    do_ret();
 }
 
 void XIOS::do_maxconsole() {
     uint8_t num_consoles = mem_->read_common(0xFF01);
     cpu_->regs.AF.set_high(num_consoles);
-    do_ret();
 }
 
 void XIOS::do_systeminit() {
-    // C = breakpoint RST number
-    // DE = breakpoint handler address
-    // HL = XIOS direct jump table address
-    //
-    // The real XIOS SYSINIT only sets up RST 38H interrupt vector and initializes
-    // hardware. It does NOT patch other banks - that's done by MP/M's process
-    // initialization code. See RESXIOS.ASM lines 583-585.
-
     // Initialize consoles
     ConsoleManager::instance().init();
 
     // Enable timer interrupts
     tick_enabled_.store(true);
-    do_ret();
 }
 
 void XIOS::do_idle() {
-    do_ret();
+    // Idle - nothing to do
 }
 
 // Commonbase entries - called by XDOS/BNKBDOS for bank switching and dispatch
@@ -329,51 +274,37 @@ void XIOS::do_swtuser() {
         uint8_t bank = mem_->fetch_mem(desc_addr + 3);
         mem_->select_bank(bank);
     }
-    do_ret();
 }
 
 void XIOS::do_swtsys() {
     mem_->select_bank(0);
-    do_ret();
 }
 
 void XIOS::do_pdisp() {
     // Process dispatcher entry point - called at end of interrupt handler
-    // The Z80 code does EI then JP PDISP, but EI's effect is delayed
-    // Re-enable interrupts here to ensure they stay enabled
+    // Re-enable interrupts to ensure they stay enabled
     cpu_->regs.IFF1 = 1;
     cpu_->regs.IFF2 = 1;
-    do_ret();
 }
 
 void XIOS::do_xdosent() {
-    // XDOS entry point
-    do_ret();
+    // XDOS entry point - nothing to do
 }
 
 void XIOS::do_sysdat() {
     // Return pointer to system data area (SYSDAT) in HL
-    // SYSDAT is at FF00H
     cpu_->regs.HL.set_pair16(0xFF00);
-    do_ret();
 }
 
 void XIOS::do_boot() {
-    // For MP/M II, COLDBOOT (offset 0) returns HL = address of commonbase
-    // The commonbase structure is in XIOSJMP (at FC00H)
+    // COLDBOOT returns HL = address of commonbase (FC4B)
     uint16_t xiosjmp_addr = 0xFC00;
-
-    // Commonbase structure starts at offset 0x4B in XIOSJMP
-    uint16_t commonbase = xiosjmp_addr + XIOS_COMMONBASE;  // FC00+4B = FC4B
-
+    uint16_t commonbase = xiosjmp_addr + XIOS_COMMONBASE;
     cpu_->regs.HL.set_pair16(commonbase);
-    do_ret();
 }
 
 void XIOS::do_wboot() {
-    // Warm boot - terminate current process
-    // In MP/M, this goes back to TMP
-    do_ret();
+    // Warm boot - nothing to do, Z80 code handles return to TMP
 }
 
 void XIOS::tick() {
