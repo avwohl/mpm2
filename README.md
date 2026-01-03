@@ -7,13 +7,14 @@ A Z80-based MP/M II emulator with SSH terminal access. Multiple users can connec
 ## Quick Start
 
 ```bash
-# After setting up dependencies (see below)
+# Build everything
 ./scripts/build_all.sh
 
-# Run with direct MPM.SYS loading (recommended)
-./build/mpm2_emu -l -s disks/mpm.sys -d A:disks/mpm2_system.img
+# Run with local console
+./build/mpm2_emu -l -d A:disks/mpm2_system.img
 
-# Connect from another terminal (if SSH enabled)
+# Or run with SSH access (connect from another terminal)
+./build/mpm2_emu -d A:disks/mpm2_system.img
 ssh -p 2222 user@localhost
 ```
 
@@ -61,26 +62,17 @@ sudo apt install libssh-dev
 
 ## Building
 
-### Full Build (Recommended)
-
 ```bash
 cd mpm2
 ./scripts/build_all.sh
 ```
 
 This runs three steps:
-1. **build_asm.sh** - Assembles LDRBIOS and BNKXIOS, builds C++ emulator
-2. **build_hd1k.sh** - Creates 8MB disk image with MP/M II files
-3. **gensys.sh** - Runs GENSYS to create MPM.SYS (4 consoles, 4 memory banks)
+1. **build_hd1k.sh** - Creates 8MB disk image with MP/M II files
+2. **build_asm.sh** - Assembles LDRBIOS and BNKXIOS, builds C++ emulator, writes boot sector
+3. **gensys.sh** - Runs GENSYS to create MPM.SYS (4 consoles, 7 memory banks)
 
-### Manual Build Steps
-
-```bash
-# Build C++ emulator (auto-detects libssh if installed)
-mkdir build && cd build
-cmake ..
-make
-```
+Output: `disks/mpm2_system.img` - bootable disk with MP/M II
 
 ### Generate SSH Host Key
 
@@ -92,31 +84,31 @@ ssh-keygen -t rsa -b 2048 -m PEM -f keys/ssh_host_rsa_key -N ''
 ## Running
 
 ```bash
-./build/mpm2_emu [options]
+./build/mpm2_emu [options] -d A:diskimage
 
 Options:
+  -d, --disk A:FILE     Mount disk image (required)
+  -l, --local           Local console mode (output to stdout)
   -p, --port PORT       SSH listen port (default: 2222)
   -k, --key FILE        Host key file (default: keys/ssh_host_rsa_key)
-  -d, --disk A:FILE     Mount disk image on drive A-P
-  -b, --boot FILE       Boot image file (NOT WORKING - use -s instead)
-  -s, --sys FILE        Load MPM.SYS directly (recommended)
-  -l, --local           Enable local console output
-  -t, --timeout SECS    Boot timeout for debugging
+  -t, --timeout SECS    Timeout for debugging
   -h, --help            Show help
-
-Examples:
-  # Direct MPM.SYS load (recommended - the only working boot method)
-  ./build/mpm2_emu -l -s disks/mpm.sys -d A:disks/mpm2_system.img
-
-  # With SSH support (no -l flag)
-  ./build/mpm2_emu -s disks/mpm.sys -d A:disks/mpm2_system.img
 ```
 
-**Note:** Boot via MPMLDR (`-b` option) is not currently working. Use direct MPM.SYS loading (`-s` option) instead.
+The emulator boots from sector 0 of the disk mounted as drive A.
 
-Connect via SSH:
+### Examples
+
 ```bash
+# Local console - see output directly
+./build/mpm2_emu -l -d A:disks/mpm2_system.img
+
+# SSH mode - connect via ssh
+./build/mpm2_emu -d A:disks/mpm2_system.img
 ssh -p 2222 user@localhost
+
+# Custom SSH port
+./build/mpm2_emu -p 2223 -d A:disks/mpm2_system.img
 ```
 
 ## Project Structure
@@ -125,12 +117,13 @@ ssh -p 2222 user@localhost
 mpm2/
 ├── scripts/
 │   ├── build_all.sh      # Master build script
-│   ├── build_asm.sh      # Assemble Z80 code, build C++
-│   ├── build_hd1k.sh     # Create disk images
+│   ├── build_hd1k.sh     # Create disk image with MP/M II files
+│   ├── build_asm.sh      # Assemble Z80 code, build C++, write boot sector
 │   └── gensys.sh         # Generate MPM.SYS
 ├── asm/
-│   ├── ldrbios_hd1k.asm  # Loader BIOS for hd1k disks
-│   └── bnkxios_port.asm  # Banked XIOS (I/O port dispatch)
+│   ├── coldboot.asm      # Boot sector (loads MPMLDR + LDRBIOS)
+│   ├── ldrbios.asm       # Loader BIOS for boot phase
+│   └── bnkxios.asm       # Runtime XIOS (I/O port dispatch)
 ├── src/                  # C++ emulator source
 ├── include/              # C++ headers
 ├── build/                # CMake build directory (generated)
@@ -142,23 +135,28 @@ mpm2/
 
 MP/M II is Digital Research's multi-user, multi-tasking operating system for Z80. This emulator:
 
-1. Runs a Z80 CPU with 60Hz timer interrupts
-2. Provides banked memory (4 banks, 48KB user + 16KB common each)
-3. Emulates disk I/O via hd1k format images
-4. Exposes 4 consoles via SSH connections
+1. Boots from disk sector 0 (cold boot loader)
+2. Loads MPMLDR and LDRBIOS from reserved tracks
+3. MPMLDR loads MPM.SYS into high memory
+4. Provides 7 memory banks (48KB user + 16KB common each)
+5. Runs 60Hz timer interrupts for task switching
+6. Exposes 4 consoles via SSH connections
 
-The XIOS (Extended I/O System) uses I/O port traps - Z80 code does `OUT (0xE0), A` and the emulator intercepts to handle the function.
+The XIOS uses I/O port traps - Z80 code does `OUT (0xE0), A` and the emulator intercepts to handle disk, console, and system functions.
 
 ## Troubleshooting
 
 ### "MPM SYS ?" error on boot
-The disk needs a valid MPM.SYS matching the LDRBIOS disk format. Run `./scripts/gensys.sh` to regenerate.
+Run `./scripts/gensys.sh` to regenerate MPM.SYS with matching serial numbers.
 
 ### Build fails with "um80 not found"
 Install um80/ul80: `pip install -e path/to/um80_and_friends`
 
 ### SSH connection refused
 Ensure the emulator is running and check if port 2222 is available.
+
+### No output after boot
+Use `-l` flag for local console mode to see boot messages.
 
 ## License
 
