@@ -112,7 +112,7 @@ private:
     ConsoleManager() = default;
     std::array<std::unique_ptr<Console>, MAX_CONSOLES> consoles_;
     bool initialized_ = false;
-    int active_consoles_ = MAX_CONSOLES;  // Default to all, set from SYSDAT
+    int active_consoles_ = 4;  // Default to 4 consoles (typical MP/M II config)
 };
 
 #endif // CONSOLE_H

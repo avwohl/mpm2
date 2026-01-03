@@ -312,13 +312,10 @@ int main(int argc, char* argv[]) {
     }
 #ifdef HAVE_SSH
     else if (ssh_enabled) {
-        // SSH mode - run CPU while accepting connections
-        // Note: SSH accept_loop blocks, so we need a different approach
-        // For now, run CPU in polling mode with SSH accept in background
-        // TODO: Proper integration with SSH session threads
+        // SSH mode - poll SSH and CPU in single thread
         while (!g_shutdown_requested && !z80.timed_out()) {
+            ssh_server.poll();  // Check for new connections and session I/O
             if (!z80.run_polled()) break;
-            usleep(100);  // Brief yield for SSH
         }
     }
 #endif
