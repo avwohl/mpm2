@@ -153,6 +153,14 @@ bool Z80Runner::run_polled() {
 
         // Handle HALT
         if (cpu_->is_halted()) {
+            // Auto-start clock if CPU halts with interrupts enabled
+            // This means the system is waiting for a timer tick
+            static bool halt_auto_started = false;
+            if (!halt_auto_started && cpu_->regs.IFF1 && !xios_->clock_enabled()) {
+                xios_->start_clock();
+                halt_auto_started = true;
+            }
+
             if (cpu_->check_interrupts()) {
                 cpu_->clear_halted();
             } else {

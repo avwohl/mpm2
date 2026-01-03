@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Non-blocking, single-threaded SSH implementation using polling.
+// Uses OS-level non-blocking I/O (fcntl O_NONBLOCK) and ssh_event API.
 
 #ifndef SSH_SESSION_H
 #define SSH_SESSION_H
@@ -19,25 +20,41 @@ class Console;
 typedef struct ssh_session_struct* ssh_session;
 typedef struct ssh_bind_struct* ssh_bind;
 typedef struct ssh_channel_struct* ssh_channel;
+typedef struct ssh_event_struct* ssh_event;
+
+// Session state during handshake
+enum class SSHState {
+    KEY_EXCHANGE,
+    AUTHENTICATING,
+    CHANNEL_OPEN,
+    READY,
+    CLOSED
+};
 
 // SSH session - handles one SSH connection (non-blocking)
 class SSHSession {
 public:
-    SSHSession(int console_id, ssh_session session, ssh_channel channel);
+    SSHSession(ssh_session session);
     ~SSHSession();
 
-    // Poll for I/O - call from main loop
+    // Poll for handshake progress and I/O - call from main loop
     // Returns false when session should be removed
     bool poll();
 
-    bool is_active() const { return active_; }
+    bool is_active() const { return state_ != SSHState::CLOSED; }
+    bool is_ready() const { return state_ == SSHState::READY; }
     int console_id() const { return console_id_; }
 
 private:
-    int console_id_;
+    bool poll_handshake();
+    bool poll_io();
+
     ssh_session session_;
     ssh_channel channel_;
-    bool active_;
+    ssh_event event_;
+    SSHState state_;
+    int console_id_;
+    bool kex_done_;
     bool sent_banner_;
 };
 

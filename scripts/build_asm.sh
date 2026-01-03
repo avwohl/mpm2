@@ -187,15 +187,17 @@ cd "$PROJECT_DIR"
 # - MPMLDR.COM (the loader program)
 # The boot image places LDRBIOS at 0x1700 and MPMLDR at 0x0100
 
-MPMLDR="$PROJECT_DIR/mpm2_external/mpm2dist/MPMLDR.COM"
+# Prefer patched MPMLDR from gensys.sh (has matching serial number)
+MPMLDR="$DISKS_DIR/mpmldr.com"
 if [ ! -f "$MPMLDR" ]; then
-    # Try to extract from disk image
-    MPMLDR="$DISKS_DIR/mpmldr.com"
+    # Fall back to distribution version (may have wrong serial)
+    MPMLDR="$PROJECT_DIR/mpm2_external/mpm2dist/MPMLDR.COM"
     if [ ! -f "$MPMLDR" ]; then
         echo "  Extracting MPMLDR.COM from disk..."
         cpmcp -T raw -f wbw_hd1k "$DISKS_DIR/mpm2_hd1k.img" "0:mpmldr.com" "$MPMLDR" 2>/dev/null || true
     fi
 fi
+echo "  Using MPMLDR: $MPMLDR"
 
 # Boot image name based on disk format
 BOOT_IMAGE="$DISKS_DIR/mpm2boot_${DISK_FORMAT}.bin"
