@@ -52,6 +52,7 @@ FUNC_SWTSYS:    EQU     51H
 FUNC_PDISP:     EQU     54H
 FUNC_XDOSENT:   EQU     57H
 FUNC_SYSDAT:    EQU     5AH
+FUNC_SETPREEMP: EQU     5DH     ; Set preempted flag (A=1 enter, A=0 exit)
 
 ; XDOS function codes
 POLL:           EQU     131     ; XDOS poll function
@@ -90,7 +91,7 @@ WBOOT:  JP      DO_WBOOT        ; 03h - Warm start
         JP      DO_EXITRGN      ; 3Fh - Exit region
         JP      DO_MAXCON       ; 42h - Max console
         JP      DO_SYSINIT      ; 45h - System init
-        JP      DO_IDLE         ; 48h - Idle procedure
+        DB      0,0,0           ; 48h - Idle (patched by GENSYS)
 
 ; =============================================================================
 ; Commonbase structure - patched by GENSYS, used by XDOS/BNKBDOS
@@ -137,22 +138,20 @@ DO_CONST:
 DO_CONIN:
         ; Console input - D = console number
         ; Returns A = character
-        ; Match SIMH: call XDOS poll, no PUSH/POP, then read
-        ; Stash console in IXL via A to avoid stack usage
-        ; Use raw opcodes since um80 doesn't support IXL/IXH
+        ; Poll for input ready before reading
+        LD      H, D            ; H = console (save for later)
+        PUSH    HL              ; Save on stack
 
         LD      A, D            ; A = console
-        DB      0DDH, 06FH      ; LD IXL, A (undocumented)
-
         ADD     A, A            ; A = 2*console
-        INC     A               ; A = 2*console + 1
+        INC     A               ; A = 2*console + 1 (input device)
         LD      E, A            ; E = device number
         LD      D, 0            ; D = 0 for simple poll
         LD      C, POLL
         CALL    XDOS            ; Wait for input ready
 
-        DB      0DDH, 07DH      ; LD A, IXL (undocumented)
-        LD      D, A
+        POP     HL              ; Restore saved value
+        LD      D, H            ; D = console
 
         LD      A, FUNC_CONIN
         OUT     (XIOS_DISPATCH), A
@@ -161,25 +160,22 @@ DO_CONIN:
 
 DO_CONOUT:
         ; Console output - D = console number, C = character
-        ; Poll output device before writing to avoid queue overflow
-        ; Save C (character) in IXL, D (console) in IXH
-        LD      A, C
-        DB      0DDH, 06FH      ; LD IXL, A (save character)
-        LD      A, D
-        DB      0DDH, 067H      ; LD IXH, A (save console)
+        ; Poll for output ready before sending (flow control)
+        ; Save console in H, character in L
+        LD      H, D            ; H = console
+        LD      L, C            ; L = character
+        PUSH    HL              ; Save both
 
-        ; Calculate output device = 2*console (even = output)
-        ADD     A, A            ; A = 2*console
-        LD      E, A            ; E = output device number
+        LD      A, D            ; A = console
+        ADD     A, A            ; A = 2*console (output device)
+        LD      E, A            ; E = device number
         LD      D, 0            ; D = 0 for simple poll
         LD      C, POLL
         CALL    XDOS            ; Wait for output ready
 
-        ; Restore console and character
-        DB      0DDH, 07CH      ; LD A, IXH (restore console)
-        LD      D, A
-        DB      0DDH, 07DH      ; LD A, IXL (restore character)
-        LD      C, A
+        POP     HL              ; Restore saved values
+        LD      D, H            ; D = console
+        LD      C, L            ; C = character
 
         LD      A, FUNC_CONOUT
         OUT     (XIOS_DISPATCH), A
@@ -367,13 +363,6 @@ DO_SYSINIT:
         EI
         RET
 
-DO_IDLE:
-        ; Idle procedure - called when no process is ready
-        ; Enable interrupts and wait for the next tick
-        EI
-        HALT                    ; Wait for interrupt
-        RET
-
 DO_SWTUSER:
         ; Switch to user bank
         LD      A, FUNC_SWTUSER
@@ -415,7 +404,7 @@ INTHND:
         PUSH    DE
         PUSH    HL
 
-        ; Set preempted flag
+        ; Set preempted flag in memory
         LD      A, 0FFH
         LD      (PREEMP), A
 
@@ -440,16 +429,14 @@ NOTICK:
         JR      NZ, NOTSEC
 
         ; Reset counter and set flag #2 (1 second flag)
-        ; Note: Load constant from memory because GENSYS incorrectly
-        ; relocates immediate values that look like page numbers (0x3C = 60)
-        LD      A, (CONST60)
+        LD      A, 60
         LD      (HL), A
         LD      C, FLAGSET
         LD      E, 2
         CALL    XDOS
 
 NOTSEC:
-        ; Clear preempted flag
+        ; Clear preempted flag in memory
         XOR     A
         LD      (PREEMP), A
 
@@ -461,9 +448,9 @@ NOTSEC:
         ; Restore original SP before dispatching
         LD      SP, (SAVED_SP)
 
-        ; Note: Do NOT enable interrupts here
-        ; The dispatcher enables them when resuming a process
-        JP      PDISP           ; Dispatch to next ready process
+        ; Jump to dispatcher (PDISP is patched by GENSYS to XDOS+3)
+        ; XDOS dispatcher will enable interrupts when appropriate
+        JP      PDISP
 
 ; =============================================================================
 ; Data area
@@ -472,7 +459,6 @@ NOTSEC:
 TICKN:  DB      0               ; Tick enable flag
 CNT60:  DB      60              ; 60 Hz counter (for 1-second flag)
 PREEMP: DB      0               ; Preempted flag
-CONST60: DB     60              ; Constant 60 for resetting CNT60
 
 ; Interrupt stack (prevents corruption of SYSDAT if interrupted SP is near 0xFFFF)
 SAVED_SP: DW    0               ; Saved SP from interrupted code

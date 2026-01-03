@@ -21,11 +21,23 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
     , dma_addr_(0x0080)
     , dma_bank_(0)
     , tick_enabled_(false)
-    , preempted_(false)
 {
 }
 
 void XIOS::handle_port_dispatch(uint8_t func) {
+    // Debug: trace all XIOS calls after SSH connects
+    {
+        static bool ssh_connected = false;
+        Console* con3 = ConsoleManager::instance().get(3);
+        if (con3 && con3->input_queue().available() > 0) ssh_connected = true;
+        if (ssh_connected) {
+            static int count = 0;
+            if (++count <= 30) {
+                std::cerr << "[XIOS] func=" << (int)func << "\n";
+            }
+        }
+    }
+
     switch (func) {
         case XIOS_BOOT:      do_boot(); break;
         case XIOS_WBOOT:     do_wboot(); break;
@@ -58,6 +70,7 @@ void XIOS::handle_port_dispatch(uint8_t func) {
         case XIOS_PDISP:      do_pdisp(); break;
         case XIOS_XDOSENT:    do_xdosent(); break;
         case XIOS_SYSDAT:     do_sysdat(); break;
+        case XIOS_SETPREEMP:  do_setpreemp(); break;
 
         default:
             // Log unknown functions with PC for debugging
@@ -83,6 +96,19 @@ void XIOS::do_const() {
 
     Console* con = ConsoleManager::instance().get(console);
     uint8_t status = con ? con->const_status() : 0x00;
+
+    // Debug: log CONST calls
+    {
+        static bool ssh_connected = false;
+        Console* con3 = ConsoleManager::instance().get(3);
+        if (con3 && con3->input_queue().available() > 0) ssh_connected = true;
+        if (ssh_connected) {
+            static int count = 0;
+            if (++count <= 20) {
+                std::cerr << "[CONST] con=" << (int)console << " status=" << (int)status << "\n";
+            }
+        }
+    }
 
     cpu_->regs.AF.set_high(status);
 }
@@ -222,6 +248,19 @@ void XIOS::do_polldevice() {
     uint8_t device = cpu_->regs.BC.get_low();
     uint8_t result = 0x00;
 
+    // Debug: trace ALL polldevice calls after SSH connects
+    {
+        static bool ssh_connected = false;
+        Console* con3 = ConsoleManager::instance().get(3);
+        if (con3 && con3->input_queue().available() > 0) ssh_connected = true;
+        if (ssh_connected) {
+            static int count = 0;
+            if (++count <= 20) {
+                std::cerr << "[POLLDEV] device=" << (int)device << "\n";
+            }
+        }
+    }
+
     if (device < 16) {
         int console = device / 2;
         bool is_input = (device & 1) != 0;
@@ -229,8 +268,21 @@ void XIOS::do_polldevice() {
         if (console < 8) {
             Console* con = ConsoleManager::instance().get(console);
             if (is_input) {
-                if (con && con->const_status()) {
+                uint8_t status = con ? con->const_status() : 0;
+                if (status) {
                     result = 0xFF;
+                }
+                // Debug: trace polls for console 3 input
+                if (console == 3) {
+                    static bool log_all = false;
+                    int avail = con ? con->input_queue().available() : -1;
+                    if (avail > 0) log_all = true;
+                    if (log_all) {
+                        static int count = 0;
+                        if (++count <= 10) {
+                            std::cerr << "[POLL] dev=7 con=3 status=" << (int)status << " avail=" << avail << "\n";
+                        }
+                    }
                 }
             } else {
                 // Console output - ready if queue has space OR console not connected
@@ -240,6 +292,12 @@ void XIOS::do_polldevice() {
                 bool full = con && con->output_queue().full();
                 if (!con || !connected || !full) {
                     result = 0xFF;
+                }
+                // Debug: only trace when NOT ready (potential blocking)
+                if (result == 0x00) {
+                    std::cerr << "[POLL OUT] dev=" << (int)device << " con=" << console
+                              << " connected=" << connected << " full=" << full
+                              << " -> NOT_READY\n";
                 }
             }
         }
@@ -257,8 +315,7 @@ void XIOS::do_stopclock() {
 }
 
 void XIOS::do_exitregion() {
-    // Exit mutual exclusion region
-    // NOTE: Do NOT enable interrupts here - the Z80 EXITRGN code handles it
+    // Assembly handles everything - this is just a no-op for tracing
 }
 
 void XIOS::do_maxconsole() {
@@ -267,6 +324,7 @@ void XIOS::do_maxconsole() {
 }
 
 void XIOS::do_systeminit() {
+    std::cerr << "[XIOS] SYSTEMINIT called, IFF1=" << (int)cpu_->regs.IFF1 << "\n";
     // Initialize consoles
     ConsoleManager::instance().init();
 
@@ -275,7 +333,11 @@ void XIOS::do_systeminit() {
 }
 
 void XIOS::do_idle() {
-    // Idle - nothing to do
+    // Idle procedure - enable interrupts and wait
+    static int count = 0;
+    if (++count <= 5) {
+        std::cerr << "[IDLE] called, IFF1=" << (int)cpu_->regs.IFF1 << "\n";
+    }
 }
 
 // Commonbase entries - called by XDOS/BNKBDOS for bank switching and dispatch
@@ -293,10 +355,7 @@ void XIOS::do_swtsys() {
 }
 
 void XIOS::do_pdisp() {
-    // Process dispatcher entry point - called at end of interrupt handler
-    // Re-enable interrupts to ensure they stay enabled
-    cpu_->regs.IFF1 = 1;
-    cpu_->regs.IFF2 = 1;
+    // Process dispatcher - assembly/XDOS handles everything
 }
 
 void XIOS::do_xdosent() {
@@ -306,6 +365,10 @@ void XIOS::do_xdosent() {
 void XIOS::do_sysdat() {
     // Return pointer to system data area (SYSDAT) in HL
     cpu_->regs.HL.set_pair16(0xFF00);
+}
+
+void XIOS::do_setpreemp() {
+    // Preempted flag is handled entirely in assembly - no C++ tracking needed
 }
 
 void XIOS::do_boot() {

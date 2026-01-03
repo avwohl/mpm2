@@ -213,9 +213,13 @@ bool SSHSession::poll_io() {
     char buf[256];
     int n = ssh_channel_read_nonblocking(channel_, buf, sizeof(buf), 0);
     if (n > 0) {
+        std::cerr << "[SSH IN] Got " << n << " bytes: ";
         for (int i = 0; i < n; i++) {
-            con->input_queue().try_write(static_cast<uint8_t>(buf[i]));
+            uint8_t ch = static_cast<uint8_t>(buf[i]);
+            std::cerr << "0x" << std::hex << (int)ch << std::dec << " ";
+            con->input_queue().try_write(ch);
         }
+        std::cerr << "\n";
     } else if (n == SSH_ERROR) {
         state_ = SSHState::CLOSED;
         return false;

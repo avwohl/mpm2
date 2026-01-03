@@ -50,6 +50,7 @@ constexpr uint8_t XIOS_SWTSYS      = 0x51;  // Switch to system bank
 constexpr uint8_t XIOS_PDISP       = 0x54;  // Process dispatcher
 constexpr uint8_t XIOS_XDOSENT     = 0x57;  // XDOS entry
 constexpr uint8_t XIOS_SYSDAT      = 0x5A;  // System data pointer (2-byte DW)
+constexpr uint8_t XIOS_SETPREEMP   = 0x5D;  // Set preempted flag (C=value)
 
 // MP/M II flags (set by interrupt handlers)
 constexpr uint8_t FLAG_TICK     = 1;   // System tick (16.67ms)
@@ -80,10 +81,6 @@ public:
     // Clock control (STARTCLOCK/STOPCLOCK)
     bool clock_enabled() const { return tick_enabled_.load(); }
     void start_clock() { tick_enabled_.store(true); }
-
-    // PREEMPT flag for interrupt handling
-    bool is_preempted() const { return preempted_.load(); }
-    void set_preempted(bool p) { preempted_.store(p); }
 
     // Update DMA target bank (called when bank switching via port 0xE1)
     void update_dma_bank(uint8_t bank) { if (bank != 0) dma_bank_ = bank; }
@@ -124,6 +121,7 @@ private:
     void do_pdisp();     // Process dispatcher
     void do_xdosent();   // XDOS entry point
     void do_sysdat();    // System data pointer
+    void do_setpreemp(); // Set preempted flag
 
     qkz80* cpu_;
     BankedMemory* mem_;
@@ -138,7 +136,6 @@ private:
 
     // Clock control
     std::atomic<bool> tick_enabled_;
-    std::atomic<bool> preempted_;
 };
 
 #endif // XIOS_H
