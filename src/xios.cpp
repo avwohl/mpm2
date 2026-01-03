@@ -115,13 +115,6 @@ void XIOS::do_conout() {
     if (console >= 8) console = 0;  // Workaround: invalid console -> default to 0
     uint8_t ch = cpu_->regs.BC.get_low();        // C = character
 
-    static int conout_count = 0;
-    if (++conout_count <= 50) {
-        std::cerr << "[CONOUT] con=" << (int)console << " ch=0x" << std::hex << (int)ch << std::dec;
-        if (ch >= 0x20 && ch < 0x7f) std::cerr << " '" << (char)ch << "'";
-        std::cerr << "\n";
-    }
-
     Console* con = ConsoleManager::instance().get(console);
     if (con) {
         con->write_char(ch);

@@ -131,15 +131,9 @@ bool Z80Runner::run_polled() {
 
             // Request tick interrupt if clock is enabled
             if (xios_->clock_enabled()) {
-                static uint64_t last_int_cycles = 0;
-                constexpr uint64_t MIN_CYCLES_BETWEEN_INTERRUPTS = 66667;
-
-                uint64_t current_cycles = cpu_->cycles;
-                uint64_t cycles_since_last = current_cycles - last_int_cycles;
-
-                if (cpu_->regs.IFF1 && cycles_since_last >= MIN_CYCLES_BETWEEN_INTERRUPTS) {
+                // Generate interrupt if interrupts are enabled
+                if (cpu_->regs.IFF1) {
                     cpu_->request_rst(7);  // RST 38H
-                    last_int_cycles = current_cycles;
                 }
                 xios_->tick();
             }
@@ -154,7 +148,6 @@ bool Z80Runner::run_polled() {
         // Handle HALT
         if (cpu_->is_halted()) {
             // Auto-start clock if CPU halts with interrupts enabled
-            // This means the system is waiting for a timer tick
             static bool halt_auto_started = false;
             if (!halt_auto_started && cpu_->regs.IFF1 && !xios_->clock_enabled()) {
                 xios_->start_clock();
