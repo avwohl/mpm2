@@ -10,6 +10,8 @@
 #include <array>
 
 // Maximum number of consoles supported
+// This is the emulator's capacity. Active console count (from MP/M SYSDAT)
+// is tracked separately in ConsoleManager::active_consoles_
 constexpr int MAX_CONSOLES = 8;
 
 // Console state for one terminal

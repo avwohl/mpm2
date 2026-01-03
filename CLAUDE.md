@@ -174,8 +174,9 @@ This script:
 1. Starts the emulator on a test port (2223)
 2. Connects via SSH using expect
 3. Waits for the MP/M II banner and prompt
-4. Sends a `dir` command and verifies output
-5. Reports pass/fail status
+4. Sends a `stat` command (not `dir` since `dir` runs automatically from startup batch)
+5. Verifies response contains disk space info
+6. Reports pass/fail status
 
 **Expected output:**
 ```
@@ -183,8 +184,8 @@ This script:
 ...
 >>> OUTPUT TEST: Got MP/M II banner
 >>> OUTPUT TEST: Got command prompt
->>> INPUT TEST: Sending 'dir' command
->>> INPUT TEST: Got response to dir command
+>>> INPUT TEST: Sending 'stat' command
+>>> INPUT TEST: Got stat response showing disk space
 >>> SUCCESS: Both input and output working!
 === TEST PASSED ===
 ```

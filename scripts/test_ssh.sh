@@ -89,17 +89,17 @@ expect {
     }
 }
 
-# Send a command
-puts ">>> INPUT TEST: Sending 'dir' command"
-send "dir\r"
+# Send a command (use 'stat' not 'dir' since dir is in startup batch)
+puts ">>> INPUT TEST: Sending 'stat' command"
+send "stat\r"
 
-# Wait for directory output or prompt return
+# Wait for stat output (disk space info)
 expect {
-    -re "A:|Directory|No File|\[0-9\]A>" {
-        puts ">>> INPUT TEST: Got response to dir command"
+    -re "Space:" {
+        puts ">>> INPUT TEST: Got stat response showing disk space"
     }
     timeout {
-        puts ">>> INPUT TEST FAILED: No response to dir command"
+        puts ">>> INPUT TEST FAILED: No response to stat command"
         exit 1
     }
 }

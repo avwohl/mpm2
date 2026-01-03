@@ -78,6 +78,7 @@ void XIOS::do_const() {
 
     Console* con = ConsoleManager::instance().get(console);
     uint8_t status = con ? con->const_status() : 0x00;
+
     cpu_->regs.AF.set_high(status);
 }
 
