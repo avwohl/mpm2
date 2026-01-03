@@ -200,12 +200,20 @@ bool SSHSession::poll_io() {
 
     // Write from console output queue -> SSH
     int ch;
+    int write_count = 0;
     while ((ch = con->output_queue().try_read()) >= 0) {
         char c = static_cast<char>(ch);
         if (ssh_channel_write(channel_, &c, 1) < 0) {
             state_ = SSHState::CLOSED;
             return false;
         }
+        write_count++;
+    }
+    static int poll_count = 0;
+    if (++poll_count % 1000 == 0 || write_count > 0) {
+        std::cerr << "[SSH] poll#" << poll_count << " con=" << console_id_
+                  << " out_avail=" << con->output_queue().available()
+                  << " wrote=" << write_count << "\n";
     }
 
     return true;
