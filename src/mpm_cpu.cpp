@@ -8,11 +8,6 @@
 #include <iostream>
 #include <iomanip>
 
-// Track POLLDEVICE for console 7 input (device 15)
-// These are not static so they can be accessed from xios.cpp
-int last_polldevice_device = -1;
-bool last_polldevice_ready = false;  // Set when device 15 returns ready
-
 MpmCpu::MpmCpu(qkz80_cpu_mem* memory)
     : qkz80(memory)
 {
@@ -79,13 +74,6 @@ void MpmCpu::handle_xios_dispatch() {
     // Save the result for IN A, (port) to read later
     // The XIOS handler sets the result in A register via set_high()
     last_xios_result_ = regs.AF.get_high();
-
-    // Track POLLDEVICE state for debugging
-    if (func == 0x36) {  // POLLDEVICE
-        uint8_t device = regs.BC.get_low();
-        last_polldevice_device = device;
-        last_polldevice_ready = (last_xios_result_ == 0xFF);
-    }
 }
 
 void MpmCpu::handle_bank_select(uint8_t bank) {
@@ -109,21 +97,7 @@ void MpmCpu::halt(void) {
 }
 
 void MpmCpu::execute(void) {
-    // Debug: trace execution at key addresses during boot
-    static int trace_count = 0;
-    uint16_t pc = regs.PC.get_pair16();
-    // Trace MPMLDR entry and BIOS calls (0x1700-0x173F)
-    if (trace_count < 30) {
-        if (pc == 0x0100 || pc == 0x0322 || (pc >= 0x1700 && pc < 0x1740)) {
-            std::cerr << "[EXEC] PC=0x" << std::hex << pc;
-            // Dump bytes at PC
-            std::cerr << " [" << std::setfill('0') << std::setw(2) << (int)mem->fetch_mem(pc)
-                      << " " << std::setw(2) << (int)mem->fetch_mem(pc+1)
-                      << " " << std::setw(2) << (int)mem->fetch_mem(pc+2) << "]";
-            std::cerr << std::dec << "\n";
-            trace_count++;
-        }
-    }
+    // Debug disabled for cleaner boot output
     qkz80::execute();
 }
 

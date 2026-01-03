@@ -1,6 +1,9 @@
 // ssh_session_libssh.cpp - Non-blocking SSH using libssh
 // Part of MP/M II Emulator
 // SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Uses OS-level non-blocking I/O (fcntl O_NONBLOCK) on all file descriptors.
+// No libssh blocking mode calls - pure non-blocking via fcntl and ssh_event.
 
 #ifdef HAVE_LIBSSH
 
@@ -8,25 +11,51 @@
 #include "console.h"
 #include <libssh/libssh.h>
 #include <libssh/server.h>
+#include <libssh/callbacks.h>
 #include <iostream>
 #include <cstring>
+#include <unistd.h>
+#include <fcntl.h>
+
+// Set fd to non-blocking at OS level
+static bool set_nonblocking(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags == -1) return false;
+    return fcntl(fd, F_SETFL, flags | O_NONBLOCK) != -1;
+}
 
 // ============================================================================
 // SSHSession - handles one connection with non-blocking I/O
 // ============================================================================
 
-SSHSession::SSHSession(int console_id, ssh_session session, ssh_channel channel)
-    : console_id_(console_id)
-    , session_(session)
-    , channel_(channel)
-    , active_(true)
+SSHSession::SSHSession(ssh_session session)
+    : session_(session)
+    , channel_(nullptr)
+    , event_(nullptr)
+    , state_(SSHState::KEY_EXCHANGE)
+    , console_id_(-1)
+    , kex_done_(false)
     , sent_banner_(false)
 {
-    // Set channel to non-blocking
-    ssh_channel_set_blocking(channel_, 0);
+    // Create event context (don't add session until after KEX)
+    event_ = ssh_event_new();
 }
 
 SSHSession::~SSHSession() {
+    // Release console
+    if (console_id_ >= 0) {
+        Console* con = ConsoleManager::instance().get(console_id_);
+        if (con) {
+            con->set_connected(false);
+        }
+    }
+
+    if (event_) {
+        if (session_ && kex_done_) {
+            ssh_event_remove_session(event_, session_);
+        }
+        ssh_event_free(event_);
+    }
     if (channel_) {
         ssh_channel_close(channel_);
         ssh_channel_free(channel_);
@@ -35,30 +64,121 @@ SSHSession::~SSHSession() {
         ssh_disconnect(session_);
         ssh_free(session_);
     }
-
-    // Mark console as disconnected
-    Console* con = ConsoleManager::instance().get(console_id_);
-    if (con) {
-        con->set_connected(false);
-    }
 }
 
 bool SSHSession::poll() {
-    if (!active_) return false;
+    if (state_ == SSHState::CLOSED) return false;
+
+    // Poll events if kex done
+    if (kex_done_ && event_) {
+        int rc = ssh_event_dopoll(event_, 0);  // 0 = don't block
+        if (rc == SSH_ERROR) {
+            state_ = SSHState::CLOSED;
+            return false;
+        }
+    }
+
+    if (state_ == SSHState::READY) {
+        return poll_io();
+    } else {
+        return poll_handshake();
+    }
+}
+
+bool SSHSession::poll_handshake() {
+    switch (state_) {
+        case SSHState::KEY_EXCHANGE: {
+            int rc = ssh_handle_key_exchange(session_);
+            if (rc == SSH_OK) {
+                kex_done_ = true;
+                // Now safe to add to event
+                if (event_) {
+                    ssh_event_add_session(event_, session_);
+                }
+                state_ = SSHState::AUTHENTICATING;
+            } else if (rc == SSH_ERROR) {
+                std::cerr << "[SSH] Key exchange failed: " << ssh_get_error(session_) << "\n";
+                state_ = SSHState::CLOSED;
+                return false;
+            }
+            // SSH_AGAIN means still in progress
+            break;
+        }
+
+        case SSHState::AUTHENTICATING:
+        case SSHState::CHANNEL_OPEN: {
+            ssh_message msg = ssh_message_get(session_);
+            if (msg) {
+                int type = ssh_message_type(msg);
+                int subtype = ssh_message_subtype(msg);
+
+                if (type == SSH_REQUEST_AUTH) {
+                    // Accept any authentication
+                    ssh_message_auth_reply_success(msg, 0);
+                    state_ = SSHState::CHANNEL_OPEN;
+                } else if (type == SSH_REQUEST_CHANNEL_OPEN) {
+                    if (subtype == SSH_CHANNEL_SESSION) {
+                        channel_ = ssh_message_channel_request_open_reply_accept(msg);
+                    } else {
+                        ssh_message_reply_default(msg);
+                    }
+                } else if (type == SSH_REQUEST_CHANNEL && channel_) {
+                    if (subtype == SSH_CHANNEL_REQUEST_PTY) {
+                        ssh_message_channel_request_reply_success(msg);
+                    } else if (subtype == SSH_CHANNEL_REQUEST_SHELL) {
+                        ssh_message_channel_request_reply_success(msg);
+
+                        // Find a free console
+                        Console* con = ConsoleManager::instance().find_free();
+                        if (!con) {
+                            std::cerr << "[SSH] No free console\n";
+                            state_ = SSHState::CLOSED;
+                            ssh_message_free(msg);
+                            return false;
+                        }
+
+                        console_id_ = con->id();
+                        con->set_connected(true);
+                        state_ = SSHState::READY;
+
+                        std::cerr << "[SSH] New connection on console " << console_id_ << "\n";
+                    } else {
+                        ssh_message_reply_default(msg);
+                    }
+                } else {
+                    ssh_message_reply_default(msg);
+                }
+                ssh_message_free(msg);
+            }
+            break;
+        }
+
+        default:
+            break;
+    }
+
+    return state_ != SSHState::CLOSED;
+}
+
+bool SSHSession::poll_io() {
+    if (!channel_) {
+        state_ = SSHState::CLOSED;
+        return false;
+    }
 
     // Check if channel is still open
     if (ssh_channel_is_closed(channel_) || ssh_channel_is_eof(channel_)) {
-        active_ = false;
+        state_ = SSHState::CLOSED;
         return false;
     }
 
     Console* con = ConsoleManager::instance().get(console_id_);
     if (!con) {
-        active_ = false;
+        state_ = SSHState::CLOSED;
         return false;
     }
 
-    // Send banner on first poll
+    // Send banner on first I/O poll
     if (!sent_banner_) {
         char banner[64];
         snprintf(banner, sizeof(banner), "\r\nMP/M II Console %d\r\n\r\n", console_id_);
@@ -74,7 +194,7 @@ bool SSHSession::poll() {
             con->input_queue().try_write(static_cast<uint8_t>(buf[i]));
         }
     } else if (n == SSH_ERROR) {
-        active_ = false;
+        state_ = SSHState::CLOSED;
         return false;
     }
 
@@ -83,7 +203,7 @@ bool SSHSession::poll() {
     while ((ch = con->output_queue().try_read()) >= 0) {
         char c = static_cast<char>(ch);
         if (ssh_channel_write(channel_, &c, 1) < 0) {
-            active_ = false;
+            state_ = SSHState::CLOSED;
             return false;
         }
     }
@@ -139,8 +259,11 @@ bool SSHServer::listen(int port) {
         return false;
     }
 
-    // Set non-blocking mode
-    ssh_bind_set_blocking(sshbind_, 0);
+    // Set bind socket non-blocking at OS level
+    socket_t bind_fd = ssh_bind_get_fd(sshbind_);
+    if (bind_fd != SSH_INVALID_SOCKET) {
+        set_nonblocking(bind_fd);
+    }
 
     running_ = true;
     return true;
@@ -169,111 +292,20 @@ void SSHServer::poll_accept() {
     if (!session) return;
 
     int rc = ssh_bind_accept(sshbind_, session);
-    if (rc == SSH_ERROR) {
+    if (rc != SSH_OK) {
         // No connection waiting or error
         ssh_free(session);
         return;
     }
 
-    // Got a connection - handle key exchange (this may block briefly)
-    if (ssh_handle_key_exchange(session) != SSH_OK) {
-        std::cerr << "[SSH] Key exchange failed: " << ssh_get_error(session) << "\n";
-        ssh_disconnect(session);
-        ssh_free(session);
-        return;
+    // Got a connection - set fd non-blocking at OS level
+    socket_t fd = ssh_get_fd(session);
+    if (fd != SSH_INVALID_SOCKET) {
+        set_nonblocking(fd);
     }
 
-    // Handle authentication (accept any for now)
-    ssh_message message;
-    bool authenticated = false;
-    int auth_attempts = 0;
-
-    while (!authenticated && auth_attempts < 20) {
-        message = ssh_message_get(session);
-        if (!message) break;
-
-        if (ssh_message_type(message) == SSH_REQUEST_AUTH) {
-            // Accept any authentication
-            ssh_message_auth_reply_success(message, 0);
-            authenticated = true;
-        } else {
-            ssh_message_reply_default(message);
-        }
-        ssh_message_free(message);
-        auth_attempts++;
-    }
-
-    if (!authenticated) {
-        ssh_disconnect(session);
-        ssh_free(session);
-        return;
-    }
-
-    // Wait for channel open request
-    ssh_channel channel = nullptr;
-    bool shell_requested = false;
-    int channel_attempts = 0;
-
-    while (!shell_requested && channel_attempts < 50) {
-        message = ssh_message_get(session);
-        if (!message) {
-            channel_attempts++;
-            continue;
-        }
-
-        switch (ssh_message_type(message)) {
-        case SSH_REQUEST_CHANNEL_OPEN:
-            if (ssh_message_subtype(message) == SSH_CHANNEL_SESSION) {
-                channel = ssh_message_channel_request_open_reply_accept(message);
-            } else {
-                ssh_message_reply_default(message);
-            }
-            break;
-        case SSH_REQUEST_CHANNEL:
-            if (channel && (ssh_message_subtype(message) == SSH_CHANNEL_REQUEST_SHELL ||
-                           ssh_message_subtype(message) == SSH_CHANNEL_REQUEST_PTY)) {
-                ssh_message_channel_request_reply_success(message);
-                if (ssh_message_subtype(message) == SSH_CHANNEL_REQUEST_SHELL) {
-                    shell_requested = true;
-                }
-            } else {
-                ssh_message_reply_default(message);
-            }
-            break;
-        default:
-            ssh_message_reply_default(message);
-        }
-        ssh_message_free(message);
-        channel_attempts++;
-    }
-
-    if (!channel || !shell_requested) {
-        if (channel) {
-            ssh_channel_close(channel);
-            ssh_channel_free(channel);
-        }
-        ssh_disconnect(session);
-        ssh_free(session);
-        return;
-    }
-
-    // Find a free console
-    Console* con = ConsoleManager::instance().find_free();
-    if (!con) {
-        ssh_channel_close(channel);
-        ssh_channel_free(channel);
-        ssh_disconnect(session);
-        ssh_free(session);
-        return;
-    }
-
-    con->set_connected(true);
-
-    // Create session
-    auto ssh_session_obj = std::make_unique<SSHSession>(con->id(), session, channel);
-    sessions_.push_back(std::move(ssh_session_obj));
-
-    std::cerr << "[SSH] New connection on console " << con->id() << "\n";
+    // Create session object - handshake will proceed in poll()
+    sessions_.push_back(std::make_unique<SSHSession>(session));
 }
 
 void SSHServer::poll_sessions() {

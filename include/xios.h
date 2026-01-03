@@ -125,9 +125,6 @@ private:
     void do_xdosent();   // XDOS entry point
     void do_sysdat();    // System data pointer
 
-    // BDOS stub (for boot phase)
-    void do_bdos();
-
     // Simulate RET instruction
     void do_ret();
 
@@ -148,12 +145,6 @@ private:
 
     // Skip RET flag for I/O port dispatch
     bool skip_ret_ = false;
-
-    // BDOS file state (for boot phase file I/O)
-    uint16_t bdos_dma_ = 0x0080;  // BDOS DMA address
-    uint16_t bdos_fcb_ = 0;       // Current FCB address
-    int bdos_file_offset_ = 0;    // Current file offset in bytes
-    bool bdos_file_open_ = false; // File is open
 };
 
 #endif // XIOS_H
