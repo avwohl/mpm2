@@ -1,9 +1,9 @@
-// z80_thread.h - Z80 CPU emulation thread
+// z80_runner.h - Z80 CPU emulation runner
 // Part of MP/M II Emulator
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-#ifndef Z80_THREAD_H
-#define Z80_THREAD_H
+#ifndef Z80_RUNNER_H
+#define Z80_RUNNER_H
 
 #include <thread>
 #include <atomic>
@@ -15,14 +15,18 @@ class MpmCpu;
 class BankedMemory;
 class XIOS;
 
-// Z80 emulator thread - runs the CPU and handles timer interrupts
-class Z80Thread {
+// Z80 emulator runner - runs the CPU and handles timer interrupts
+class Z80Runner {
 public:
-    Z80Thread();
-    ~Z80Thread();
+    Z80Runner();
+    ~Z80Runner();
 
     // Initialize with memory and load boot code
     bool init(const std::string& boot_image);
+
+    // Boot from disk sector 0 (cold boot loader)
+    // Reads sector 0 from drive A into 0x0000 and starts execution there
+    bool boot_from_disk();
 
     // Load MPM.SYS directly (bypasses MPMLDR)
     // Returns true on success, sets entry_point to xdos_base*256
@@ -60,9 +64,6 @@ public:
 
 private:
     void thread_func();
-    void create_missing_tmps();  // Create TMPs for consoles that don't have one
-    void fix_uninitialized_tmps();  // Fix TMPs with invalid stack pointers
-    void fix_bad_process_descriptor(uint16_t addr);  // Fix a bad process descriptor
 
     std::unique_ptr<MpmCpu> cpu_;
     std::unique_ptr<BankedMemory> memory_;
@@ -88,6 +89,9 @@ private:
     // System configuration (from SYSDAT)
     int num_consoles_ = 8;   // Number of consoles (from SYSDAT offset 1)
     int num_mem_segs_ = 8;   // Number of memory segments (from SYSDAT offset 15)
+
+    // Debug addresses
+    uint16_t tickn_addr_ = 0;  // Address of TICKN flag in BNKXIOS
 };
 
-#endif // Z80_THREAD_H
+#endif // Z80_RUNNER_H

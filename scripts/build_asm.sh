@@ -71,13 +71,14 @@
 # ==============================================================================
 #
 # Source files (asm/):
-#   ldrbios.asm        - LDRBIOS for 8" SSSD floppy (ibm-3740 format)
-#                        NOTE: Only one LDRBIOS - used for all disk formats
-#   bnkxios.asm   - BNKXIOS using I/O port traps to emulator
+#   coldboot.asm       - Cold start loader (sector 0, loads MPMLDR+LDRBIOS)
+#   ldrbios.asm        - LDRBIOS for loader phase (loads at 0x1700)
+#   bnkxios.asm        - BNKXIOS using I/O port traps to emulator
 #
 # Binary outputs (asm/):
+#   coldboot.bin       - Cold start loader (512 bytes, sector 0)
 #   ldrbios.bin        - Assembled LDRBIOS (loads at 0x1700)
-#   BNKXIOS.SPR   - BNKXIOS as relocatable SPR file
+#   BNKXIOS.SPR        - BNKXIOS as relocatable SPR file
 #
 # Boot images (disks/):
 #   mpm2boot_<format>.bin - Boot image (LDRBIOS + MPMLDR)
@@ -129,16 +130,43 @@ rm -f *.rel *.spr *.SPR
 LDRBIOS="ldrbios"
 um80 -o "${LDRBIOS}.rel" "${LDRBIOS}.asm"
 # LDRBIOS loads at 0x1700, so link with that origin
-ul80 -p 1700 -o "${LDRBIOS}.bin" "${LDRBIOS}.rel" 
+ul80 -p 1700 -o "${LDRBIOS}.bin" "${LDRBIOS}.rel"
 
-echo "  Output: $ASM_DIR/${LDRBIOS}.bin"
-echo "  Emulator handles actual disk format via port dispatch"
+# Create stripped version for boot area (skip 0x1700 bytes of ORG padding)
+dd if="${LDRBIOS}.bin" of="${LDRBIOS}_boot.bin" bs=1 skip=$((0x1700)) 2>/dev/null
+LDRBIOS_CODE_SIZE=$(stat -f%z "${LDRBIOS}_boot.bin")
+echo "  Output: $ASM_DIR/${LDRBIOS}.bin (with ORG padding)"
+echo "  Output: $ASM_DIR/${LDRBIOS}_boot.bin ($LDRBIOS_CODE_SIZE bytes, for boot area at 0x1700)"
 echo ""
 
 # ------------------------------------------------------------------------------
-# Step 3: Assemble BNKXIOS
+# Step 3: Assemble cold boot loader
 # ------------------------------------------------------------------------------
-echo "Step 3: Assembling BNKXIOS..."
+echo "Step 3: Assembling cold boot loader..."
+cd "$ASM_DIR"
+
+COLDBOOT="coldboot"
+um80 -o "${COLDBOOT}.rel" "${COLDBOOT}.asm"
+# Cold boot loader runs at 0x0000 (loaded from sector 0)
+ul80 -p 0 -o "${COLDBOOT}.bin" "${COLDBOOT}.rel"
+
+# Pad to exactly 512 bytes (one physical sector)
+COLDBOOT_SIZE=$(stat -f%z "${COLDBOOT}.bin")
+if [ "$COLDBOOT_SIZE" -lt 512 ]; then
+    dd if=/dev/zero bs=1 count=$((512 - COLDBOOT_SIZE)) >> "${COLDBOOT}.bin" 2>/dev/null
+    echo "  Padded ${COLDBOOT}.bin to 512 bytes"
+elif [ "$COLDBOOT_SIZE" -gt 512 ]; then
+    echo "  ERROR: ${COLDBOOT}.bin is $COLDBOOT_SIZE bytes (max 512)"
+    exit 1
+fi
+
+echo "  Output: $ASM_DIR/${COLDBOOT}.bin (512 bytes)"
+echo ""
+
+# ------------------------------------------------------------------------------
+# Step 4: Assemble BNKXIOS
+# ------------------------------------------------------------------------------
+echo "Step 4: Assembling BNKXIOS..."
 cd "$ASM_DIR"
 
 BNKXIOS="bnkxios"
@@ -149,9 +177,9 @@ echo "  Output: $ASM_DIR/${BNKXIOS}.spr"
 echo ""
 
 # ------------------------------------------------------------------------------
-# Step 4: Create boot image
+# Step 5: Create boot image
 # ------------------------------------------------------------------------------
-echo "Step 4: Creating boot image..."
+echo "Step 5: Creating boot image..."
 cd "$PROJECT_DIR"
 
 # We need:
@@ -192,18 +220,67 @@ fi
 echo ""
 
 # ------------------------------------------------------------------------------
-# Step 5: Summary
+# Step 6: Write boot area to disk image
+# ------------------------------------------------------------------------------
+echo "Step 6: Writing boot area to disk..."
+
+CPM_DISK="$PROJECT_DIR/../cpmemu/util/cpm_disk.py"
+DISK_IMAGE="$DISKS_DIR/mpm2_hd1k.img"
+
+if [ -f "$DISK_IMAGE" ] && [ -f "$CPM_DISK" ]; then
+    # Boot area layout (512-byte physical sectors, 128-byte logical sectors):
+    #   Physical sector 0 (logical 0-3):     coldboot.bin
+    #   Physical sectors 1-12 (logical 4-51): MPMLDR.COM (~6KB)
+    #   Physical sectors 13-16 (logical 52-67): LDRBIOS (~2KB)
+
+    # Write cold boot loader to sector 0
+    "$CPM_DISK" write-boot "$DISK_IMAGE" "$ASM_DIR/${COLDBOOT}.bin" 0 1
+
+    # Write MPMLDR.COM to sectors 1-12
+    if [ -f "$MPMLDR" ]; then
+        "$CPM_DISK" write-boot "$DISK_IMAGE" "$MPMLDR" 1 12
+    elif [ -f "$DISKS_DIR/mpmldr.com" ]; then
+        "$CPM_DISK" write-boot "$DISK_IMAGE" "$DISKS_DIR/mpmldr.com" 1 12
+    else
+        echo "  WARNING: MPMLDR.COM not found, skipping"
+    fi
+
+    # Write LDRBIOS to sectors 13-16
+    "$CPM_DISK" write-boot "$DISK_IMAGE" "$ASM_DIR/${LDRBIOS}_boot.bin" 13 4
+
+    echo "  Boot area written to $DISK_IMAGE"
+else
+    if [ ! -f "$DISK_IMAGE" ]; then
+        echo "  Disk image not found: $DISK_IMAGE"
+        echo "  Run scripts/build_hd1k.sh first to create disk image"
+    fi
+    if [ ! -f "$CPM_DISK" ]; then
+        echo "  cpm_disk.py not found: $CPM_DISK"
+    fi
+fi
+echo ""
+
+# ------------------------------------------------------------------------------
+# Step 7: Summary
 # ------------------------------------------------------------------------------
 echo "=============================================="
 echo "Assembly Build Complete"
 echo "=============================================="
 echo ""
 echo "Files created:"
-echo "  LDRBIOS:     $ASM_DIR/${LDRBIOS}.bin"
+echo "  Cold boot:   $ASM_DIR/${COLDBOOT}.bin (512 bytes, sector 0)"
+echo "  LDRBIOS:     $ASM_DIR/${LDRBIOS}_boot.bin (for boot area, sectors 13+)"
 echo "  BNKXIOS:     $ASM_DIR/${BNKXIOS}.spr"
-echo "  Boot image:  $BOOT_IMAGE"
+echo "  Boot image:  $BOOT_IMAGE (legacy)"
 echo ""
-echo "Next steps (or run build_all.sh to do all):"
-echo "  1. scripts/build_hd1k.sh  - Create disk image"
-echo "  2. scripts/gensys.sh      - Generate MPM.SYS"
+if [ -f "$DISK_IMAGE" ]; then
+    echo "Boot area written to: $DISK_IMAGE"
+    echo ""
+    echo "To run:"
+    echo "  $BUILD_DIR/mpm2_emu -l -d A:$DISK_IMAGE"
+else
+    echo "Next steps (or run build_all.sh to do all):"
+    echo "  1. scripts/build_hd1k.sh  - Create disk image"
+    echo "  2. scripts/gensys.sh      - Generate MPM.SYS"
+fi
 echo ""
