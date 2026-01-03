@@ -154,13 +154,45 @@ Options:
 
 Examples:
   # Local console mode
-  ./mpm2_emu -l -d A:disks/mpm2_hd1k.img
+  ./mpm2_emu -l -d A:disks/mpm2_system.img
 
   # SSH mode (connect with ssh -p 2222 user@localhost)
-  ./mpm2_emu -d A:disks/mpm2_hd1k.img
+  ./mpm2_emu -d A:disks/mpm2_system.img
 ```
 
 The emulator boots from disk sector 0 of drive A using the cold start loader.
+
+## Testing SSH
+
+Use the test harness script to verify SSH input and output work correctly:
+
+```bash
+./scripts/test_ssh.sh
+```
+
+This script:
+1. Starts the emulator on a test port (2223)
+2. Connects via SSH using expect
+3. Waits for the MP/M II banner and prompt
+4. Sends a `dir` command and verifies output
+5. Reports pass/fail status
+
+**Expected output:**
+```
+=== SSH Test Harness ===
+...
+>>> OUTPUT TEST: Got MP/M II banner
+>>> OUTPUT TEST: Got command prompt
+>>> INPUT TEST: Sending 'dir' command
+>>> INPUT TEST: Got response to dir command
+>>> SUCCESS: Both input and output working!
+=== TEST PASSED ===
+```
+
+**Common issues:**
+- "Serial numbers do not match": Run `./scripts/gensys.sh` to rebuild the disk image
+- No output after banner: Disk image may need regeneration
+- Connection refused: Check another emulator isn't running on that port
 
 ## Boot Process - The Four Layers
 
