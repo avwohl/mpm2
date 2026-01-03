@@ -198,7 +198,7 @@ bool SSHSession::poll_io() {
         return false;
     }
 
-    // Write from console output queue -> SSH
+    // Write from console output queue -> SSH (one char at a time for now)
     int ch;
     while ((ch = con->output_queue().try_read()) >= 0) {
         char c = static_cast<char>(ch);
@@ -298,11 +298,12 @@ void SSHServer::poll_accept() {
         return;
     }
 
-    // Got a connection - set fd non-blocking at OS level
+    // Got a connection - set non-blocking at both OS and libssh level
     socket_t fd = ssh_get_fd(session);
     if (fd != SSH_INVALID_SOCKET) {
         set_nonblocking(fd);
     }
+    ssh_set_blocking(session, 0);  // Tell libssh we're non-blocking
 
     // Create session object - handshake will proceed in poll()
     sessions_.push_back(std::make_unique<SSHSession>(session));
