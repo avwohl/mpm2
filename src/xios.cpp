@@ -8,6 +8,7 @@
 #include "disk.h"
 #include "qkz80.h"
 #include <iostream>
+#include <iomanip>
 #include <set>
 
 XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
@@ -298,9 +299,12 @@ void XIOS::do_sysdat() {
 }
 
 void XIOS::do_boot() {
-    // COLDBOOT returns HL = address of commonbase (FC4B)
-    uint16_t xiosjmp_addr = 0xFC00;
-    uint16_t commonbase = xiosjmp_addr + XIOS_COMMONBASE;
+    // COLDBOOT returns HL = address of commonbase
+    // Calculate XIOS base from PC:
+    // When OUT executes in DO_BOOT, PC points to RET at XIOS offset 0x60
+    uint16_t pc = cpu_->regs.PC.get_pair16();
+    uint16_t xios_base = pc - 0x60;
+    uint16_t commonbase = xios_base + XIOS_COMMONBASE;
     cpu_->regs.HL.set_pair16(commonbase);
 }
 

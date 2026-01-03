@@ -172,6 +172,29 @@ bool SSHSession::poll_io() {
         return false;
     }
 
+    // Handle any pending SSH messages (env vars, window changes, etc.)
+    // These can arrive after shell is established
+    ssh_message msg;
+    while ((msg = ssh_message_get(session_)) != nullptr) {
+        int type = ssh_message_type(msg);
+        int subtype = ssh_message_subtype(msg);
+
+        if (type == SSH_REQUEST_CHANNEL) {
+            if (subtype == SSH_CHANNEL_REQUEST_ENV) {
+                // Accept environment variables (we ignore them)
+                ssh_message_channel_request_reply_success(msg);
+            } else if (subtype == SSH_CHANNEL_REQUEST_WINDOW_CHANGE) {
+                // Accept window size changes (we ignore them)
+                ssh_message_channel_request_reply_success(msg);
+            } else {
+                ssh_message_reply_default(msg);
+            }
+        } else {
+            ssh_message_reply_default(msg);
+        }
+        ssh_message_free(msg);
+    }
+
     Console* con = ConsoleManager::instance().get(console_id_);
     if (!con) {
         state_ = SSHState::CLOSED;
@@ -198,14 +221,21 @@ bool SSHSession::poll_io() {
         return false;
     }
 
-    // Write from console output queue -> SSH (one char at a time for now)
+    // Write from console output queue -> SSH (batched for efficiency)
+    char outbuf[512];
+    size_t outlen = 0;
     int ch;
-    while ((ch = con->output_queue().try_read()) >= 0) {
-        char c = static_cast<char>(ch);
-        if (ssh_channel_write(channel_, &c, 1) < 0) {
+    while (outlen < sizeof(outbuf) && (ch = con->output_queue().try_read()) >= 0) {
+        outbuf[outlen++] = static_cast<char>(ch);
+    }
+    if (outlen > 0) {
+        int written = ssh_channel_write(channel_, outbuf, outlen);
+        if (written < 0) {
             state_ = SSHState::CLOSED;
             return false;
         }
+        // If not all bytes written, we'd need to buffer - for now just continue
+        // The queue will refill and we'll write more next poll
     }
 
     return true;

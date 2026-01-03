@@ -107,10 +107,40 @@ expect {
 # Wait for prompt again
 expect {
     -re "\[0-9\]A>" {
-        puts ">>> SUCCESS: Both input and output working!"
+        puts ">>> Got prompt after stat"
     }
     timeout {
         puts ">>> PARTIAL: Got some output but no final prompt"
+        exit 1
+    }
+}
+
+# Test with lots of output - switch to user 0 and run dir
+puts ">>> BULK OUTPUT TEST: Switching to user 0"
+send "user 0\r"
+expect {
+    -re "User Number = 0" {
+        puts ">>> Switched to user 0"
+    }
+    timeout {
+        puts ">>> BULK TEST FAILED: No response to user command"
+        exit 1
+    }
+}
+
+expect -re "\[0-9\]A>"
+
+puts ">>> BULK OUTPUT TEST: Running dir (many files)"
+send "dir\r"
+
+# Wait for directory listing to complete - should see prompt return
+expect {
+    -re "\[0-9\]A>" {
+        puts ">>> SUCCESS: Both input and bulk output working!"
+    }
+    timeout {
+        puts ">>> BULK TEST FAILED: Hung during large output"
+        exit 1
     }
 }
 

@@ -35,7 +35,7 @@ public:
 
     // I/O queues (accessed from multiple threads)
     ConsoleQueue<256>& input_queue() { return input_queue_; }
-    ConsoleQueue<1024>& output_queue() { return output_queue_; }
+    ConsoleQueue<4096>& output_queue() { return output_queue_; }
 
     // XIOS interface (called from Z80 thread)
     // Returns 0xFF if input available, 0x00 if not
@@ -56,7 +56,7 @@ private:
     std::atomic<bool> local_mode_;
 
     ConsoleQueue<256> input_queue_;    // SSH -> Z80 (keyboard)
-    ConsoleQueue<1024> output_queue_;  // Z80 -> SSH (display)
+    ConsoleQueue<4096> output_queue_;  // Z80 -> SSH (display)
 };
 
 // Global console manager
