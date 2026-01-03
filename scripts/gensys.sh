@@ -177,9 +177,9 @@ cp mpm.sys "$DISKS_DIR/mpm.sys"
 cp mpmldr.com "$DISKS_DIR/mpmldr.com"
 cp boot.bin "$DISKS_DIR/mpm2boot.bin"
 
-# Create system disk
+# Create system disk (rename intermediate image to final)
 echo "Creating system disk..."
-cp "$DISKS_DIR/mpm2_hd1k.img" "$DISKS_DIR/mpm2_system.img"
+mv "$DISKS_DIR/mpm2_hd1k.img" "$DISKS_DIR/mpm2_system.img"
 python3 "$CPM_DISK" delete "$DISKS_DIR/mpm2_system.img" mpm.sys mpmldr.com 2>/dev/null || true
 python3 "$CPM_DISK" add "$DISKS_DIR/mpm2_system.img" mpm.sys mpmldr.com
 
@@ -192,7 +192,7 @@ echo "  MPM.SYS:     $DISKS_DIR/mpm.sys"
 echo "  System disk: $DISKS_DIR/mpm2_system.img"
 echo ""
 echo "To run:"
-echo "  $BUILD_DIR/mpm2_emu -s $DISKS_DIR/mpm.sys -d A:$DISKS_DIR/mpm2_system.img"
+echo "  $BUILD_DIR/mpm2_emu -d A:$DISKS_DIR/mpm2_system.img"
 echo ""
 echo "Configuration:"
 echo "  - $NMBCNS consoles"
