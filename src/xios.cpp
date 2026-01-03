@@ -60,12 +60,16 @@ void XIOS::handle_port_dispatch(uint8_t func) {
         case XIOS_SYSDAT:     do_sysdat(); break;
 
         default:
-            // Only warn once per unknown function to avoid spamming
-            static std::set<uint8_t> warned_funcs;
-            if (warned_funcs.find(func) == warned_funcs.end()) {
-                warned_funcs.insert(func);
-                std::cerr << "[XIOS PORT] Unknown function 0x" << std::hex << (int)func << std::dec
-                          << " (further occurrences suppressed)\n";
+            // Log unknown functions with PC for debugging
+            {
+                static std::set<uint8_t> warned_funcs;
+                if (warned_funcs.find(func) == warned_funcs.end()) {
+                    warned_funcs.insert(func);
+                    uint16_t pc = cpu_->regs.PC.get_pair16();
+                    std::cerr << "[XIOS PORT] Unknown function 0x" << std::hex << (int)func
+                              << " at PC=0x" << pc << std::dec
+                              << " (further occurrences suppressed)\n";
+                }
             }
             break;
     }
