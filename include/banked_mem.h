@@ -21,8 +21,8 @@
 class BankedMemory : public qkz80_cpu_mem {
 public:
     // Create memory with specified number of banks
-    // Each bank is 32KB, plus 32KB common area
-    // Total RAM = (num_banks * 32KB) + 32KB common
+    // Each bank is BANK_SIZE (48KB), plus COMMON_SIZE (16KB) common area
+    // Total RAM = (num_banks * BANK_SIZE) + COMMON_SIZE
     explicit BankedMemory(int num_banks = 4);
 
     // qkz80_cpu_mem interface

@@ -20,7 +20,21 @@ uint8_t Console::const_status() {
     // (Matches SIMH approach: status based on queue content, not connection flag)
     // This allows detecting input as soon as SSH queues it, before connected_ is set
     size_t avail = input_queue_.available();
-    return avail > 0 ? 0xFF : 0x00;
+    uint8_t result = avail > 0 ? 0xFF : 0x00;
+
+    // Debug: track status checks
+    static int check_count[8] = {0};
+    static bool reported_ready[8] = {false};
+    check_count[id_]++;
+    if (avail > 0 && !reported_ready[id_]) {
+        std::cerr << "[CONST" << id_ << "] READY! queue=" << avail << " check#" << check_count[id_] << "\n";
+        reported_ready[id_] = true;
+    } else if (avail == 0 && reported_ready[id_]) {
+        std::cerr << "[CONST" << id_ << "] queue emptied after " << check_count[id_] << " checks\n";
+        reported_ready[id_] = false;
+    }
+
+    return result;
 }
 
 uint8_t Console::read_char() {
@@ -28,6 +42,10 @@ uint8_t Console::read_char() {
     // (Matches SIMH approach: I/O based on queue content, not connection flag)
     // Brief wait - MP/M should poll with CONST first
     int ch = input_queue_.read(10);  // 10ms timeout
+    if (ch >= 0) {
+        std::cerr << "[CONIN" << id_ << "] read 0x" << std::hex << ch << std::dec
+                  << " '" << (ch >= 0x20 && ch < 0x7f ? (char)ch : '?') << "'\n";
+    }
     return ch >= 0 ? static_cast<uint8_t>(ch) : 0x00;
 }
 
@@ -82,9 +100,9 @@ Console* ConsoleManager::get(int id) {
 
 Console* ConsoleManager::find_free() {
     // MP/M II creates TMP on console (MAXCONSOLE - 1)
-    // With 8 consoles, the TMP runs on console 7
-    // Assign from highest down so first connection gets the active TMP console
-    for (int i = MAX_CONSOLES - 1; i >= 0; i--) {
+    // With 4 consoles, the TMP runs on console 3
+    // Assign from highest active console down so first connection gets the active TMP console
+    for (int i = active_consoles_ - 1; i >= 0; i--) {
         if (consoles_[i] && !consoles_[i]->is_connected()) {
             return consoles_[i].get();
         }

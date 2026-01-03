@@ -97,7 +97,7 @@ endif()
 set(SOURCES
     src/main.cpp
     src/console.cpp
-    src/z80_thread.cpp
+    src/z80_runner.cpp
     src/mpm_cpu.cpp
     src/xios.cpp
     src/banked_mem.cpp

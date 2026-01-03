@@ -69,66 +69,59 @@ static bool setup_raw_terminal() {
 }
 
 void print_usage(const char* prog) {
-    std::cerr << "Usage: " << prog << " [options]\n"
+    std::cerr << "Usage: " << prog << " [options] -d A:diskimage\n"
               << "\n"
               << "Options:\n"
-              << "  -p, --port PORT       SSH listen port (default: 2222)\n"
-              << "  -k, --key FILE        Host key file in PEM format (default: keys/ssh_host_rsa_key)\n"
-              << "  -d, --disk A:FILE     Mount disk image on drive A-P\n"
-              << "  -b, --boot FILE       Boot image file (MPMLDR + LDRBIOS memory image)\n"
-              << "  -s, --sys FILE        Load MPM.SYS directly (bypass boot loader)\n"
+              << "  -d, --disk A:FILE     Mount disk image on drive A-P (required)\n"
               << "  -l, --local           Enable local console (output to stdout)\n"
               << "  -t, --timeout SECS    Timeout in seconds for debugging (0 = no timeout)\n"
-              << "  -1, --single-thread   Run in single-threaded polling mode (for debugging)\n"
+#ifdef HAVE_SSH
+              << "  -p, --port PORT       SSH listen port (default: 2222)\n"
+              << "  -k, --key FILE        Host key file (default: keys/ssh_host_rsa_key)\n"
+#endif
               << "  -h, --help            Show this help\n"
               << "\n"
-              << "Boot methods (in order of preference):\n"
-              << "  1. Disk boot: Mount disk with -d A:file, boots from sector 0\n"
-              << "  2. Direct load: Use -s MPM.SYS to load system directly\n"
-              << "  3. Boot image: Use -b file for memory image boot\n"
+              << "The emulator boots from disk sector 0 of drive A.\n"
               << "\n"
               << "Examples:\n"
-              << "  " << prog << " -l -d A:system.dsk              # Boot from disk sector 0\n"
-              << "  " << prog << " -l -s MPM.SYS -d A:system.dsk   # Direct MPM.SYS load\n"
-              << "  " << prog << " -l -b boot.img -d A:system.dsk  # Boot image file\n"
-              << "  " << prog << " -d A:system.dsk                 # SSH mode, boot from disk\n"
+              << "  " << prog << " -l -d A:system.img           # Local console mode\n"
+#ifdef HAVE_SSH
+              << "  " << prog << " -d A:system.img              # SSH mode (connect with ssh -p 2222)\n"
+#endif
               << "\n";
 }
 
 int main(int argc, char* argv[]) {
     // Default options
-    int ssh_port = 2222;
-    std::string host_key = "keys/ssh_host_rsa_key";
-    std::string boot_image;
-    std::string mpm_sys_file;  // Direct MPM.SYS loading (bypasses MPMLDR)
     bool local_console = false;
-    bool single_thread = false;  // Single-threaded polling mode for debugging
     int timeout_seconds = 0;
     std::vector<std::pair<int, std::string>> disk_mounts;
+#ifdef HAVE_SSH
+    int ssh_port = 2222;
+    std::string host_key = "keys/ssh_host_rsa_key";
+#endif
 
     // Parse command line options
     static struct option long_options[] = {
-        {"port",          required_argument, nullptr, 'p'},
-        {"key",           required_argument, nullptr, 'k'},
         {"disk",          required_argument, nullptr, 'd'},
-        {"boot",          required_argument, nullptr, 'b'},
-        {"sys",           required_argument, nullptr, 's'},
         {"local",         no_argument,       nullptr, 'l'},
         {"timeout",       required_argument, nullptr, 't'},
-        {"single-thread", no_argument,       nullptr, '1'},
+#ifdef HAVE_SSH
+        {"port",          required_argument, nullptr, 'p'},
+        {"key",           required_argument, nullptr, 'k'},
+#endif
         {"help",          no_argument,       nullptr, 'h'},
         {nullptr,         0,                 nullptr, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "p:k:d:b:s:lt:1h", long_options, nullptr)) != -1) {
+#ifdef HAVE_SSH
+    const char* optstring = "d:lt:p:k:h";
+#else
+    const char* optstring = "d:lt:h";
+#endif
+    while ((opt = getopt_long(argc, argv, optstring, long_options, nullptr)) != -1) {
         switch (opt) {
-            case 'p':
-                ssh_port = std::atoi(optarg);
-                break;
-            case 'k':
-                host_key = optarg;
-                break;
             case 'd': {
                 // Format: A:filename or 0:filename
                 std::string arg = optarg;
@@ -151,21 +144,20 @@ int main(int argc, char* argv[]) {
                 }
                 break;
             }
-            case 'b':
-                boot_image = optarg;
-                break;
-            case 's':
-                mpm_sys_file = optarg;
-                break;
             case 'l':
                 local_console = true;
                 break;
             case 't':
                 timeout_seconds = std::atoi(optarg);
                 break;
-            case '1':
-                single_thread = true;
+#ifdef HAVE_SSH
+            case 'p':
+                ssh_port = std::atoi(optarg);
                 break;
+            case 'k':
+                host_key = optarg;
+                break;
+#endif
             case 'h':
                 print_usage(argv[0]);
                 return 0;
@@ -173,6 +165,13 @@ int main(int argc, char* argv[]) {
                 print_usage(argv[0]);
                 return 1;
         }
+    }
+
+    // Require at least one disk mount
+    if (disk_mounts.empty()) {
+        std::cerr << "Error: No disk mounted. Use -d A:diskimage to mount a boot disk.\n\n";
+        print_usage(argv[0]);
+        return 1;
     }
 
     // Set up signal handlers
@@ -193,8 +192,6 @@ int main(int argc, char* argv[]) {
     std::cout << "Initialized " << MAX_CONSOLES << " consoles\n";
 
     // Enable local console mode if requested
-    // Enable output on ALL consoles (MP/M II uses multiple consoles for TMPs)
-    // Input will be directed to console 0 only (see input handling below)
     if (local_console) {
         for (int i = 0; i < MAX_CONSOLES; i++) {
             Console* con = ConsoleManager::instance().get(i);
@@ -202,7 +199,7 @@ int main(int argc, char* argv[]) {
                 con->set_local_mode(true);
             }
         }
-        std::cout << "Local console enabled on all " << MAX_CONSOLES << " consoles (input to consoles 3-7)\n";
+        std::cout << "Local console enabled on all " << MAX_CONSOLES << " consoles\n";
     }
 
     // Mount disks
@@ -222,55 +219,25 @@ int main(int argc, char* argv[]) {
                       << static_cast<char>('A' + mount.first) << ": [" << fmt_name << "]\n";
         } else {
             std::cerr << "Failed to mount " << mount.second << "\n";
+            return 1;
         }
     }
 
-    // Initialize Z80 thread
+    // Initialize Z80 and boot from disk
     Z80Runner z80;
 
-    // Check for conflicting options
-    if (!boot_image.empty() && !mpm_sys_file.empty()) {
-        std::cerr << "Cannot specify both -b (boot image) and -s (MPM.SYS)\n";
+    if (!z80.boot_from_disk()) {
+        std::cerr << "Failed to boot from disk\n";
         return 1;
     }
 
-    // Determine boot method
-    bool boot_from_disk = boot_image.empty() && mpm_sys_file.empty() && !disk_mounts.empty();
-
-    if (!mpm_sys_file.empty()) {
-        // Direct MPM.SYS loading - bypass MPMLDR
-        if (!z80.init("")) {  // Initialize without boot image
-            std::cerr << "Failed to initialize Z80 emulator\n";
-            return 1;
-        }
-        if (!z80.load_mpm_sys(mpm_sys_file)) {
-            std::cerr << "Failed to load MPM.SYS: " << mpm_sys_file << "\n";
-            return 1;
-        }
-        // XIOS base is set by load_mpm_sys based on SYSTEM.DAT
-    } else if (boot_from_disk) {
-        // Boot from disk sector 0 (cold start loader)
-        if (!z80.boot_from_disk()) {
-            std::cerr << "Failed to boot from disk\n";
-            return 1;
-        }
-    } else if (!boot_image.empty()) {
-        // Traditional boot via boot image file
-        if (!z80.init(boot_image)) {
-            std::cerr << "Failed to initialize Z80 emulator\n";
-            std::cerr << "Could not load boot image: " << boot_image << "\n";
-            return 1;
-        }
-    } else {
-        // No boot method specified
-        if (!z80.init("")) {
-            std::cerr << "Failed to initialize Z80 emulator\n";
-            return 1;
-        }
+    if (timeout_seconds > 0) {
+        std::cout << "Setting boot timeout: " << timeout_seconds << " seconds\n";
+        z80.set_timeout(timeout_seconds);
     }
 
 #ifdef HAVE_SSH
-    // Initialize SSH server (skip if only using local console)
+    // Initialize SSH server (skip if using local console)
     SSHServer ssh_server;
     bool ssh_enabled = false;
     if (!local_console) {
@@ -289,57 +256,14 @@ int main(int argc, char* argv[]) {
         ssh_enabled = true;
         std::cout << "SSH server listening on port " << ssh_port << "\n";
         std::cout << "Connect with: ssh -p " << ssh_port << " user@localhost\n\n";
-    } else {
-        std::cout << "Local console mode (-l flag)\n\n";
-    }
-#else
-    std::cout << "SSH not compiled in - local console only\n\n";
-    (void)ssh_port;
-    (void)host_key;
-
-    // Auto-enable local mode on all consoles when SSH not available
-    // Output from all consoles, input to console 0 only
-    for (int i = 0; i < MAX_CONSOLES; i++) {
-        Console* con = ConsoleManager::instance().get(i);
-        if (con) {
-            con->set_local_mode(true);
-        }
     }
 #endif
-
-    // Start Z80 (threaded or single-threaded)
-    if (!boot_image.empty() || !mpm_sys_file.empty() || boot_from_disk) {
-        if (timeout_seconds > 0) {
-            std::cout << "Setting boot timeout: " << timeout_seconds << " seconds\n";
-            z80.set_timeout(timeout_seconds);
-        }
-        if (single_thread) {
-            std::cout << "Single-threaded polling mode - SSH disabled\n";
-            // Force local console mode in single-threaded mode
-            local_console = true;
-            for (int i = 0; i < MAX_CONSOLES; i++) {
-                Console* con = ConsoleManager::instance().get(i);
-                if (con) con->set_local_mode(true);
-            }
-        } else {
-            std::cout << "Starting Z80 CPU thread...\n";
-            z80.start();
-        }
-    } else {
-        std::cout << "No boot method specified - CPU not started\n";
-        std::cout << "Mount a disk with -d A:diskimage to boot from disk sector 0\n";
-        std::cout << "Or use -b for boot image or -s for direct MPM.SYS loading\n";
-    }
 
     // Main loop
     std::cout << "\nPress Ctrl+C to shutdown\n\n";
 
-#ifdef HAVE_SSH
-    if (ssh_enabled) {
-        // Run SSH accept loop in main thread (blocks until shutdown)
-        ssh_server.accept_loop();
-    } else {
-        // Local console mode - read from stdin and send to consoles
+    if (local_console) {
+        // Local console mode - read from stdin and run CPU
         if (setup_raw_terminal()) {
             while (!g_shutdown_requested && !z80.timed_out()) {
                 // Poll stdin for input
@@ -351,35 +275,23 @@ int main(int argc, char* argv[]) {
                         g_shutdown_requested = 1;
                         break;
                     }
-                    // Send input to console 3 (local console)
+                    // Send input to console 3 (first user console)
                     Console* con = ConsoleManager::instance().get(3);
                     if (con && con->is_local()) {
                         con->input_queue().try_write(static_cast<uint8_t>(ch));
                     }
-                } else if (single_thread) {
-                    // Single-threaded mode: run CPU instead of sleeping
-                    if (!z80.run_polled()) break;
-                } else {
-                    // No input available - sleep briefly to avoid busy-wait
-                    usleep(1000);  // 1ms
                 }
+                // Run CPU
+                if (!z80.run_polled()) break;
             }
             restore_terminal();
         } else {
-            // Not a TTY - still read from stdin (for piped input) but with select() for timeout
+            // Not a TTY - use select() for input with timeout
             fd_set rfds;
-            bool stdin_eof = false;
             while (!g_shutdown_requested && !z80.timed_out()) {
-                if (stdin_eof && !single_thread) {
-                    // Stdin closed - just sleep until shutdown/timeout
-                    usleep(10000);  // 10ms
-                    continue;
-                }
                 FD_ZERO(&rfds);
                 FD_SET(STDIN_FILENO, &rfds);
-                struct timeval tv;
-                tv.tv_sec = 0;
-                tv.tv_usec = single_thread ? 0 : 10000;  // No wait in single-thread mode
+                struct timeval tv = {0, 0};  // No wait
                 int ret = select(STDIN_FILENO + 1, &rfds, nullptr, nullptr, &tv);
                 if (ret > 0 && FD_ISSET(STDIN_FILENO, &rfds)) {
                     char ch;
@@ -387,86 +299,26 @@ int main(int argc, char* argv[]) {
                     if (n > 0) {
                         // Convert LF to CR for CP/M compatibility
                         if (ch == '\n') ch = '\r';
-                        // Send input to console 3 (local console)
                         Console* con = ConsoleManager::instance().get(3);
                         if (con && con->is_local()) {
                             con->input_queue().try_write(static_cast<uint8_t>(ch));
                         }
-                    } else if (n == 0) {
-                        // EOF on stdin - stop reading but don't exit
-                        stdin_eof = true;
                     }
                 }
-                // Single-threaded mode: run CPU
-                if (single_thread) {
-                    if (!z80.run_polled()) break;
-                }
+                // Run CPU
+                if (!z80.run_polled()) break;
             }
         }
     }
-#else
-    // Local console mode - read from stdin and send to console 3
-    if (setup_raw_terminal()) {
+#ifdef HAVE_SSH
+    else if (ssh_enabled) {
+        // SSH mode - run CPU while accepting connections
+        // Note: SSH accept_loop blocks, so we need a different approach
+        // For now, run CPU in polling mode with SSH accept in background
+        // TODO: Proper integration with SSH session threads
         while (!g_shutdown_requested && !z80.timed_out()) {
-            // Poll stdin for input
-            char ch;
-            ssize_t n = read(STDIN_FILENO, &ch, 1);
-            if (n > 0) {
-                // Handle Ctrl+C for shutdown
-                if (ch == 0x03) {
-                    g_shutdown_requested = 1;
-                    break;
-                }
-                // Send input to console 3 (local console)
-                Console* con = ConsoleManager::instance().get(3);
-                if (con && con->is_local()) {
-                    con->input_queue().try_write(static_cast<uint8_t>(ch));
-                }
-            } else if (single_thread) {
-                // Single-threaded mode: run CPU instead of sleeping
-                if (!z80.run_polled()) break;
-            } else {
-                // No input available - sleep briefly to avoid busy-wait
-                usleep(1000);  // 1ms
-            }
-        }
-        restore_terminal();
-    } else {
-        // Not a TTY - still read from stdin (for piped input) but with select() for timeout
-        fd_set rfds;
-        bool stdin_eof = false;
-        while (!g_shutdown_requested && !z80.timed_out()) {
-            if (stdin_eof && !single_thread) {
-                // Stdin closed - just sleep until shutdown/timeout
-                usleep(10000);  // 10ms
-                continue;
-            }
-            FD_ZERO(&rfds);
-            FD_SET(STDIN_FILENO, &rfds);
-            struct timeval tv;
-            tv.tv_sec = 0;
-            tv.tv_usec = single_thread ? 0 : 10000;  // No wait in single-thread mode
-            int ret = select(STDIN_FILENO + 1, &rfds, nullptr, nullptr, &tv);
-            if (ret > 0 && FD_ISSET(STDIN_FILENO, &rfds)) {
-                char ch;
-                ssize_t n = read(STDIN_FILENO, &ch, 1);
-                if (n > 0) {
-                    // Convert LF to CR for CP/M compatibility
-                    if (ch == '\n') ch = '\r';
-                    // Send input to console 3 only
-                    Console* con = ConsoleManager::instance().get(3);
-                    if (con && con->is_local()) {
-                        con->input_queue().try_write(static_cast<uint8_t>(ch));
-                    }
-                } else if (n == 0) {
-                    // EOF on stdin - stop reading but don't exit
-                    stdin_eof = true;
-                }
-            }
-            // Single-threaded mode: run CPU
-            if (single_thread) {
-                if (!z80.run_polled()) break;
-            }
+            if (!z80.run_polled()) break;
+            usleep(100);  // Brief yield for SSH
         }
     }
 #endif
@@ -477,11 +329,9 @@ int main(int argc, char* argv[]) {
         std::cout << "\nShutting down...\n";
     }
 
-    // Stop Z80
-    z80.stop();
+    z80.request_stop();
 
 #ifdef HAVE_SSH
-    // Stop SSH server
     ssh_server.stop();
 #endif
 

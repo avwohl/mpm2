@@ -8,10 +8,8 @@
 #include "disk.h"
 #include "qkz80.h"
 #include <iostream>
-#include <iomanip>
 #include <set>
 
-extern bool g_debug_enabled;
 extern int last_polldevice_device;
 
 XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
@@ -29,35 +27,6 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
 }
 
 void XIOS::handle_port_dispatch(uint8_t func) {
-    // DEBUG: log ALL port dispatch calls after POLL15 returns ready
-    extern int last_polldevice_device;
-    extern bool last_polldevice_ready;
-    static bool logging_after_poll15 = false;
-    static int logged_funcs = 0;
-
-    if (last_polldevice_device == 15 && last_polldevice_ready) {
-        logging_after_poll15 = true;
-        logged_funcs = 0;  // Reset counter
-    }
-
-    if (logging_after_poll15 && logged_funcs < 100) {
-        logged_funcs++;
-        std::cerr << "[PORT_AFTER_POLL15] Function 0x" << std::hex << (int)func
-                  << " console=" << std::dec << (int)cpu_->regs.DE.get_high() << "\n";
-        if (func == XIOS_CONIN) {
-            logging_after_poll15 = false;  // Stop after seeing CONIN
-        }
-    }
-
-    // Debug: suppress verbose function call logging
-    // Uncomment below for debugging
-    // static int func_counts[256] = {0};
-    // func_counts[func]++;
-    // if (func_counts[func] <= 5) {
-    //     std::cerr << "[PORT] Function 0x" << std::hex << (int)func << std::dec << "\n";
-    // }
-
-    // Temporarily set skip_ret flag so handlers don't do RET
     skip_ret_ = true;
 
     switch (func) {
@@ -128,13 +97,6 @@ void XIOS::do_const() {
     Console* con = ConsoleManager::instance().get(console);
     uint8_t status = con ? con->const_status() : 0x00;
 
-    // Verbose logging disabled - uncomment for debugging
-    // static int const_calls[8] = {0};
-    // if (console < 8 && (con && con->input_queue().available() > 0)) {
-    //     const_calls[console]++;
-    //     std::cerr << "[CONST" << (int)console << "] queue has data\n";
-    // }
-
     cpu_->regs.AF.set_high(status);
     do_ret();
 }
@@ -146,7 +108,6 @@ void XIOS::do_conin() {
     Console* con = ConsoleManager::instance().get(console);
     uint8_t ch = con ? con->read_char() : 0x1A;  // EOF default if no console
 
-    // Verbose CR debugging disabled
     cpu_->regs.AF.set_high(ch);
     do_ret();
 }
@@ -157,11 +118,13 @@ void XIOS::do_conout() {
     if (console >= 8) console = 0;  // Workaround: invalid console -> default to 0
     uint8_t ch = cpu_->regs.BC.get_low();        // C = character
 
-    // DEBUG: trace console output
-    if (g_debug_enabled) {
-        std::cerr << "[CONOUT" << (int)console << "] char=0x" << std::hex << (int)ch << std::dec;
+    // Debug: show first CONOUT calls during boot
+    static int conout_count = 0;
+    if (conout_count < 50) {
+        std::cerr << "[CONOUT] con=" << (int)console << " ch=0x" << std::hex << (int)ch;
         if (ch >= 0x20 && ch < 0x7f) std::cerr << " '" << (char)ch << "'";
-        std::cerr << " PC=0x" << std::hex << cpu_->regs.PC.get_pair16() << std::dec << "\n";
+        std::cerr << std::dec << "\n";
+        conout_count++;
     }
 
     Console* con = ConsoleManager::instance().get(console);
@@ -242,44 +205,29 @@ void XIOS::do_setdma() {
 }
 
 void XIOS::do_read() {
-    // Set up disk system with current parameters
     DiskSystem::instance().set_track(current_track_);
     DiskSystem::instance().set_sector(current_sector_);
-    // Pass DMA address and target bank for banked memory writes
     DiskSystem::instance().set_dma(dma_addr_, dma_bank_);
 
-    if (g_debug_enabled) {
-        std::cerr << "[READ] drv=" << (int)current_disk_
-                  << " trk=" << current_track_
-                  << " sec=" << current_sector_
-                  << " dma=0x" << std::hex << dma_addr_ << std::dec
-                  << " bank=" << (int)mem_->current_bank()
-                  << " target_bank=" << (int)dma_bank_ << "\n";
+    // Debug: show first few READ calls during boot
+    static int read_count = 0;
+    if (read_count < 20) {
+        std::cerr << "[READ] trk=" << current_track_ << " sec=" << current_sector_
+                  << " dma=0x" << std::hex << dma_addr_ << " bank=" << (int)dma_bank_
+                  << std::dec << "\n";
+        read_count++;
     }
 
-    // Perform read
     int result = DiskSystem::instance().read(mem_);
     cpu_->regs.AF.set_high(result);
     do_ret();
 }
 
 void XIOS::do_write() {
-    // Set up disk system with current parameters
     DiskSystem::instance().set_track(current_track_);
     DiskSystem::instance().set_sector(current_sector_);
-    // Pass DMA address and target bank for banked memory reads
     DiskSystem::instance().set_dma(dma_addr_, dma_bank_);
 
-    if (g_debug_enabled) {
-        std::cerr << "[WRITE] drv=" << (int)current_disk_
-                  << " trk=" << current_track_
-                  << " sec=" << current_sector_
-                  << " dma=0x" << std::hex << dma_addr_ << std::dec
-                  << " bank=" << (int)mem_->current_bank()
-                  << " target_bank=" << (int)dma_bank_ << "\n";
-    }
-
-    // Perform write
     int result = DiskSystem::instance().write(mem_);
     cpu_->regs.AF.set_high(result);
     do_ret();
@@ -312,29 +260,7 @@ void XIOS::do_selmemory() {
     uint16_t desc_addr = cpu_->regs.BC.get_pair16();
     uint8_t bank = mem_->fetch_mem(desc_addr + 3);
 
-    // DEBUG: always log SELMEMORY calls when POLLDEVICE 15 returns ready
-    static int selmem_count = 0;
-    static bool poll15_was_ready = false;
-    selmem_count++;
-
-    // Check if we just had poll15 return ready
-    extern int last_polldevice_device;
-    extern bool last_polldevice_ready;
-    if (last_polldevice_device == 15 && last_polldevice_ready) {
-        poll15_was_ready = true;
-    }
-
-    if (g_debug_enabled && (selmem_count <= 50 || poll15_was_ready)) {
-        std::cerr << "[SELMEMORY] desc=0x" << std::hex << desc_addr
-                  << " bank=" << std::dec << (int)bank
-                  << " SP=0x" << std::hex << cpu_->regs.SP.get_pair16()
-                  << std::dec << " #" << selmem_count
-                  << (poll15_was_ready ? " AFTER_POLL15" : "") << "\n";
-    }
-
-
     // Track last non-zero bank as the DMA target for user data
-    // When BNKBDOS switches to user bank, remember it for disk I/O
     if (bank != 0) {
         dma_bank_ = bank;
     }
@@ -355,7 +281,6 @@ void XIOS::do_polldevice() {
     uint8_t device = cpu_->regs.BC.get_low();
     uint8_t result = 0x00;
 
-    // Track last polled device for debug tracing
     last_polldevice_device = device;
     last_polldevice_ready = false;
 
@@ -365,11 +290,10 @@ void XIOS::do_polldevice() {
 
         if (console < 8) {
             if (is_input) {
-                // Console input - check if character ready
                 Console* con = ConsoleManager::instance().get(console);
-
                 if (con && con->const_status()) {
                     result = 0xFF;
+                    last_polldevice_ready = true;
                 }
             } else {
                 // Console output - always ready
@@ -400,20 +324,8 @@ void XIOS::do_exitregion() {
 }
 
 void XIOS::do_maxconsole() {
-    // Documentation (MPM_II_System_Implementors_Guide_Aug82.txt line 3673):
-    // "maximum console procedure enables the calling program to determine
-    // the number of physical consoles the BIOS is capable of supporting."
-    //
-    // So return the NUMBER of consoles (e.g., 8), not the max index (7).
-    uint8_t num_consoles = mem_->read_common(0xFF01);  // Number of consoles from SYSDAT
-    uint8_t result = num_consoles;
-
-    if (g_debug_enabled) {
-        std::cerr << "[MAXCONSOLE] returning " << (int)result
-                  << " (SYSDAT num_consoles=" << (int)num_consoles << ")\n";
-    }
-
-    cpu_->regs.AF.set_high(result);
+    uint8_t num_consoles = mem_->read_common(0xFF01);
+    cpu_->regs.AF.set_high(num_consoles);
     do_ret();
 }
 
@@ -435,35 +347,21 @@ void XIOS::do_systeminit() {
 }
 
 void XIOS::do_idle() {
-    // Called when no processes are ready
-    // For a polled system, this would call the dispatcher
-    // For us, we can just return (or yield briefly)
     do_ret();
 }
 
 // Commonbase entries - called by XDOS/BNKBDOS for bank switching and dispatch
 
 void XIOS::do_swtuser() {
-    // Switch to user bank
-    // BC contains memory descriptor address
-    // The descriptor's bank field tells us which bank to switch to
     uint16_t desc_addr = cpu_->regs.BC.get_pair16();
     if (desc_addr != 0) {
         uint8_t bank = mem_->fetch_mem(desc_addr + 3);
-        if (g_debug_enabled) {
-            std::cerr << "[SWTUSER] desc=0x" << std::hex << desc_addr
-                      << " -> bank=" << std::dec << (int)bank << "\n";
-        }
         mem_->select_bank(bank);
     }
     do_ret();
 }
 
 void XIOS::do_swtsys() {
-    // Switch to system bank (bank 0)
-    if (g_debug_enabled) {
-        std::cerr << "[SWTSYS] -> bank=0 (was " << (int)mem_->current_bank() << ")\n";
-    }
     mem_->select_bank(0);
     do_ret();
 }

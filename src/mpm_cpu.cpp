@@ -8,8 +8,6 @@
 #include <iostream>
 #include <iomanip>
 
-extern bool g_debug_enabled;
-
 // Track POLLDEVICE for console 7 input (device 15)
 // These are not static so they can be accessed from xios.cpp
 int last_polldevice_device = -1;
@@ -34,17 +32,10 @@ void MpmCpu::port_out(qkz80_uint8 port, qkz80_uint8 value) {
             break;
 
         case MpmPorts::SIGNAL:
-            // Signal port - used for debug/status
-            if (debug_io) {
-                std::cerr << "[SIGNAL] value=0x" << std::hex << (int)value << std::dec << std::endl;
-            }
+            // Signal port - used for status
             break;
 
         default:
-            if (debug_io) {
-                std::cerr << "[OUT] port=0x" << std::hex << (int)port
-                          << " value=0x" << (int)value << std::dec << std::endl;
-            }
             break;
     }
 }
@@ -65,9 +56,6 @@ qkz80_uint8 MpmCpu::port_in(qkz80_uint8 port) {
             break;
 
         default:
-            if (debug_io) {
-                std::cerr << "[IN] port=0x" << std::hex << (int)port << std::dec << std::endl;
-            }
             break;
     }
 
@@ -106,12 +94,6 @@ void MpmCpu::handle_bank_select(uint8_t bank) {
         return;
     }
 
-    if (g_debug_enabled || debug_io) {
-        std::cerr << "[BANK SELECT] bank=" << (int)bank
-                  << " (was " << (int)banked_mem_->current_bank() << ")"
-                  << " PC=0x" << std::hex << regs.PC.get_pair16() << std::dec << "\n";
-    }
-
     banked_mem_->select_bank(bank);
 
     // Notify XIOS of bank change for DMA targeting
@@ -127,61 +109,21 @@ void MpmCpu::halt(void) {
 }
 
 void MpmCpu::execute(void) {
+    // Debug: trace execution at key addresses during boot
+    static int trace_count = 0;
     uint16_t pc = regs.PC.get_pair16();
-    uint8_t opcode = mem->fetch_mem(pc);
-
-    // FIX: Prevent self-loop in Tick process
-    // The self-loop is created when insert_process writes [BC] = DE and BC == DE
-    const uint16_t TICK_ADDR = 0xED98;
-
-    // FIX: If Tick.link becomes corrupted (points to itself), fix it immediately
-    // This prevents the scheduler from going into an infinite loop
-    {
-        uint16_t tick_link = mem->fetch_mem(TICK_ADDR) | (mem->fetch_mem(TICK_ADDR + 1) << 8);
-        if (tick_link == TICK_ADDR) {
-            // Self-loop detected! Fix it by setting Tick.link = 0 (end of list)
-            mem->store_mem(TICK_ADDR, 0);
-            mem->store_mem(TICK_ADDR + 1, 0);
-            static int fix_count = 0;
-            fix_count++;
-            if (fix_count <= 5) {
-                std::cerr << "[TICK SELF-LOOP FIXED #" << fix_count
-                          << "] Tick.link was 0x" << std::hex << TICK_ADDR
-                          << ", set to 0\n" << std::dec;
-            }
+    // Trace MPMLDR entry and BIOS calls (0x1700-0x173F)
+    if (trace_count < 30) {
+        if (pc == 0x0100 || pc == 0x0322 || (pc >= 0x1700 && pc < 0x1740)) {
+            std::cerr << "[EXEC] PC=0x" << std::hex << pc;
+            // Dump bytes at PC
+            std::cerr << " [" << std::setfill('0') << std::setw(2) << (int)mem->fetch_mem(pc)
+                      << " " << std::setw(2) << (int)mem->fetch_mem(pc+1)
+                      << " " << std::setw(2) << (int)mem->fetch_mem(pc+2) << "]";
+            std::cerr << std::dec << "\n";
+            trace_count++;
         }
     }
-    // Note: We no longer try to prevent the self-loop before it happens.
-    // The post-hoc fix above catches and repairs it immediately after creation.
-
-    // PRE-EXECUTE check: prevent LD SP,HL from setting SP to an invalid value
-    // Opcode 0xF9 = LD SP,HL - the scheduler uses this to switch contexts
-
-    if (opcode == 0xF9) {  // LD SP,HL
-        uint16_t new_sp = regs.HL.get_pair16();
-        if (new_sp == 0xFFFF || new_sp == 0x0000 || new_sp < 0x0100) {
-            static int bad_sp_prevented = 0;
-            bad_sp_prevented++;
-            if (bad_sp_prevented <= 10) {
-                std::cerr << "[BAD SP PREVENTED] LD SP,HL would set SP=0x" << std::hex << new_sp
-                          << " at PC=0x" << pc << " - skipping to next process\n" << std::dec;
-            }
-
-            // Skip this instruction (advance PC past the 1-byte opcode)
-            regs.PC.set_pair16(pc + 1);
-
-            // Jump to the dispatcher to pick the next process
-            // First, restore a safe SP
-            regs.SP.set_pair16(0xFE00);  // Safe stack in common memory
-
-            // Set up for RST 38H (dispatcher entry)
-            regs.PC.set_pair16(0xC23A);  // RST 38H vector destination
-
-            return;  // Don't execute the LD SP,HL
-        }
-    }
-
-    // Call the base class execute
     qkz80::execute();
 }
 

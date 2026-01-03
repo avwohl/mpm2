@@ -98,13 +98,21 @@ public:
     // Number of currently connected consoles
     int connected_count() const;
 
-    // Maximum console number
-    int max_console() const { return MAX_CONSOLES; }
+    // Maximum console number (from MP/M SYSDAT)
+    int max_console() const { return active_consoles_; }
+
+    // Set active console count (from MP/M SYSDAT byte 1)
+    void set_active_consoles(int count) {
+        if (count > 0 && count <= MAX_CONSOLES) {
+            active_consoles_ = count;
+        }
+    }
 
 private:
     ConsoleManager() = default;
     std::array<std::unique_ptr<Console>, MAX_CONSOLES> consoles_;
     bool initialized_ = false;
+    int active_consoles_ = MAX_CONSOLES;  // Default to all, set from SYSDAT
 };
 
 #endif // CONSOLE_H

@@ -4,16 +4,29 @@
 The scheduler enters an infinite loop when the Tick process's link field points to itself (self-loop at 0xED98).
 
 ## Current Workaround
-The code in `mpm_cpu.cpp` detects when Tick.link becomes 0xED98 (self-referential) and immediately fixes it by setting Tick.link = 0 (end of list).
+The code in `banked_mem.cpp` prevents self-loops at the memory write level by detecting when a process's link field is about to be written with its own address:
 
 ```cpp
-if (tick_link == TICK_ADDR) {
-    mem->store_mem(TICK_ADDR, 0);
-    mem->store_mem(TICK_ADDR + 1, 0);
+// In store_mem(), for addresses in process descriptor range (0xED00-0xFE00):
+// Block writes that would create a self-loop (link pointing to itself)
+if (byte == (addr & 0xFF)) {
+    uint8_t high_byte = common_[(addr + 1) - COMMON_BASE];
+    if (high_byte == ((addr >> 8) & 0xFF)) {
+        return;  // Block the write
+    }
 }
 ```
 
-**This is a post-hoc fix, not a root cause solution.**
+**This is a workaround for an unidentified emulator bug, NOT a fix for a bug in MP/M II.**
+
+## Important: MP/M II is NOT at Fault
+
+SIMH and real hardware run MP/M II without self-loops. The OS was commercially successful and widely deployed. The bug is in our emulator, not in MP/M II.
+
+Reference implementations that work correctly:
+- SIMH with MXIOS.MAC
+- MmsCpm3 (https://github.com/durgadas311/MmsCpm3/blob/master/mpm/src/mxios.asm)
+- Original hardware
 
 ## How the Self-Loop is Created
 
@@ -24,55 +37,47 @@ The self-loop occurs in `insert_process` (DSPTCH.ASM) when:
 
 This happens because Tick is **already in the RLR** when `insert_process` is called.
 
-## Root Cause Investigation
+## Unknown Emulator Bug
 
-### Timeline of a self-loop creation
+Something in our emulator causes `insert_process` to be called with a process that's already in the list. This does NOT happen on real hardware or SIMH.
 
-1. Tick is at head of RLR with status=0 (ready to run)
-2. Timer interrupt fires
-3. PDISP sets Tick.status = 9 (Dispatch)
-4. Dispatcher should remove Tick from RLR: `rlr = Tick.link`
-5. Status 9 handling calls `insert_process(&rlr, Tick)`
-6. Tick should be re-inserted into the now-modified RLR
+Possible areas where our emulator differs from real hardware:
+1. Interrupt timing/delivery
+2. IFF1/IFF2 state management
+3. Cycle counting accuracy
+4. Bank switch timing
+5. Something else entirely unknown
 
-**The bug**: At step 5, Tick is somehow still in RLR, causing `insert_process` to traverse the list and find Tick, creating the self-loop.
+### What We've Tried
 
-### Verified fixes (partial)
+1. **EI delay**: Added proper Z80 EI delay (one instruction executes after EI before interrupts are accepted)
+2. **Minimum cycles between interrupts**: Enforced 66,667 cycles (~60Hz at 4MHz)
+3. **Removed force-enable interrupts**: Removed code that violated DI critical sections
+4. **Fixed interrupt catch-up**: Prevented rapid-fire interrupts when emulator falls behind
 
-1. **Removed force-enable interrupts** - The code at line 872-878 that forced IFF=1 after 5 ticks was removed. This could have violated DI critical sections.
-
-2. **Fixed interrupt catch-up** - Changed `next_tick_ += TICK_INTERVAL` to `next_tick_ = now + TICK_INTERVAL` to prevent rapid-fire interrupts when the emulator falls behind.
-
-### Remaining issues
-
-After the self-loop workaround triggers, secondary "BAD SP PREVENTED" errors occur, indicating the dispatcher is trying to resume processes with invalid stack pointers. This suggests the list corruption affects more than just Tick.
-
-## Why SIMH and Real Systems Work
-
-Real MP/M II hardware and SIMH:
-- Have correct interrupt timing (60Hz, not faster)
-- Properly gate interrupts via IFF1/IFF2
-- Don't force-enable interrupts during DI critical sections
-- Have correct flag state management
-
-## Next Steps for Root Cause
-
-1. Add tracing to `sys_flag[]` array to verify state transitions
-2. Trace when processes are added to DRL vs RLR
-3. Verify the dispatch removal step (step 4 above) is working correctly
-4. Check if another code path is adding Tick to DRL while it's still in RLR
+None of these fixed the root cause. The self-loop still occurs without the memory-level workaround.
 
 ## Key Observations
 
-- The self-loop is created at PC=0xdc33 (STAX B instruction in @27A)
+- The self-loop is created at PC=0xdc33-0xdc36 (STAX B instruction in insertprocess)
 - BC = 0xed99 (high byte of Tick's link), DE = 0xed98 (Tick)
 - At detection time, RLR = 0xed98 (Tick at head), Tick.status = 0
 - This means Tick was NOT removed before insert_process was called
 
 ## Files Modified
 
-- `src/mpm_cpu.cpp` - Self-loop detection and fix
-- `src/z80_thread.cpp` - Removed force-enable interrupts, fixed timing
+- `src/banked_mem.cpp` - Self-loop prevention workaround
+- `src/z80_thread.cpp` - Timing fixes (did not solve root cause)
+- `../cpmemu/src/qkz80.cc` - EI delay (did not solve root cause)
+
+## TODO: Find the Real Bug
+
+The memory-level workaround masks the symptom but doesn't fix the emulator bug. To find the real issue:
+
+1. Compare our interrupt handling with SIMH's implementation
+2. Trace exact cycle-by-cycle behavior around the self-loop creation
+3. Check if our bank switching has timing differences
+4. Review IFF state transitions vs real Z80 behavior
 
 ## References
 
@@ -80,3 +85,4 @@ Real MP/M II hardware and SIMH:
 - `/mpm2_external/mpm2src/NUCLEUS/FLAG.ASM` - FLAGWAIT and FLAGSET
 - `/mpm2_external/mpm2src/NUCLEUS/TICK.ASM` - Tick process
 - `/mpm2_external/mpm2src/CONTROL/RESXIOS.ASM` - Interrupt handler (INTHND)
+- SIMH AltairZ80 source - reference implementation that works

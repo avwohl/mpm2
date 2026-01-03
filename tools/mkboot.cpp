@@ -189,15 +189,24 @@ int main(int argc, char* argv[]) {
             return 1;
         }
 
-        // LDRBIOS must fit before MPMLDR ends (around 0x1780)
-        // and before high memory
-        if (ldrbios.size() > 0x1000) {  // 4KB max
-            std::cerr << "Error: LDRBIOS too large (max 4096 bytes)\n";
+        // ul80 linker outputs files with ORG padding (zeros from 0x0000 to ORG).
+        // If file is larger than 0x1700, it contains the ORG padding - skip it.
+        size_t skip = 0;
+        size_t code_size = ldrbios.size();
+        if (ldrbios.size() > 0x1700) {
+            skip = 0x1700;
+            code_size = ldrbios.size() - 0x1700;
+            std::cout << "LDRBIOS has ORG padding, skipping first 0x1700 bytes\n";
+        }
+
+        // LDRBIOS must fit before high memory (max ~2KB of actual code)
+        if (code_size > 0x1000) {  // 4KB max
+            std::cerr << "Error: LDRBIOS too large (max 4096 bytes, got " << code_size << ")\n";
             return 1;
         }
 
-        std::memcpy(&image[0x1700], ldrbios.data(), ldrbios.size());
-        std::cout << "Loaded LDRBIOS at 0x1700 (" << ldrbios.size() << " bytes)\n";
+        std::memcpy(&image[0x1700], ldrbios.data() + skip, code_size);
+        std::cout << "Loaded LDRBIOS at 0x1700 (" << code_size << " bytes)\n";
     }
 
     // Load XIOS at 0xFC00

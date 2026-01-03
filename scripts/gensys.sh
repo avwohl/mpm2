@@ -26,10 +26,10 @@ CPMEMU="${CPMEMU:-$HOME/src/cpmemu/src/cpmemu}"
 WORK_DIR="/tmp/gensys_work"
 CPM_DISK="${CPM_DISK:-$HOME/src/cpmemu/util/cpm_disk.py}"
 
-# Number of consoles (default 8)
+# Number of consoles (default 4, matching asm/bnkxios.asm)
 # must match asm/bnkxios.asm:
-# NMBCNS:         EQU     8       ; consoles for SSH users
-NMBCNS=${1:-8}
+# NMBCNS:         EQU     4       ; consoles for SSH users
+NMBCNS=${1:-4}
 
 echo "MP/M II System Generation"
 echo "========================="

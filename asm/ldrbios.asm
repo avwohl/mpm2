@@ -8,7 +8,7 @@
 ; Assemble with: um80 -o ldrbios.rel ldrbios.asm
 
         .Z80                    ; Use Z80 mnemonics
-        ORG     01700H          ; LDRBIOS location (matches MP/M II LDRBDOS expectation)
+        ORG     01700H          ; LDRBIOS location (standard MP/M II location)
 
 ; =============================================================================
 ; LDRBIOS Jump Table

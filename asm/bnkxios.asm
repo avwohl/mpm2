@@ -59,7 +59,7 @@ FLAGWAIT:       EQU     132     ; XDOS flag wait
 FLAGSET:        EQU     133     ; XDOS flag set
 
 ; Number of consoles
-NMBCNS:         EQU     8       ; 8 consoles for SSH users
+NMBCNS:         EQU     4       ; consoles for SSH users
 
 ; =============================================================================
 ; BNKXIOS Jump Vector
@@ -137,26 +137,23 @@ DO_CONST:
 DO_CONIN:
         ; Console input - D = console number
         ; Returns A = character
-        ; Wait for character using POLL on the console's input device.
-        ; POLL takes device number, not flag number!
-        ; Device numbering: input = 2*console + 1 (odd devices are input)
-        PUSH    BC
-        PUSH    DE
+        ; Match SIMH: call XDOS poll, no PUSH/POP, then read
+        ; Stash console in IXL via A to avoid stack usage
+        ; Use raw opcodes since um80 doesn't support IXL/IXH
 
-        ; Calculate device number: 2*console + 1 for input
-        ; D already has console number
-        LD      A, D
+        LD      A, D            ; A = console
+        DB      0DDH, 06FH      ; LD IXL, A (undocumented)
+
         ADD     A, A            ; A = 2*console
-        INC     A               ; A = 2*console + 1 (input device)
-        LD      D, 0            ; D = 0 for simple poll (MUST be before LD E, A!)
-        LD      E, A            ; E = device number for POLL
-        LD      C, POLL         ; POLL function (131)
-        CALL    XDOS            ; Wait for input device to be ready
+        INC     A               ; A = 2*console + 1
+        LD      E, A            ; E = device number
+        LD      D, 0            ; D = 0 for simple poll
+        LD      C, POLL
+        CALL    XDOS            ; Wait for input ready
 
-        POP     DE              ; Restore console number in D
-        POP     BC
+        DB      0DDH, 07DH      ; LD A, IXL (undocumented)
+        LD      D, A
 
-        ; Now read the character
         LD      A, FUNC_CONIN
         OUT     (XIOS_DISPATCH), A
         IN      A, (XIOS_DISPATCH)
@@ -164,6 +161,8 @@ DO_CONIN:
 
 DO_CONOUT:
         ; Console output - D = console number, C = character
+        ; Output queue is large enough that overflow is unlikely.
+        ; TODO: Add output status check if flow control needed.
         LD      A, FUNC_CONOUT
         OUT     (XIOS_DISPATCH), A
         RET
@@ -337,13 +336,16 @@ DO_SYSINIT:
         ; Set interrupt mode 1 (Z80)
         IM      1
 
+        ; Enable TICKN immediately - XDOS's STARTCLOCK call isn't reliable in emulator
+        ; (In real hardware, STARTCLOCK is called by dispatcher when delay list is empty)
+        LD      A, 0FFH
+        LD      (TICKN), A
+
         ; Notify emulator of initialization
         LD      A, FUNC_SYSINIT
         OUT     (XIOS_DISPATCH), A
 
         ; IMPORTANT: Enable interrupts LAST, after all initialization
-        ; Do NOT enable TICKN here - XDOS will call STARTCLOCK when ready
-        ; (Per SIMH XIOS: tickn starts at 0, STARTCLOCK sets it to 0xFF)
         EI
         RET
 

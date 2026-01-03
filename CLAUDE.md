@@ -8,11 +8,11 @@ This emulator runs MP/M II, Digital Research's multi-user, multi-tasking operati
 
 ## Architecture
 
-### Threading Model
+### Execution Model
 
-- **Z80 Thread**: Single thread running the Z80 CPU emulator with 60Hz timer interrupts for MP/M II scheduling
-- **SSH Session Threads**: One thread per SSH connection, bridging the SSH stream to console I/O queues
-- **Main Thread**: SSH accept loop and signal handling
+The emulator runs single-threaded with polling:
+- **Main Loop**: Runs Z80 CPU in batches, handles console I/O, 60Hz timer interrupts
+- **SSH Sessions**: Bridge SSH connections to console I/O queues
 
 ### Memory Model
 
@@ -27,7 +27,7 @@ MP/M II uses bank-switched memory:
 | Console | `console.h/cpp`, `console_queue.h` | Thread-safe character queues for terminal I/O |
 | Memory | `banked_mem.h/cpp` | Bank-switched memory for process isolation |
 | XIOS | `xios.h/cpp` | Extended I/O System - MP/M II hardware abstraction |
-| Z80 | `z80_thread.h/cpp` | CPU emulation thread with timer interrupts |
+| Z80 | `z80_runner.h/cpp` | CPU emulation with timer interrupts |
 | Disk | `disk.h/cpp` | CP/M-compatible disk image I/O |
 | SSH | `ssh_session.h/cpp` | libssh-based terminal access |
 
@@ -142,35 +142,27 @@ ssh-keygen -t rsa -b 2048 -m PEM -f keys/ssh_host_rsa_key -N ''
 ## Usage
 
 ```bash
-./mpm2_emu [options]
+./mpm2_emu [options] -d A:diskimage
 
 Options:
+  -d, --disk A:FILE     Mount disk image on drive A-P (required)
+  -l, --local           Enable local console (output to stdout)
+  -t, --timeout SECS    Timeout in seconds for debugging
   -p, --port PORT       SSH listen port (default: 2222)
   -k, --key FILE        Host key file (default: keys/ssh_host_rsa_key)
-  -d, --disk A:FILE     Mount disk image on drive A-P
-  -b, --boot FILE       Boot image file (NOT WORKING - use -s instead)
-  -s, --sys FILE        Load MPM.SYS directly (recommended, only working method)
-  -l, --local           Enable local console output
-  -t, --timeout SECS    Boot timeout for debugging
+  -h, --help            Show help
 
 Examples:
-  # Direct MPM.SYS load (recommended - the only working boot method)
-  ./mpm2_emu -l -s disks/mpm.sys -d A:disks/mpm2_system.img
+  # Local console mode
+  ./mpm2_emu -l -d A:disks/mpm2_hd1k.img
 
-  # With SSH support (no -l flag)
-  ./mpm2_emu -s disks/mpm.sys -d A:disks/mpm2_system.img
+  # SSH mode (connect with ssh -p 2222 user@localhost)
+  ./mpm2_emu -d A:disks/mpm2_hd1k.img
 ```
 
-**Note:** Boot via MPMLDR (`-b` option) is not currently working. The emulator cannot properly handle MPMLDR's boot sequence. Use direct MPM.SYS loading (`-s` option) instead.
-
-Connect via SSH:
-```bash
-ssh -p 2222 user@localhost
-```
+The emulator boots from disk sector 0 of drive A using the cold start loader.
 
 ## Boot Process - The Four Layers
-
-**Note:** This section documents the theoretical boot process. The MPMLDR-based boot (`-b` option) is not currently working in the emulator. Use direct MPM.SYS loading (`-s` option) instead.
 
 MP/M II boot involves four distinct software layers. **Each layer uses different BIOS code.**
 

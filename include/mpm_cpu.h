@@ -48,9 +48,6 @@ public:
     bool is_halted() const { return halted_; }
     void clear_halted() { halted_ = false; }
 
-    // Debug/statistics
-    bool debug_io = false;
-
 private:
     XIOS* xios_ = nullptr;
     BankedMemory* banked_mem_ = nullptr;

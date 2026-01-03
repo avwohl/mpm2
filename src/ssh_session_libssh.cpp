@@ -83,10 +83,14 @@ void SSHSession::thread_func() {
     std::cerr << "[SSH:" << console_id_ << "] Entering main loop\n";
 
     uint8_t buf[256];
+    bool eof_received = false;
+    int idle_after_eof = 0;  // Count idle iterations after EOF
 
     while (!stop_requested_.load()) {
-        // Check if channel is still open
-        if (ssh_channel_is_closed(channel_) || ssh_channel_is_eof(channel_)) {
+        // Check if channel is still open - but if we're draining after EOF,
+        // don't exit immediately (client may have closed channel)
+        if (ssh_channel_is_closed(channel_) && !eof_received) {
+            std::cerr << "[SSH:" << console_id_ << "] Channel closed (not draining)\n";
             break;
         }
 
@@ -112,27 +116,53 @@ void SSHSession::thread_func() {
                     did_work = true;
                 }
             }
+            idle_after_eof = 0;  // Reset counter when we have output
         }
 
-        // Read input from SSH client (non-blocking)
-        int n = ssh_channel_read_nonblocking(channel_, buf, sizeof(buf), 0);
-        if (n > 0) {
-            std::cerr << "[SSH:" << console_id_ << "] Read " << n << " bytes: ";
-            // Queue characters for MP/M
-            for (int i = 0; i < n; i++) {
-                uint8_t ch = buf[i];
-                std::cerr << "0x" << std::hex << (int)ch << " ";
-                if (ch == '\n') ch = '\r';  // LF -> CR for CP/M
-                con->input_queue().try_write(ch);
+        // Read input from SSH client (non-blocking) - skip if already got EOF
+        if (!eof_received) {
+            int n = ssh_channel_read_nonblocking(channel_, buf, sizeof(buf), 0);
+            if (n > 0) {
+                std::cerr << "[SSH:" << console_id_ << "] Read " << n << " bytes: ";
+                // Queue characters for MP/M
+                for (int i = 0; i < n; i++) {
+                    uint8_t ch = buf[i];
+                    std::cerr << "0x" << std::hex << (int)ch << " ";
+                    if (ch == '\n') ch = '\r';  // LF -> CR for CP/M
+                    bool queued = con->input_queue().try_write(ch);
+                    if (!queued) {
+                        std::cerr << "(QUEUE FULL!) ";
+                    }
+                }
+                size_t q = con->input_queue().available();
+                std::cerr << std::dec << " [QUEUED:" << q << "]" << std::endl;
+                did_work = true;
+            } else if (n == SSH_ERROR) {
+                std::cerr << "[SSH:" << console_id_ << "] Read error: "
+                          << ssh_get_error(session_) << "\n";
+                break;
+            } else if (n == SSH_EOF || ssh_channel_is_eof(channel_)) {
+                std::cerr << "[SSH:" << console_id_ << "] Client EOF, waiting for output flush\n";
+                eof_received = true;
             }
-            std::cerr << std::dec << "\n";
-            did_work = true;
-        } else if (n == SSH_ERROR) {
-            std::cerr << "[SSH:" << console_id_ << "] Read error: "
-                      << ssh_get_error(session_) << "\n";
-            break;
-        } else if (n == SSH_EOF) {
-            break;
+        }
+
+        // After EOF, exit if we've been idle for a while (no more output coming)
+        if (eof_received) {
+            if (!did_work) {
+                idle_after_eof++;
+                if (idle_after_eof % 100 == 1) {
+                    std::cerr << "[SSH:" << console_id_ << "] Draining, idle=" << idle_after_eof << "\n";
+                }
+                // Wait up to 5 seconds (500 iterations * 10ms) for any pending output
+                // MP/M needs time to context-switch to TMP, read input, and process command
+                if (idle_after_eof > 500) {
+                    std::cerr << "[SSH:" << console_id_ << "] Drain timeout\n";
+                    break;
+                }
+            } else {
+                std::cerr << "[SSH:" << console_id_ << "] Output during drain\n";
+            }
         }
 
         // Sleep if idle - use poll on SSH socket to wake on activity

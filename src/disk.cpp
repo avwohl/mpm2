@@ -289,10 +289,10 @@ int DiskSystem::read(BankedMemory* mem) {
 
     if (result == 0) {
         // Copy 128 bytes (one CP/M record) to memory at DMA address
-        // Use the target bank for addresses in banked memory (<C000H)
+        // Use the target bank for addresses in banked memory
         for (uint16_t i = 0; i < 128; i++) {
             uint16_t addr = dma_addr_ + i;
-            if (addr < 0xC000) {
+            if (addr < BankedMemory::COMMON_BASE) {
                 // Banked address - write to the specified target bank
                 mem->write_bank(dma_bank_, addr, buffer[offset_in_phys + i]);
             } else {
@@ -331,10 +331,10 @@ int DiskSystem::write(BankedMemory* mem) {
     disk->read_sector(buffer);
 
     // Modify the 128-byte portion
-    // Use the target bank for addresses in banked memory (<C000H)
+    // Use the target bank for addresses in banked memory
     for (uint16_t i = 0; i < 128; i++) {
         uint16_t addr = dma_addr_ + i;
-        if (addr < 0xC000) {
+        if (addr < BankedMemory::COMMON_BASE) {
             // Banked address - read from the specified target bank
             buffer[offset_in_phys + i] = mem->read_bank(dma_bank_, addr);
         } else {
