@@ -227,14 +227,20 @@ void XIOS::do_polldevice() {
         bool is_input = (device & 1) != 0;
 
         if (console < 8) {
+            Console* con = ConsoleManager::instance().get(console);
             if (is_input) {
-                Console* con = ConsoleManager::instance().get(console);
                 if (con && con->const_status()) {
                     result = 0xFF;
                 }
             } else {
-                // Console output - always ready
-                result = 0xFF;
+                // Console output - ready if queue has space OR console not connected
+                // For unconnected consoles, return ready (chars will be dropped if queue full)
+                // Only block/wait if someone is actually draining the queue
+                bool connected = con && con->is_connected();
+                bool full = con && con->output_queue().full();
+                if (!con || !connected || !full) {
+                    result = 0xFF;
+                }
             }
         }
     }

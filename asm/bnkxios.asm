@@ -161,8 +161,26 @@ DO_CONIN:
 
 DO_CONOUT:
         ; Console output - D = console number, C = character
-        ; Output queue is large enough that overflow is unlikely.
-        ; TODO: Add output status check if flow control needed.
+        ; Poll output device before writing to avoid queue overflow
+        ; Save C (character) in IXL, D (console) in IXH
+        LD      A, C
+        DB      0DDH, 06FH      ; LD IXL, A (save character)
+        LD      A, D
+        DB      0DDH, 067H      ; LD IXH, A (save console)
+
+        ; Calculate output device = 2*console (even = output)
+        ADD     A, A            ; A = 2*console
+        LD      E, A            ; E = output device number
+        LD      D, 0            ; D = 0 for simple poll
+        LD      C, POLL
+        CALL    XDOS            ; Wait for output ready
+
+        ; Restore console and character
+        DB      0DDH, 07CH      ; LD A, IXH (restore console)
+        LD      D, A
+        DB      0DDH, 07DH      ; LD A, IXL (restore character)
+        LD      C, A
+
         LD      A, FUNC_CONOUT
         OUT     (XIOS_DISPATCH), A
         RET
