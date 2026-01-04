@@ -7,8 +7,11 @@ A Z80-based MP/M II emulator with SSH terminal access. Multiple users can connec
 ## Quick Start
 
 ```bash
-# Build everything
+# Build with DRI binaries (default, fast)
 ./scripts/build_all.sh
+
+# Or build from source (requires uplm80/um80/ul80)
+./scripts/build_all.sh --tree=src
 
 # Run with local console
 ./build/mpm2_emu -l -d A:disks/mpm2_system.img
@@ -44,6 +47,12 @@ cd um80_and_friends
 pip install -e .  # Installs um80 and ul80 commands
 cd ..
 
+# uplm80 - PL/M-80 cross-compiler (required for --tree=src builds)
+git clone https://github.com/avwohl/uplm80.git
+cd uplm80
+pip install -e .  # Installs uplm80 command
+cd ..
+
 # MP/M II distribution files (required) - contact maintainer for access
 # Should be placed in mpm2/mpm2_external/
 ```
@@ -62,17 +71,48 @@ sudo apt install libssh-dev
 
 ## Building
 
+The project supports two binary trees:
+
+| Tree | Description | Requirements |
+|------|-------------|--------------|
+| `dri` | Original DRI binaries (default) | None - binaries included |
+| `src` | Build from source code | uplm80, um80, ul80 |
+
 ```bash
 cd mpm2
+
+# Build with DRI binaries (fast, recommended)
 ./scripts/build_all.sh
+
+# Build from source (compiles PL/M and assembly)
+./scripts/build_all.sh --tree=src
 ```
 
-This runs three steps:
-1. **build_hd1k.sh** - Creates 8MB disk image with MP/M II files
-2. **build_asm.sh** - Assembles LDRBIOS and BNKXIOS, builds C++ emulator, writes boot sector
-3. **gensys.sh** - Runs GENSYS to create MPM.SYS (4 consoles, 7 memory banks)
+Build steps:
+1. **[src only] build_src.sh** - Compile source code to bin/src/
+2. **build_hd1k.sh** - Creates 8MB disk image with binaries from selected tree
+3. **build_asm.sh** - Assembles LDRBIOS and BNKXIOS, builds C++ emulator, writes boot sector
+4. **gensys.sh** - Runs GENSYS to create MPM.SYS (4 consoles, 7 memory banks)
 
 Output: `disks/mpm2_system.img` - bootable disk with MP/M II
+
+### Building from Source
+
+When using `--tree=src`, all utilities are compiled from the original Digital Research
+source code using modern cross-compilers:
+
+- **uplm80** - PL/M-80 to Z80 assembly compiler
+- **um80** - MACRO-80 compatible assembler
+- **ul80** - LINK-80 compatible linker
+
+The source build system supports local modifications in `src/overrides/` that take
+precedence over the original source. For example, the MPMLDR has its serial number
+check disabled in `src/overrides/MPMLDR/MPMLDR.PLM`.
+
+To build just the source binaries without creating a disk:
+```bash
+./scripts/build_src.sh
+```
 
 ### SSH Setup
 
@@ -131,19 +171,33 @@ ssh -p 2222 user@localhost
 ```
 mpm2/
 ├── scripts/
-│   ├── build_all.sh      # Master build script
+│   ├── build_all.sh      # Master build script (--tree=dri|src)
+│   ├── build_src.sh      # Build from source code
 │   ├── build_hd1k.sh     # Create disk image with MP/M II files
 │   ├── build_asm.sh      # Assemble Z80 code, build C++, write boot sector
 │   └── gensys.sh         # Generate MPM.SYS
+├── bin/
+│   ├── dri/              # Original DRI binaries (.COM, .PRL, .SPR)
+│   └── src/              # Source-built binaries (generated)
+├── src/
+│   ├── overrides/        # Source code modifications
+│   │   ├── MPMLDR/       # MPMLDR with disabled serial check
+│   │   └── NUCLEUS/      # Kernel source overrides
+│   └── cpm_runtime.mac   # Runtime support for PL/M programs
+├── tools/
+│   ├── build.py          # Source build script (Python)
+│   └── dri_patch.py      # Binary patching tool
 ├── asm/
 │   ├── coldboot.asm      # Boot sector (loads MPMLDR + LDRBIOS)
 │   ├── ldrbios.asm       # Loader BIOS for boot phase
 │   └── bnkxios.asm       # Runtime XIOS (I/O port dispatch)
-├── src/                  # C++ emulator source
+├── emulator/             # C++ emulator source
 ├── include/              # C++ headers
 ├── build/                # CMake build directory (generated)
 ├── disks/                # Disk images (generated)
-└── mpm2_external/        # MP/M II distribution (not in git)
+└── mpm2_external/        # MP/M II source and distribution (not in git)
+    ├── mpm2src/          # Original source code
+    └── mpm2dist/         # Original binaries
 ```
 
 ## How It Works
