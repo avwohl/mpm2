@@ -11,17 +11,17 @@
 #include <memory>
 
 // MP/M II memory model:
-// - Page 0 (0x0000-0x00FF): Low common area (shared, for interrupt vectors)
-// - Banked (0x0100-0xBFFF): Bank-switchable per process
+// - Banked (0x0000-0xBFFF): Bank-switchable per process (48KB per bank)
 // - Upper 16KB (0xC000-0xFFFF): High common area (shared by all processes)
 //
 // Banks are selected via SELMEMORY XIOS call.
 // Bank 0 is typically the system bank.
 // Banks 1-N are user memory segments.
 //
-// The low common area is required because Z80 interrupt vectors (RST 0-7)
-// are at fixed addresses 0x0000, 0x0008, ..., 0x0038 and must be accessible
-// from all banks for interrupts to work correctly.
+// Page 0 (0x0000-0x00FF) is part of each bank, NOT shared. This is correct
+// because page 0 contains per-process data (FCB at 0x5C, DMA at 0x80, etc.).
+// Only the interrupt vectors (RST 0-7 at 0x00, 0x08, ..., 0x38) need to be
+// the same in each bank. SYSINIT copies these from bank 0 to all other banks.
 
 class BankedMemory : public qkz80_cpu_mem {
 public:
@@ -66,10 +66,8 @@ private:
     uint8_t current_bank_;
 
     // Memory storage: banks[i] is 48KB for bank i (0x0000-0xBFFF)
+    // Page 0 is part of each bank (not shared)
     std::vector<std::unique_ptr<uint8_t[]>> banks_;
-
-    // Low common area: 256 bytes (0x0000-0x00FF) - shared by all banks
-    std::unique_ptr<uint8_t[]> low_common_;
 
     // High common area: 16KB (0xC000-0xFFFF)
     std::unique_ptr<uint8_t[]> common_;

@@ -331,8 +331,47 @@ DO_MAXCON:
 
 DO_SYSINIT:
         ; System initialization
-        ; Set up interrupt handler at RST 7 (0038H)
-        LD      A, 0C3H         ; JP opcode
+        ; Input parameters (from MP/M):
+        ;   C  = MP/M debugger restart # (0-7 for RST 0-7)
+        ;   DE = MP/M debugger entry point address
+        ;   HL = BIOS direct jump table address
+        ;
+        ; We set up low memory in bank 0 here. The emulator's FUNC_SYSINIT
+        ; handler will copy the low 256 bytes to all other banks.
+
+        ; Calculate debugger RST address: addr = C * 8
+        LD      A, C
+        AND     07H                     ; Ensure valid RST number (0-7)
+        RLCA                            ; *2
+        RLCA                            ; *4
+        RLCA                            ; *8
+        LD      C, A                    ; C = RST address (0, 8, 16, ..., 56)
+
+        ; Set JMP at 0x0000 -> BIOS direct jump table (HL)
+        LD      A, 0C3H                 ; JP opcode
+        LD      (0000H), A
+        LD      (0001H), HL             ; Store address from HL
+
+        ; Set JMP at debugger RST address -> debugger entry point (DE)
+        ; C = RST address, use it as low byte of pointer
+        LD      L, C
+        LD      H, 0                    ; HL = RST address
+        LD      A, 0C3H                 ; JP opcode
+        LD      (HL), A
+        INC     HL
+        LD      (HL), E                 ; Low byte of debugger entry (from DE)
+        INC     HL
+        LD      (HL), D                 ; High byte of debugger entry
+
+        ; Set JMP at 0x0005 -> XDOS entry (COMMONBASE+12 has JP XDOS)
+        ; This is the CP/M-compatible BDOS entry point
+        LD      A, 0C3H                 ; JP opcode
+        LD      (0005H), A
+        LD      HL, COMMONBASE+12       ; XDOS entry in jump table
+        LD      (0006H), HL
+
+        ; Set JMP at 0x0038 (RST 7) -> interrupt handler (INTHND)
+        LD      A, 0C3H                 ; JP opcode
         LD      (0038H), A
         LD      HL, INTHND
         LD      (0039H), HL
@@ -345,9 +384,12 @@ DO_SYSINIT:
         LD      A, 0FFH
         LD      (TICKN), A
 
-	LD HL,BNK_VERSION
+        ; Debug: pass COMMONBASE and version to emulator
+        LD      DE, COMMONBASE
+        LD      HL, BNK_VERSION
 
         ; Notify emulator of initialization
+        ; The emulator will copy low 256 bytes of bank 0 to all other banks
         LD      A, FUNC_SYSINIT
         OUT     (XIOS_DISPATCH), A
 

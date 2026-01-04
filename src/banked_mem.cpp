@@ -16,6 +16,8 @@ BankedMemory::BankedMemory(int num_banks)
     }
 
     // Allocate banks (each BANK_SIZE)
+    // Page 0 (0x0000-0x00FF) is part of each bank, NOT shared.
+    // Only interrupt vectors need to be copied to each bank at SYSINIT.
     banks_.reserve(num_banks);
     for (int i = 0; i < num_banks; i++) {
         auto bank = std::make_unique<uint8_t[]>(BANK_SIZE);
@@ -23,37 +25,27 @@ BankedMemory::BankedMemory(int num_banks)
         banks_.push_back(std::move(bank));
     }
 
-    // Allocate low common area (page 0 for interrupt vectors)
-    low_common_ = std::make_unique<uint8_t[]>(LOW_COMMON_SIZE);
-    std::memset(low_common_.get(), 0, LOW_COMMON_SIZE);
-
     // Allocate high common area (16KB for NUCLEUS layout)
     common_ = std::make_unique<uint8_t[]>(COMMON_SIZE);
     std::memset(common_.get(), 0, COMMON_SIZE);
 }
 
 qkz80_uint8 BankedMemory::fetch_mem(qkz80_uint16 addr, bool is_instruction) {
-    if (addr < LOW_COMMON_SIZE) {
-        // Low common area (page 0 - interrupt vectors)
-        return low_common_[addr];
-    } else if (addr >= COMMON_BASE) {
-        // High common area
+    if (addr >= COMMON_BASE) {
+        // High common area (0xC000-0xFFFF)
         return common_[addr - COMMON_BASE];
     } else {
-        // Banked area
+        // Banked area (0x0000-0xBFFF) - includes page 0
         return banks_[current_bank_][addr];
     }
 }
 
 void BankedMemory::store_mem(qkz80_uint16 addr, qkz80_uint8 byte) {
-    if (addr < LOW_COMMON_SIZE) {
-        // Low common area (page 0 - interrupt vectors)
-        low_common_[addr] = byte;
-    } else if (addr >= COMMON_BASE) {
-        // High common area
+    if (addr >= COMMON_BASE) {
+        // High common area (0xC000-0xFFFF)
         common_[addr - COMMON_BASE] = byte;
     } else {
-        // Banked area
+        // Banked area (0x0000-0xBFFF) - includes page 0
         banks_[current_bank_][addr] = byte;
     }
 }
@@ -64,24 +56,19 @@ void BankedMemory::select_bank(uint8_t bank) {
 }
 
 uint8_t BankedMemory::read_bank(uint8_t bank, uint16_t addr) const {
-    if (addr < LOW_COMMON_SIZE) {
-        return low_common_[addr];
-    } else if (addr >= COMMON_BASE) {
+    assert(bank < num_banks_ && "read_bank: invalid bank number");
+    if (addr >= COMMON_BASE) {
         return common_[addr - COMMON_BASE];
     }
-    assert(bank < num_banks_ && "read_bank: invalid bank number");
     return banks_[bank][addr];
 }
 
 void BankedMemory::write_bank(uint8_t bank, uint16_t addr, uint8_t byte) {
-    if (addr < LOW_COMMON_SIZE) {
-        low_common_[addr] = byte;
-        return;
-    } else if (addr >= COMMON_BASE) {
+    assert(bank < num_banks_ && "write_bank: invalid bank number");
+    if (addr >= COMMON_BASE) {
         common_[addr - COMMON_BASE] = byte;
         return;
     }
-    assert(bank < num_banks_ && "write_bank: invalid bank number");
     banks_[bank][addr] = byte;
 }
 
@@ -100,14 +87,11 @@ void BankedMemory::load(uint8_t bank, uint16_t addr, const uint8_t* data, size_t
 
     for (size_t i = 0; i < len; i++) {
         uint16_t target = addr + i;
-        if (target < LOW_COMMON_SIZE) {
-            // Load to low common area (page 0)
-            low_common_[target] = data[i];
-        } else if (target >= COMMON_BASE) {
+        if (target >= COMMON_BASE) {
             // Load to high common area
             common_[target - COMMON_BASE] = data[i];
         } else {
-            // Load to banked area
+            // Load to banked area (includes page 0)
             banks_[bank][target] = data[i];
         }
     }

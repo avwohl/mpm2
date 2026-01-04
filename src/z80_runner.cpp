@@ -150,19 +150,6 @@ bool Z80Runner::run_polled() {
             }
         }
 
-        // Debug: track IFF1 transitions around the critical area
-        static uint8_t prev_iff1 = 255;
-        static uint64_t last_iff1_change = 0;
-
-        // Warn if stuck at 0 for 1M instructions
-        if (cpu_->regs.IFF1 == 0 && instruction_count_ - last_iff1_change > 1000000) {
-	  cpu_->regs.IFF1=1;
-	  std::cerr << "[IFF1 STUCK] Last change at inst=" << last_iff1_change
-                      << ", now=" << instruction_count_ << "\n";
-	  last_iff1_change = instruction_count_;
-        }
-	prev_iff1 = cpu_->regs.IFF1;
-
         cpu_->check_interrupts();
         cpu_->execute();
         instruction_count_++;
