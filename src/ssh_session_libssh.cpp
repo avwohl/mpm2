@@ -13,6 +13,8 @@
 #include <libssh/server.h>
 #include <libssh/callbacks.h>
 #include <iostream>
+#include <fstream>
+#include <sstream>
 #include <cstring>
 #include <unistd.h>
 #include <fcntl.h>
@@ -28,7 +30,7 @@ static bool set_nonblocking(int fd) {
 // SSHSession - handles one connection with non-blocking I/O
 // ============================================================================
 
-SSHSession::SSHSession(ssh_session session)
+SSHSession::SSHSession(ssh_session session, SSHServer* server)
     : session_(session)
     , channel_(nullptr)
     , event_(nullptr)
@@ -36,6 +38,7 @@ SSHSession::SSHSession(ssh_session session)
     , console_id_(-1)
     , kex_done_(false)
     , sent_banner_(false)
+    , server_(server)
 {
     // Create event context (don't add session until after KEX)
     event_ = ssh_event_new();
@@ -113,9 +116,51 @@ bool SSHSession::poll_handshake() {
                 int subtype = ssh_message_subtype(msg);
 
                 if (type == SSH_REQUEST_AUTH) {
-                    // Accept any authentication
-                    ssh_message_auth_reply_success(msg, 0);
-                    state_ = SSHState::CHANNEL_OPEN;
+                    // Check authentication
+                    if (server_ && server_->no_auth()) {
+                        // No authentication required - accept anything
+                        ssh_message_auth_reply_success(msg, 0);
+                        state_ = SSHState::CHANNEL_OPEN;
+                    } else if (subtype == SSH_AUTH_METHOD_PUBLICKEY) {
+                        // Public key authentication
+                        ssh_key pubkey = ssh_message_auth_pubkey(msg);
+                        if (pubkey) {
+                            // Get key type and base64 blob for comparison
+                            const char* key_type = ssh_key_type_to_char(ssh_key_type(pubkey));
+                            char* b64_key = nullptr;
+                            if (ssh_pki_export_pubkey_base64(pubkey, &b64_key) == SSH_OK && b64_key) {
+                                std::string key_str = std::string(key_type) + " " + b64_key;
+                                ssh_string_free_char(b64_key);
+
+                                if (server_ && server_->is_key_authorized(key_str)) {
+                                    // Key is authorized
+                                    if (ssh_message_auth_publickey_state(msg) == SSH_PUBLICKEY_STATE_VALID) {
+                                        // Signature verified - grant access
+                                        ssh_message_auth_reply_success(msg, 0);
+                                        state_ = SSHState::CHANNEL_OPEN;
+                                    } else {
+                                        // Key OK but need signature - tell client to sign
+                                        ssh_message_auth_reply_pk_ok_simple(msg);
+                                    }
+                                } else {
+                                    // Key not in authorized_keys
+                                    ssh_message_reply_default(msg);
+                                }
+                            } else {
+                                ssh_message_reply_default(msg);
+                            }
+                        } else {
+                            ssh_message_reply_default(msg);
+                        }
+                    } else if (subtype == SSH_AUTH_METHOD_NONE) {
+                        // Client asking what auth methods are supported
+                        ssh_message_auth_set_methods(msg, SSH_AUTH_METHOD_PUBLICKEY);
+                        ssh_message_reply_default(msg);
+                    } else {
+                        // Other auth methods (password, etc.) - reject
+                        ssh_message_auth_set_methods(msg, SSH_AUTH_METHOD_PUBLICKEY);
+                        ssh_message_reply_default(msg);
+                    }
                 } else if (type == SSH_REQUEST_CHANNEL_OPEN) {
                     if (subtype == SSH_CHANNEL_SESSION) {
                         channel_ = ssh_message_channel_request_open_reply_accept(msg);
@@ -256,6 +301,45 @@ SSHServer::~SSHServer() {
     stop();
 }
 
+bool SSHServer::load_authorized_keys(const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        std::cerr << "[SSH] Cannot open authorized_keys: " << path << "\n";
+        return false;
+    }
+
+    authorized_keys_.clear();
+    std::string line;
+    int count = 0;
+
+    while (std::getline(file, line)) {
+        // Skip empty lines and comments
+        if (line.empty() || line[0] == '#') continue;
+
+        // Parse: key_type base64_key [comment]
+        // We store the "key_type base64_key" portion for comparison
+        std::istringstream iss(line);
+        std::string key_type, key_blob;
+        if (iss >> key_type >> key_blob) {
+            // Store as "type blob" for matching
+            authorized_keys_.push_back(key_type + " " + key_blob);
+            count++;
+        }
+    }
+
+    std::cerr << "[SSH] Loaded " << count << " authorized keys from " << path << "\n";
+    return count > 0;
+}
+
+bool SSHServer::is_key_authorized(const std::string& key_blob) const {
+    for (const auto& key : authorized_keys_) {
+        if (key == key_blob) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool SSHServer::init(const std::string& host_key_path) {
     sshbind_ = ssh_bind_new();
     if (!sshbind_) {
@@ -336,7 +420,7 @@ void SSHServer::poll_accept() {
     ssh_set_blocking(session, 0);  // Tell libssh we're non-blocking
 
     // Create session object - handshake will proceed in poll()
-    sessions_.push_back(std::make_unique<SSHSession>(session));
+    sessions_.push_back(std::make_unique<SSHSession>(session, this));
 }
 
 void SSHServer::poll_sessions() {

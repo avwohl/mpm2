@@ -31,10 +31,12 @@ enum class SSHState {
     CLOSED
 };
 
+class SSHServer;  // Forward declaration
+
 // SSH session - handles one SSH connection (non-blocking)
 class SSHSession {
 public:
-    SSHSession(ssh_session session);
+    SSHSession(ssh_session session, SSHServer* server);
     ~SSHSession();
 
     // Poll for handshake progress and I/O - call from main loop
@@ -56,6 +58,7 @@ private:
     int console_id_;
     bool kex_done_;
     bool sent_banner_;
+    SSHServer* server_;
 };
 
 // SSH server - accepts connections (non-blocking)
@@ -74,6 +77,12 @@ public:
     bool is_running() const { return running_; }
     size_t session_count() const;
 
+    // Authentication settings
+    void set_no_auth(bool no_auth) { no_auth_ = no_auth; }
+    bool load_authorized_keys(const std::string& path);
+    bool is_key_authorized(const std::string& key_blob) const;
+    bool no_auth() const { return no_auth_; }
+
 private:
     // Try to accept a new connection (non-blocking)
     void poll_accept();
@@ -84,6 +93,8 @@ private:
     ssh_bind sshbind_;
     int port_;
     bool running_;
+    bool no_auth_ = false;
+    std::vector<std::string> authorized_keys_;  // Base64 encoded public keys
 
     std::vector<std::unique_ptr<SSHSession>> sessions_;
 };

@@ -78,6 +78,8 @@ void print_usage(const char* prog) {
 #ifdef HAVE_SSH
               << "  -p, --port PORT       SSH listen port (default: 2222)\n"
               << "  -k, --key FILE        Host key file (default: keys/ssh_host_rsa_key)\n"
+              << "  -a, --authorized-keys FILE  Authorized keys file (default: keys/authorized_keys)\n"
+              << "  -n, --no-auth         Disable SSH authentication (accept any connection)\n"
 #endif
               << "  -h, --help            Show this help\n"
               << "\n"
@@ -99,6 +101,8 @@ int main(int argc, char* argv[]) {
 #ifdef HAVE_SSH
     int ssh_port = 2222;
     std::string host_key = "keys/ssh_host_rsa_key";
+    std::string authorized_keys = "keys/authorized_keys";
+    bool no_auth = false;
 #endif
 
     // Parse command line options
@@ -109,6 +113,8 @@ int main(int argc, char* argv[]) {
 #ifdef HAVE_SSH
         {"port",          required_argument, nullptr, 'p'},
         {"key",           required_argument, nullptr, 'k'},
+        {"authorized-keys", required_argument, nullptr, 'a'},
+        {"no-auth",       no_argument,       nullptr, 'n'},
 #endif
         {"help",          no_argument,       nullptr, 'h'},
         {nullptr,         0,                 nullptr, 0}
@@ -116,7 +122,7 @@ int main(int argc, char* argv[]) {
 
     int opt;
 #ifdef HAVE_SSH
-    const char* optstring = "d:lt:p:k:h";
+    const char* optstring = "d:lt:p:k:a:nh";
 #else
     const char* optstring = "d:lt:h";
 #endif
@@ -156,6 +162,12 @@ int main(int argc, char* argv[]) {
                 break;
             case 'k':
                 host_key = optarg;
+                break;
+            case 'a':
+                authorized_keys = optarg;
+                break;
+            case 'n':
+                no_auth = true;
                 break;
 #endif
             case 'h':
@@ -246,6 +258,19 @@ int main(int argc, char* argv[]) {
             std::cerr << "Make sure host key exists: " << host_key << "\n";
             std::cerr << "Generate with: ssh-keygen -t rsa -f " << host_key << " -N ''\n";
             return 1;
+        }
+
+        // Configure authentication
+        if (no_auth) {
+            ssh_server.set_no_auth(true);
+            std::cout << "SSH authentication disabled (--no-auth)\n";
+        } else {
+            if (!ssh_server.load_authorized_keys(authorized_keys)) {
+                std::cerr << "Warning: No authorized keys loaded from " << authorized_keys << "\n";
+                std::cerr << "Copy your public key: cp ~/.ssh/id_rsa.pub " << authorized_keys << "\n";
+                std::cerr << "Or use --no-auth to disable authentication\n";
+                return 1;
+            }
         }
 
         if (!ssh_server.listen(ssh_port)) {

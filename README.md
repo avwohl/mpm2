@@ -74,11 +74,21 @@ This runs three steps:
 
 Output: `disks/mpm2_system.img` - bootable disk with MP/M II
 
-### Generate SSH Host Key
+### SSH Setup
+
+Generate host key and configure user authentication:
 
 ```bash
 mkdir -p keys
+
+# Generate host key (required)
 ssh-keygen -t rsa -b 2048 -m PEM -f keys/ssh_host_rsa_key -N ''
+
+# Copy your public key for authentication
+cp ~/.ssh/id_rsa.pub keys/authorized_keys
+
+# Or to skip authentication (development only):
+# ./build/mpm2_emu --no-auth -d A:disks/mpm2_system.img
 ```
 
 ## Running
@@ -87,12 +97,14 @@ ssh-keygen -t rsa -b 2048 -m PEM -f keys/ssh_host_rsa_key -N ''
 ./build/mpm2_emu [options] -d A:diskimage
 
 Options:
-  -d, --disk A:FILE     Mount disk image (required)
-  -l, --local           Local console mode (output to stdout)
-  -p, --port PORT       SSH listen port (default: 2222)
-  -k, --key FILE        Host key file (default: keys/ssh_host_rsa_key)
-  -t, --timeout SECS    Timeout for debugging
-  -h, --help            Show help
+  -d, --disk A:FILE           Mount disk image (required)
+  -l, --local                 Local console mode (output to stdout)
+  -p, --port PORT             SSH listen port (default: 2222)
+  -k, --key FILE              Host key file (default: keys/ssh_host_rsa_key)
+  -a, --authorized-keys FILE  Authorized keys file (default: keys/authorized_keys)
+  -n, --no-auth               Disable SSH authentication (accept any connection)
+  -t, --timeout SECS          Timeout for debugging
+  -h, --help                  Show help
 ```
 
 The emulator boots from sector 0 of the disk mounted as drive A.
@@ -103,9 +115,12 @@ The emulator boots from sector 0 of the disk mounted as drive A.
 # Local console - see output directly
 ./build/mpm2_emu -l -d A:disks/mpm2_system.img
 
-# SSH mode - connect via ssh
+# SSH mode - connect via ssh (requires keys/authorized_keys)
 ./build/mpm2_emu -d A:disks/mpm2_system.img
 ssh -p 2222 user@localhost
+
+# SSH mode without authentication (development only)
+./build/mpm2_emu --no-auth -d A:disks/mpm2_system.img
 
 # Custom SSH port
 ./build/mpm2_emu -p 2223 -d A:disks/mpm2_system.img

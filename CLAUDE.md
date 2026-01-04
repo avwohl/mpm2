@@ -132,11 +132,16 @@ cmake ..
 make
 ```
 
-### Generate SSH Host Key
+### SSH Setup
 
 ```bash
 mkdir -p keys
+
+# Generate host key (required)
 ssh-keygen -t rsa -b 2048 -m PEM -f keys/ssh_host_rsa_key -N ''
+
+# Copy your public key for authentication
+cp ~/.ssh/id_rsa.pub keys/authorized_keys
 ```
 
 ## Usage
@@ -145,19 +150,24 @@ ssh-keygen -t rsa -b 2048 -m PEM -f keys/ssh_host_rsa_key -N ''
 ./mpm2_emu [options] -d A:diskimage
 
 Options:
-  -d, --disk A:FILE     Mount disk image on drive A-P (required)
-  -l, --local           Enable local console (output to stdout)
-  -t, --timeout SECS    Timeout in seconds for debugging
-  -p, --port PORT       SSH listen port (default: 2222)
-  -k, --key FILE        Host key file (default: keys/ssh_host_rsa_key)
-  -h, --help            Show help
+  -d, --disk A:FILE           Mount disk image on drive A-P (required)
+  -l, --local                 Enable local console (output to stdout)
+  -t, --timeout SECS          Timeout in seconds for debugging
+  -p, --port PORT             SSH listen port (default: 2222)
+  -k, --key FILE              Host key file (default: keys/ssh_host_rsa_key)
+  -a, --authorized-keys FILE  Authorized keys file (default: keys/authorized_keys)
+  -n, --no-auth               Disable SSH authentication (accept any connection)
+  -h, --help                  Show help
 
 Examples:
   # Local console mode
   ./mpm2_emu -l -d A:disks/mpm2_system.img
 
-  # SSH mode (connect with ssh -p 2222 user@localhost)
+  # SSH mode (requires keys/authorized_keys)
   ./mpm2_emu -d A:disks/mpm2_system.img
+
+  # SSH mode without authentication (development only)
+  ./mpm2_emu --no-auth -d A:disks/mpm2_system.img
 ```
 
 The emulator boots from disk sector 0 of drive A using the cold start loader.
