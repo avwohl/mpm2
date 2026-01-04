@@ -223,20 +223,19 @@ bool SSHSession::poll_io() {
     }
 
     // Write from console output queue -> SSH (batched for efficiency)
-    char outbuf[512];
-    size_t outlen = 0;
-    int ch;
-    while (outlen < sizeof(outbuf) && (ch = con->output_queue().try_read()) >= 0) {
-        outbuf[outlen++] = static_cast<char>(ch);
-    }
-    if (outlen > 0) {
-        int written = ssh_channel_write(channel_, outbuf, outlen);
-        if (written < 0) {
-            state_ = SSHState::CLOSED;
-            return false;
+    // Check available window size to avoid blocking or data loss
+    uint32_t window_size = ssh_channel_window_size(channel_);
+    if (window_size > 0) {
+        char outbuf[512];
+        size_t max_write = (window_size < sizeof(outbuf)) ? window_size : sizeof(outbuf);
+        size_t outlen = 0;
+        int ch;
+        while (outlen < max_write && (ch = con->output_queue().try_read()) >= 0) {
+            outbuf[outlen++] = static_cast<char>(ch);
         }
-        // If not all bytes written, we'd need to buffer - for now just continue
-        // The queue will refill and we'll write more next poll
+        if (outlen > 0) {
+            ssh_channel_write(channel_, outbuf, outlen);
+        }
     }
 
     return true;
