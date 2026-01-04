@@ -71,13 +71,14 @@ bool Z80Runner::boot_from_disk() {
     if (first_byte != 0xF3 && first_byte != 0xC3) {
         std::cerr << "Warning: boot sector doesn't start with DI (0xF3) or JP (0xC3)\n";
         std::cerr << "First byte: 0x" << std::hex << (int)first_byte << std::dec << "\n";
+	exit(1);
     }
 
     // Set PC to 0x0000 to start execution at the cold boot loader
     cpu_->regs.PC.set_pair16(0x0000);
 
     // Set up initial stack (will be reset by the boot loader)
-    cpu_->regs.SP.set_pair16(0x0100);
+    cpu_->regs.SP.set_pair16(0xFFFF);
 
     std::cout << "Starting execution at 0x0000\n\n";
 
@@ -116,6 +117,7 @@ bool Z80Runner::run_polled() {
             }
         }
 
+	const int RST_INTERRUPT(7);
         // Check for timer interrupt (60Hz tick)
         if (now >= next_tick_) {
             next_tick_ = now + TICK_INTERVAL;
@@ -130,7 +132,7 @@ bool Z80Runner::run_polled() {
             // Request tick interrupt if clock is enabled
             if (xios_->clock_enabled()) {
                 // Always request the interrupt - CPU will process when IFF1 becomes 1
-                cpu_->request_rst(7);  // RST 38H
+                cpu_->request_rst(RST_INTERRUPT);  // RST 38H
             }
         }
 
@@ -148,7 +150,7 @@ bool Z80Runner::run_polled() {
             } else {
                 // When halted with IFF1=1 but no interrupt pending, request one now
                 if (cpu_->regs.IFF1 && xios_->clock_enabled()) {
-                    cpu_->request_rst(7);
+                    cpu_->request_rst(RST_INTERRUPT);
                     if (cpu_->check_interrupts()) {
                         cpu_->clear_halted();
                         // Don't continue - return to main loop to let SSH drain queues
@@ -174,21 +176,6 @@ bool Z80Runner::run_polled() {
         cpu_->check_interrupts();
         cpu_->execute();
         instruction_count_++;
-
-        // Debug: periodic activity log with PC
-        static uint64_t last_log = 0;
-        if (instruction_count_ - last_log > 50000000) {
-            last_log = instruction_count_;
-            uint16_t pc = cpu_->regs.PC.get_pair16();
-            uint8_t opcode = memory_->fetch_mem(pc);
-            uint8_t byte1 = memory_->fetch_mem(pc + 1);
-            uint8_t byte2 = memory_->fetch_mem(pc + 2);
-            std::cerr << "[Z80] " << (instruction_count_ / 1000000) << "M PC=0x"
-                      << std::hex << pc << " [" << std::setw(2) << std::setfill('0') << (int)opcode
-                      << " " << std::setw(2) << (int)byte1 << " " << std::setw(2) << (int)byte2 << "]"
-                      << std::dec << std::setfill(' ') << " IFF1=" << (int)cpu_->regs.IFF1
-                      << " bank=" << (int)memory_->current_bank() << "\n";
-        }
     }
 
     return true;

@@ -279,36 +279,6 @@ void XIOS::do_systeminit() {
 
     // Enable timer interrupts
     tick_enabled_.store(true);
-
-    // Debug: dump the COMMONBASE structure to verify GENSYS patching
-    // COMMONBASE layout (from bnkxios.asm):
-    //   offset 0:  JP DO_BOOT   (not patched)
-    //   offset 3:  JP SWTUSER   (patched by GENSYS)
-    //   offset 6:  JP SWTSYS    (patched by GENSYS)
-    //   offset 9:  JP PDISP     (patched by GENSYS -> XDOS+3)
-    //   offset 12: JP XDOS      (patched by GENSYS -> XDOS+6)
-    //   offset 15: DW SYSDAT    (patched by GENSYS)
-    uint16_t commonbase = cpu_->regs.DE.get_pair16();
-    std::cerr << "[XIOS] COMMONBASE at 0x" << std::hex << commonbase << std::dec << ":\n";
-
-    const char* names[] = {"DO_BOOT", "SWTUSER", "SWTSYS", "PDISP", "XDOS"};
-    uint16_t addr = commonbase;
-    for (int i = 0; i < 5; i++) {
-        uint8_t opcode = mem_->fetch_mem(addr);
-        uint16_t target = mem_->fetch_mem(addr + 1) | (mem_->fetch_mem(addr + 2) << 8);
-        std::cerr << "  " << names[i] << ": "
-                  << std::hex << std::setw(2) << std::setfill('0') << (int)opcode
-                  << " -> 0x" << std::setw(4) << target << std::dec;
-        if (opcode != 0xC3) {
-            std::cerr << " [ERROR: expected JP opcode 0xC3]";
-        }
-        std::cerr << "\n";
-        addr += 3;
-    }
-
-    // SYSDAT is a 16-bit pointer, not a JP instruction
-    uint16_t sysdat = mem_->fetch_mem(addr) | (mem_->fetch_mem(addr + 1) << 8);
-    std::cerr << "  SYSDAT: 0x" << std::hex << std::setw(4) << sysdat << std::dec << "\n";
 }
 
 void XIOS::do_idle() {

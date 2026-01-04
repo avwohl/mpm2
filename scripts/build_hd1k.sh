@@ -327,6 +327,3 @@ show_contents "$OUTPUT"
 
 echo ""
 echo "Disk image created: $OUTPUT"
-echo ""
-echo "To use with the emulator:"
-echo "  ./mpm2_emu -s disks/mpm.sys -d A:$OUTPUT"
