@@ -21,10 +21,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 MPM2_DISKS="$PROJECT_DIR/mpm2_external/mpm2disks"
-MPM2_DIST="$PROJECT_DIR/mpm2_external/mpm2dist"
 OUTPUT_DIR="$PROJECT_DIR/disks"
 CPM_DISK="${CPM_DISK:-$HOME/src/cpmemu/util/cpm_disk.py}"
 TEMP_DIR=""
+
+# Binary tree selection (dri or src)
+TREE="dri"
+BIN_DIR=""  # Set after parsing args
 
 # Check for required tools
 check_tools() {
@@ -207,12 +210,16 @@ Uses cpm_disk.py for proper SYS attribute handling on .PRL files.
 
 Options:
     -h, --help      Show this help message
+    --tree=TREE     Binary tree to use: 'dri' (default) or 'src'
     -d, --disks DIR Path to MP/M II disk images (default: mpm2_external/mpm2disks)
     -o, --output    Output image path (default: disks/mpm2_hd1k.img)
     --no-disk1      Don't include files from MPMII_1.img
     --no-disk2      Don't include files from MPMII_2.img
-    --no-dist       Don't include additional files from mpm2dist directory
     --empty         Create empty formatted disk only
+
+Binary Trees:
+    dri     Use original DRI binaries from bin/dri/
+    src     Use source-built binaries from bin/src/ (requires build_src.sh)
 
 The hd1k format provides:
     - 8 MB capacity
@@ -225,7 +232,8 @@ Environment:
                     Default: \$HOME/src/cpmemu/util/cpm_disk.py
 
 Example:
-    $0                          # Create default disk
+    $0                          # Create disk with DRI binaries
+    $0 --tree=src               # Create disk with source-built binaries
     $0 -o my_disk.img           # Create custom output
     $0 --empty -o blank.img     # Create empty formatted disk
 
@@ -237,13 +245,20 @@ EOF
 OUTPUT="$OUTPUT_DIR/mpm2_hd1k.img"
 INCLUDE_DISK1=1
 INCLUDE_DISK2=1
-INCLUDE_DIST=1
 EMPTY_ONLY=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
         -h|--help)
             usage
+            ;;
+        --tree=*)
+            TREE="${1#--tree=}"
+            shift
+            ;;
+        --tree)
+            TREE="$2"
+            shift 2
             ;;
         -d|--disks)
             MPM2_DISKS="$2"
@@ -261,10 +276,6 @@ while [ $# -gt 0 ]; do
             INCLUDE_DISK2=0
             shift
             ;;
-        --no-dist)
-            INCLUDE_DIST=0
-            shift
-            ;;
         --empty)
             EMPTY_ONLY=1
             shift
@@ -280,12 +291,33 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# Validate tree selection
+if [ "$TREE" != "dri" ] && [ "$TREE" != "src" ]; then
+    echo "Error: Invalid tree '$TREE'. Use 'dri' or 'src'"
+    exit 1
+fi
+
+# Set binary directory based on tree
+BIN_DIR="$PROJECT_DIR/bin/$TREE"
+DRI_BIN_DIR="$PROJECT_DIR/bin/dri"
+
 # Run
 echo "MP/M II hd1k Disk Builder"
 echo "========================="
+echo "Tree:   $TREE"
+echo "Output: $OUTPUT"
 echo ""
 
 check_tools
+
+# Check that binary directory exists
+if [ ! -d "$BIN_DIR" ]; then
+    echo "Error: Binary directory not found: $BIN_DIR"
+    if [ "$TREE" = "src" ]; then
+        echo "Run scripts/build_src.sh first to build from source"
+    fi
+    exit 1
+fi
 
 # Create output directory
 mkdir -p "$(dirname "$OUTPUT")"
@@ -302,20 +334,51 @@ fi
 # Extract and copy files
 setup_temp
 
-if [ $INCLUDE_DISK1 -eq 1 ]; then
+# Copy files from selected binary tree
+echo "Copying files from $TREE tree..."
+cp "$BIN_DIR"/* "$TEMP_DIR/" 2>/dev/null || true
+BIN_COUNT=$(ls "$TEMP_DIR" 2>/dev/null | wc -l | tr -d ' ')
+echo "  Copied $BIN_COUNT files from bin/$TREE/"
+
+# For source tree, also add static files from DRI that aren't built
+# (like .LIB macro libraries, .DOC documentation, sample .ASM files)
+if [ "$TREE" = "src" ]; then
+    echo "Adding static files from DRI (libraries, docs, samples)..."
+    STATIC_COUNT=0
+    for ext in LIB DOC; do
+        for f in "$DRI_BIN_DIR"/*.$ext; do
+            if [ -f "$f" ]; then
+                name=$(basename "$f")
+                if [ ! -f "$TEMP_DIR/$name" ]; then
+                    cp "$f" "$TEMP_DIR/"
+                    STATIC_COUNT=$((STATIC_COUNT + 1))
+                fi
+            fi
+        done
+    done
+    # Also add sample ASM files (BOOT.ASM, LDRBIOS.ASM, etc.)
+    for f in "$DRI_BIN_DIR"/*.ASM; do
+        if [ -f "$f" ]; then
+            name=$(basename "$f")
+            if [ ! -f "$TEMP_DIR/$name" ]; then
+                cp "$f" "$TEMP_DIR/"
+                STATIC_COUNT=$((STATIC_COUNT + 1))
+            fi
+        fi
+    done
+    echo "  Added $STATIC_COUNT static files"
+fi
+
+# Optionally add files from original floppy images (for completeness)
+if [ $INCLUDE_DISK1 -eq 1 ] && [ -f "$MPM2_DISKS/MPMII_1.img" ]; then
     extract_files "$MPM2_DISKS/MPMII_1.img" "$TEMP_DIR"
 fi
 
-if [ $INCLUDE_DISK2 -eq 1 ]; then
+if [ $INCLUDE_DISK2 -eq 1 ] && [ -f "$MPM2_DISKS/MPMII_2.img" ]; then
     extract_files "$MPM2_DISKS/MPMII_2.img" "$TEMP_DIR"
 fi
 
-# Add files from mpm2dist directory (fills in missing files)
-if [ $INCLUDE_DIST -eq 1 ]; then
-    copy_dist_files "$MPM2_DIST" "$TEMP_DIR"
-fi
-
-# Copy all extracted files to hd1k
+# Copy all files to hd1k
 copy_to_hd1k "$OUTPUT" "$TEMP_DIR"
 
 # Create startup files for each console

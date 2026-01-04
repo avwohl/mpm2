@@ -9,8 +9,11 @@ set -o errexit
 # This script automates the GENSYS process:
 # 1. Creates a BNKXIOS.SPR with the specified number of consoles
 # 2. Runs GENSYS under cpmemu with default settings
-# 3. Patches MPMLDR.COM serial number to match
+# 3. Patches MPMLDR.COM serial number to match (DRI tree only)
 # 4. Creates boot image and disk
+#
+# Usage:
+#   gensys.sh [--tree=dri|src] [num_consoles]
 #
 # Default configuration:
 # - 4 consoles
@@ -30,14 +33,46 @@ CPMEMU="${CPMEMU:-$HOME/src/cpmemu/src/cpmemu}"
 WORK_DIR="/tmp/gensys_work"
 CPM_DISK="${CPM_DISK:-$HOME/src/cpmemu/util/cpm_disk.py}"
 
-# Number of consoles (default 4, matching asm/bnkxios.asm)
-# must match asm/bnkxios.asm:
-# NMBCNS:         EQU     4       ; consoles for SSH users
-NMBCNS=${1:-4}
+# Parse arguments
+TREE="dri"  # Default to DRI binaries
+NMBCNS=4    # Default console count
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --tree=*)
+            TREE="${1#--tree=}"
+            shift
+            ;;
+        --tree)
+            TREE="$2"
+            shift 2
+            ;;
+        [0-9]*)
+            NMBCNS="$1"
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--tree=dri|src] [num_consoles]"
+            exit 1
+            ;;
+    esac
+done
+
+# Validate tree selection
+if [ "$TREE" != "dri" ] && [ "$TREE" != "src" ]; then
+    echo "Error: Invalid tree '$TREE'. Use 'dri' or 'src'"
+    exit 1
+fi
+
+# Set binary directory based on tree
+BIN_DIR="$PROJECT_DIR/bin/$TREE"
 
 echo "MP/M II System Generation"
 echo "========================="
+echo "Tree:     $TREE"
 echo "Consoles: $NMBCNS"
+echo "Binaries: $BIN_DIR"
 echo ""
 
 # Check prerequisites
@@ -62,15 +97,23 @@ fi
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
 
-# Copy required SPR files from distribution directory
-# (disk image versions may be corrupted by cpm_disk.py extraction)
-echo "Extracting SPR files from distribution..."
-DIST_DIR="$PROJECT_DIR/mpm2_external/mpm2dist"
-for f in RESBDOS.SPR BNKBDOS.SPR XDOS.SPR BNKXDOS.SPR TMP.SPR GENSYS.COM; do
+# Copy required SPR files from selected tree
+# GENSYS.COM always from DRI (it's a build tool, no source available)
+echo "Copying SPR files from $TREE tree..."
+for f in RESBDOS.SPR BNKBDOS.SPR XDOS.SPR BNKXDOS.SPR TMP.SPR; do
     lf=$(echo "$f" | tr '[:upper:]' '[:lower:]')
-    cp "$DIST_DIR/$f" "./$lf"
-    echo "Extracted $lf -> ./$lf ($(wc -c < "./$lf" | tr -d ' ') bytes)"
+    if [ -f "$BIN_DIR/$f" ]; then
+        cp "$BIN_DIR/$f" "./$lf"
+        echo "  $lf ($(wc -c < "./$lf" | tr -d ' ') bytes) [$TREE]"
+    else
+        echo "Error: $f not found in $BIN_DIR"
+        exit 1
+    fi
 done
+# GENSYS.COM from DRI (no source available)
+DRI_BIN_DIR="$PROJECT_DIR/bin/dri"
+cp "$DRI_BIN_DIR/GENSYS.COM" "./gensys.com"
+echo "  gensys.com ($(wc -c < gensys.com | tr -d ' ') bytes) [DRI - tool]"
 
 # Copy our custom BNKXIOS.SPR (port-based I/O for emulator)
 if [ -f "$ASM_DIR/bnkxios.spr" ]; then
@@ -151,17 +194,27 @@ fi
 
 echo "MPM.SYS created ($(wc -c < mpm.sys | tr -d ' ') bytes)"
 
-# Get serial number from RESBDOS.SPR and patch MPMLDR.COM
-echo "Patching MPMLDR.COM serial number..."
-# Use original MPMLDR.COM from distribution, not from disk image
-# (disk image version may be corrupted or have wrong format)
-cp "$PROJECT_DIR/mpm2_external/mpm2dist/MPMLDR.COM" mpmldr.com
-
-# Patch serial number: copy 2 bytes from RESBDOS.SPR offset 509-510 to MPMLDR offset 133-134
-# The serial is 6 bytes after "RESEARCH " at offset 0x1F9-0x1FE in RESBDOS.SPR
-# MPMLDR has matching bytes at offset 129-134, bytes 5-6 (133-134) must match
-python3 "$TOOLS_DIR/dri_patch.py" -o mpmldr.com --base mpmldr.com \
-    --copy resbdos.spr:509:2@133
+# Get MPMLDR.COM based on tree selection
+echo "Setting up MPMLDR.COM..."
+if [ "$TREE" = "src" ]; then
+    # Source-built MPMLDR has serial check disabled - no patching needed
+    if [ ! -f "$BIN_DIR/MPMLDR.COM" ]; then
+        echo "Error: Source-built MPMLDR.COM not found at $BIN_DIR/MPMLDR.COM"
+        echo "Run scripts/build_src.sh first"
+        exit 1
+    fi
+    cp "$BIN_DIR/MPMLDR.COM" mpmldr.com
+    echo "  mpmldr.com ($(wc -c < mpmldr.com | tr -d ' ') bytes) [SOURCE - no serial patch needed]"
+else
+    # DRI MPMLDR needs serial number patching
+    cp "$BIN_DIR/MPMLDR.COM" mpmldr.com
+    # Patch serial number: copy 2 bytes from RESBDOS.SPR offset 509-510 to MPMLDR offset 133-134
+    # The serial is 6 bytes after "RESEARCH " at offset 0x1F9-0x1FE in RESBDOS.SPR
+    # MPMLDR has matching bytes at offset 129-134, bytes 5-6 (133-134) must match
+    python3 "$TOOLS_DIR/dri_patch.py" -o mpmldr.com --base mpmldr.com \
+        --copy resbdos.spr:509:2@133
+    echo "  mpmldr.com ($(wc -c < mpmldr.com | tr -d ' ') bytes) [DRI - serial patched]"
+fi
 
 # Create boot image
 echo "Creating boot image..."
