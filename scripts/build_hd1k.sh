@@ -319,7 +319,8 @@ fi
 copy_to_hd1k "$OUTPUT" "$TEMP_DIR"
 
 # Create startup files for each console
-create_startup_files "$OUTPUT"
+# DISABLED for debugging - testing if DIR causes crash
+#create_startup_files "$OUTPUT"
 
 # Show results
 show_contents "$OUTPUT"

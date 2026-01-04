@@ -70,8 +70,13 @@ void XIOS::handle_port_dispatch(uint8_t func) {
 // If D is invalid (>=8), default to console 0 (workaround for possible XDOS issue)
 void XIOS::do_const() {
     uint8_t console = cpu_->regs.DE.get_high();  // D = console number
-    if (console >= 8)
-      throw std::invalid_argument("invalid console status"); 
+    if (console >= 8) {
+      uint16_t pc = cpu_->regs.PC.get_pair16();
+      std::cerr << "[CONST] Invalid console " << (int)console
+                << " DE=0x" << std::hex << cpu_->regs.DE.get_pair16()
+                << " PC=0x" << pc << std::dec << "\n";
+      throw std::invalid_argument("invalid console status");
+    } 
 
     Console* con = ConsoleManager::instance().get(console);
     uint8_t status = con ? con->const_status() : 0x00;
@@ -81,8 +86,13 @@ void XIOS::do_const() {
 
 void XIOS::do_conin() {
     uint8_t console = cpu_->regs.DE.get_high();  // D = console number
-    if (console >= 8)
-      throw std::invalid_argument("invalid console conin"); 
+    if (console >= 8) {
+      uint16_t pc = cpu_->regs.PC.get_pair16();
+      std::cerr << "[CONIN] Invalid console " << (int)console
+                << " DE=0x" << std::hex << cpu_->regs.DE.get_pair16()
+                << " PC=0x" << pc << std::dec << "\n";
+      throw std::invalid_argument("invalid console conin");
+    } 
 
     Console* con = ConsoleManager::instance().get(console);
     uint8_t ch = con ? con->read_char() : 0x1A;  // EOF default if no console
@@ -93,8 +103,13 @@ void XIOS::do_conin() {
 void XIOS::do_conout() {
     // D = console number (MP/M II XIOS convention), C = character
     uint8_t console = cpu_->regs.DE.get_high();  // D = console number
-    if (console >= 8)
-      throw std::invalid_argument("invalid console conout"); 
+    if (console >= 8) {
+      uint16_t pc = cpu_->regs.PC.get_pair16();
+      std::cerr << "[CONOUT] Invalid console " << (int)console
+                << " DE=0x" << std::hex << cpu_->regs.DE.get_pair16()
+                << " PC=0x" << pc << std::dec << "\n";
+      throw std::invalid_argument("invalid console conout");
+    } 
     uint8_t ch = cpu_->regs.BC.get_low();        // C = character
 
     Console* con = ConsoleManager::instance().get(console);
@@ -197,14 +212,16 @@ void XIOS::do_polldevice() {
     //   Console number = device / 2
     uint8_t device = cpu_->regs.BC.get_low();
     uint8_t result = 0x00;
-    if (device > 15)
-      throw std::invalid_argument("invalid device"); 
+    if (device > 15) {
+      uint16_t pc = cpu_->regs.PC.get_pair16();
+      std::cerr << "[POLLDEV] Invalid device " << (int)device
+                << " BC=0x" << std::hex << cpu_->regs.BC.get_pair16()
+                << " PC=0x" << pc << std::dec << "\n";
+      throw std::invalid_argument("invalid device");
+    }
 
     int console = device / 2;
-    bool is_input = (device & 1) != 0;
-
-    if (console > 7)
-      throw std::invalid_argument("invalid console polldevice"); 
+    bool is_input = (device & 1) != 0; 
 
     Console* con = ConsoleManager::instance().get(console);
     if (is_input) {
@@ -213,14 +230,12 @@ void XIOS::do_polldevice() {
 	result = 0xFF;
       }
     } else {
-      // Console output - ready if queue has space OR console not connected
-      // For unconnected consoles, return ready (chars will be dropped if queue full)
-      // Only block/wait if someone is actually draining the queue
-      bool connected = con && con->is_connected();
+      // Console output - ready if queue has space
       bool full = con && con->output_queue().full();
-      if (!con || !connected || !full) {
-	result = 0xFF;
+      if (!full) {
+        result = 0xFF;
       }
+      // Queue full is normal when no SSH client is connected - don't log it
     }
 
     cpu_->regs.AF.set_high(result);
@@ -297,11 +312,8 @@ void XIOS::do_systeminit() {
 }
 
 void XIOS::do_idle() {
-    // Idle procedure - enable interrupts and wait
-    static int count = 0;
-    if (++count <= 5) {
-        std::cerr << "[IDLE] called, IFF1=" << (int)cpu_->regs.IFF1 << "\n";
-    }
+    // Idle procedure - called when no process is ready to run
+    // The Z80 code does EI; HALT after this returns
 }
 
 // Commonbase entries - called by XDOS/BNKBDOS for bank switching and dispatch

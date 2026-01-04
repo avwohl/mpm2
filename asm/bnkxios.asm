@@ -87,7 +87,7 @@ WBOOT:  JP      DO_WBOOT        ; 03h - Warm start
         JP      DO_EXITRGN      ; 3Fh - Exit region
         JP      DO_MAXCON       ; 42h - Max console
         JP      DO_SYSINIT      ; 45h - System init
-        DB      0,0,0           ; 48h - Idle (patched by GENSYS)
+        JP      DO_IDLE         ; 48h - Idle procedure
 
 ; =============================================================================
 ; Commonbase structure - patched by GENSYS, used by XDOS/BNKBDOS
@@ -328,6 +328,17 @@ DO_MAXCON:
         OUT     (XIOS_DISPATCH), A
         IN      A, (XIOS_DISPATCH)      ; Get result from emulator
         RET
+
+DO_IDLE:
+        ; Idle procedure - called when no process is ready to run
+        ; Must enable interrupts and wait for a tick interrupt
+        ; The tick interrupt will jump to PDISP which re-schedules
+        ; Trace via port dispatch so emulator can log it
+        LD      A, FUNC_IDLE
+        OUT     (XIOS_DISPATCH), A
+        EI                              ; Enable interrupts
+        HALT                            ; Wait for interrupt
+        RET                             ; Return after interrupt handled
 
 DO_SYSINIT:
         ; System initialization

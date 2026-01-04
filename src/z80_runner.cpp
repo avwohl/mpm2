@@ -146,9 +146,30 @@ bool Z80Runner::run_polled() {
             if (cpu_->check_interrupts()) {
                 cpu_->clear_halted();
             } else {
-                break;
+                // When halted with IFF1=1 but no interrupt pending, request one now
+                if (cpu_->regs.IFF1 && xios_->clock_enabled()) {
+                    cpu_->request_rst(7);
+                    if (cpu_->check_interrupts()) {
+                        cpu_->clear_halted();
+                        // Don't continue - return to main loop to let SSH drain queues
+                    }
+                }
+                break;  // Return to main loop to allow SSH/console polling
             }
         }
+
+        // Track IFF1 changes (disabled for normal operation)
+        // static uint8_t prev_iff1 = 0;
+        // static int iff1_change_count = 0;
+        // if (cpu_->regs.IFF1 != prev_iff1) {
+        //     if (iff1_change_count++ < 50) {
+        //         uint16_t pc = cpu_->regs.PC.get_pair16();
+        //         std::cerr << "[IFF1] " << (int)prev_iff1 << " -> " << (int)cpu_->regs.IFF1
+        //                   << " at PC=0x" << std::hex << pc << std::dec
+        //                   << " instr=" << instruction_count_ << "\n";
+        //     }
+        //     prev_iff1 = cpu_->regs.IFF1;
+        // }
 
         cpu_->check_interrupts();
         cpu_->execute();
@@ -159,8 +180,14 @@ bool Z80Runner::run_polled() {
         if (instruction_count_ - last_log > 50000000) {
             last_log = instruction_count_;
             uint16_t pc = cpu_->regs.PC.get_pair16();
+            uint8_t opcode = memory_->fetch_mem(pc);
+            uint8_t byte1 = memory_->fetch_mem(pc + 1);
+            uint8_t byte2 = memory_->fetch_mem(pc + 2);
             std::cerr << "[Z80] " << (instruction_count_ / 1000000) << "M PC=0x"
-                      << std::hex << pc << std::dec << " IFF1=" << (int)cpu_->regs.IFF1 << "\n";
+                      << std::hex << pc << " [" << std::setw(2) << std::setfill('0') << (int)opcode
+                      << " " << std::setw(2) << (int)byte1 << " " << std::setw(2) << (int)byte2 << "]"
+                      << std::dec << std::setfill(' ') << " IFF1=" << (int)cpu_->regs.IFF1
+                      << " bank=" << (int)memory_->current_bank() << "\n";
         }
     }
 

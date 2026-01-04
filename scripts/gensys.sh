@@ -106,7 +106,7 @@ expect "Number of TMPs"           { send "$NMBCNS\r" }
 expect "Number of Printers"       { send "\r" }
 expect "Breakpoint RST"           { send "\r" }
 expect "Compatibility Attributes" { send "\r" }
-expect "system call user stacks"  { send "\r" }
+expect "system call user stacks"  { send "Y\r" }
 expect "Z80 CPU"                  { send "\r" }
 expect "ticks/second"             { send "\r" }
 expect "System Drive"             { send "\r" }

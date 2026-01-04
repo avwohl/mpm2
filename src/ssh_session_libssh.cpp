@@ -233,6 +233,10 @@ bool SSHSession::poll_io() {
         outbuf[outlen++] = static_cast<char>(ch);
     }
     if (outlen > 0) {
+        static int drain_count = 0;
+        if (++drain_count <= 20) {
+            std::cerr << "[SSH OUT] Draining " << outlen << " chars from console " << console_id_ << "\n";
+        }
         int written = ssh_channel_write(channel_, outbuf, outlen);
         if (written < 0) {
             state_ = SSHState::CLOSED;
