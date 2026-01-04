@@ -141,6 +141,12 @@ bool Z80Runner::run_polled() {
 	if (cpu_->check_interrupts()) {
 	  cpu_->clear_halted();
 	}
+
+	// When halted, break out of batch loop to allow SSH/console polling
+	if (cpu_->is_halted()) {
+	  break;
+	}
+
         cpu_->execute();
         instruction_count_++;
     }

@@ -1,0 +1,21 @@
+in ssh_session_libssh.cpp all the chars that fit in a buffer are removed:
+con->output_queue().try_read()
+then written to ssh_channel_write
+Either ssh_channel_write will block which is bad
+or drop characaters which is bad.
+See if ssh_* has a method that says how many chars will fit
+only get that many, leave the rest in the output buffer
+
+ When a z80 is halted if it is interrupted out of the halt
+ return goes on to the instruction after the halt.
+
+ This is implemented in z80_runner.cpp at:
+         if (cpu_->check_interrupts()) {
+          cpu_->clear_halted();
+        }
+However this is basic cpu functionality and should be in ../cpmemu/src/qkz*
+
+In z80_runner.cpp change the timer interrupt from 7 to 1 to leave 7
+free for the user to run the CP/M 2.2 DDT. Likewise in bnkxios.asm
+it hard codes patching 38H. Change that so the RST number is an equ 
+and it does the math to get the location.

@@ -1,0 +1,30 @@
+Change timer interrupt from RST 7 to RST 1 (leaves RST 7 free for DDT)
+
+--- a/src/z80_runner.cpp
++++ b/src/z80_runner.cpp
+@@ -122,7 +122,8 @@
+-	const int RST_INTERRUPT(7);
++	// Use RST 1 for timer interrupt, leaving RST 7 free for DDT debugger
++	const int RST_INTERRUPT(1);
+
+--- a/asm/bnkxios.asm
++++ b/asm/bnkxios.asm
+@@ -58,6 +58,10 @@
+ ; Number of consoles
+ NMBCNS:         EQU     4       ; consoles for SSH users
+
++; Timer interrupt RST number (RST 1 = address 0x08, leaves RST 7 free for DDT)
++RST_TICK:       EQU     1       ; RST number for timer interrupt
++RST_TICK_ADDR:  EQU     RST_TICK * 8    ; Address = RST# * 8
+
+@@ -384,9 +388,9 @@
+-        ; Set JMP at 0x0038 (RST 7) -> interrupt handler (INTHND)
++        ; Set JMP at RST_TICK_ADDR -> interrupt handler (INTHND)
+         LD      A, 0C3H                 ; JP opcode
+-        LD      (0038H), A
++        LD      (RST_TICK_ADDR), A
+         LD      HL, INTHND
+-        LD      (0039H), HL
++        LD      (RST_TICK_ADDR+1), HL
+
+Also update BNK_VERSION from 24 to 25

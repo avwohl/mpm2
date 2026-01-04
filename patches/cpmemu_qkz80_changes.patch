@@ -1,0 +1,59 @@
+diff --git a/src/qkz80.cc b/src/qkz80.cc
+index f4ce9d7..01e6dfa 100644
+--- a/src/qkz80.cc
++++ b/src/qkz80.cc
+@@ -11,7 +11,8 @@ qkz80::qkz80(qkz80_cpu_mem *memory):
+   int_pending(false),
+   nmi_pending(false),
+   int_vector(0xFF),
+-  ei_delay(false) { // Default to Z80 mode
++  ei_delay(false),
++  halted_(false) { // Default to Z80 mode
+   regs.cpu_mode = qkz80_reg_set::MODE_Z80;
+ }
+ 
+@@ -59,7 +60,7 @@ void qkz80::debug_dump_regs(const char* label) {
+ }
+ 
+ void qkz80::halt(void) {
+-  // Empty - override in subclass to handle halt
++  halted_ = true;
+ }
+ 
+ void qkz80::unimplemented_opcode(qkz80_uint8 opcode, qkz80_uint16 pc) {
+@@ -407,6 +408,11 @@ qkz80_uint16 qkz80::pull_word_from_opcode_stream(void) {
+ }
+ 
+ void qkz80::execute(void) {
++  // Check and handle pending interrupts before executing instruction
++  if (check_interrupts()) {
++    clear_halted();
++  }
++
+   // Add approximate cycle count (average ~5 cycles per instruction)
+   // This is a rough approximation for interrupt timing purposes
+   cycles += 5;
+diff --git a/src/qkz80.h b/src/qkz80.h
+index 14bf7b0..ec1fe61 100644
+--- a/src/qkz80.h
++++ b/src/qkz80.h
+@@ -49,6 +49,7 @@ class qkz80 {
+   bool nmi_pending;       // Non-maskable interrupt pending
+   qkz80_uint8 int_vector; // Vector for IM0/IM2 (ignored in IM1)
+   bool ei_delay;          // EI delay: Z80 executes one more instruction after EI before accepting interrupts
++  bool halted_;           // CPU is halted (waiting for interrupt)
+ 
+   // Constructor takes a memory object pointer
+   qkz80(qkz80_cpu_mem *memory);
+@@ -86,6 +87,11 @@ class qkz80 {
+   // HALT instruction - override in subclass to customize behavior
+   virtual void halt(void);
+ 
++  // Check if CPU is halted (waiting for interrupt)
++  bool is_halted() const { return halted_; }
++  void clear_halted() { halted_ = false; }
++  void set_halted() { halted_ = true; }
++
+   // Unimplemented opcode handler - override in subclass to customize behavior
+   virtual void unimplemented_opcode(qkz80_uint8 opcode, qkz80_uint16 pc);
+ 
