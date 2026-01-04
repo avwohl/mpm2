@@ -71,13 +71,6 @@ public:
     // Called when Z80 executes OUT (0xE0), A with B=function
     void handle_port_dispatch(uint8_t func);
 
-
-    // Timer tick - called from interrupt handler
-    void tick();
-
-    // One-second tick
-    void one_second_tick();
-
     // Clock control (STARTCLOCK/STOPCLOCK)
     bool clock_enabled() const { return tick_enabled_.load(); }
     void start_clock() { tick_enabled_.store(true); }
@@ -92,9 +85,6 @@ private:
     void do_const();
     void do_conin();
     void do_conout();
-    void do_list();
-    void do_punch();
-    void do_reader();
     void do_home();
     void do_seldsk();
     void do_settrk();
@@ -102,7 +92,6 @@ private:
     void do_setdma();
     void do_read();
     void do_write();
-    void do_listst();
     void do_sectran();
 
     // Extended XIOS entries
@@ -114,14 +103,6 @@ private:
     void do_maxconsole();
     void do_systeminit();
     void do_idle();
-
-    // Commonbase entries
-    void do_swtuser();   // Switch to user bank
-    void do_swtsys();    // Switch to system bank
-    void do_pdisp();     // Process dispatcher
-    void do_xdosent();   // XDOS entry point
-    void do_sysdat();    // System data pointer
-    void do_setpreemp(); // Set preempted flag
 
     qkz80* cpu_;
     BankedMemory* mem_;

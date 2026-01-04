@@ -1,4 +1,8 @@
 #!/bin/bash
+set -o errexit
+#set -o verbose
+#set -o xtrace
+
 # build_asm.sh - Build assembly files and C++ tools for MP/M II Emulator
 # Part of MP/M II Emulator
 # SPDX-License-Identifier: GPL-3.0-or-later
@@ -110,7 +114,8 @@ echo ""
 echo "Step 1: Building C++ emulator and tools..."
 cd "$BUILD_DIR"
 cmake .. > /dev/null
-make -j4 2>&1 | grep -v "^make\[" || true
+#make -j4 2>&1 | grep -v "^make\[" || true
+make -j4
 echo "  Built: mpm2_emu, mkboot"
 echo ""
 

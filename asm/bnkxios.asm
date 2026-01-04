@@ -1,3 +1,6 @@
+	;; printed at start increment every change to be sure we
+;; get the right version
+BNK_VERSION	EQU 24
 ; bnkxios_port.asm - MP/M II BNKXIOS using I/O port dispatch
 ; Part of MP/M II Emulator
 ; SPDX-License-Identifier: GPL-3.0-or-later
@@ -46,13 +49,6 @@ FUNC_EXITRGN:   EQU     3FH
 FUNC_MAXCON:    EQU     42H
 FUNC_SYSINIT:   EQU     45H
 FUNC_IDLE:      EQU     48H
-FUNC_COMMONBASE: EQU    4BH
-FUNC_SWTUSER:   EQU     4EH
-FUNC_SWTSYS:    EQU     51H
-FUNC_PDISP:     EQU     54H
-FUNC_XDOSENT:   EQU     57H
-FUNC_SYSDAT:    EQU     5AH
-FUNC_SETPREEMP: EQU     5DH     ; Set preempted flag (A=1 enter, A=0 exit)
 
 ; XDOS function codes
 POLL:           EQU     131     ; XDOS poll function
@@ -117,12 +113,11 @@ SYSDAT:
 ; =============================================================================
 
 DO_BOOT:
+DO_WBOOT:
         ; Cold boot - returns HL = commonbase address
         LD      A, FUNC_BOOT
         OUT     (XIOS_DISPATCH), A
-        RET
 
-DO_WBOOT:
         ; Warm boot - terminate process via XDOS
         LD      C, 0
         JP      XDOS            ; System reset, terminate process
@@ -182,9 +177,6 @@ DO_CONOUT:
         RET
 
 DO_LIST:
-        ; List output - C = character
-        LD      A, FUNC_LIST
-        OUT     (XIOS_DISPATCH), A
         RET
 
 DO_PUNCH:
@@ -321,8 +313,6 @@ DO_STOPCLK:
 DO_EXITRGN:
         ; Exit region - enable interrupts if not preempted
         ; Trace via port dispatch
-        LD      A, FUNC_EXITRGN
-        OUT     (XIOS_DISPATCH), A
         LD      A, (PREEMP)
         OR      A
         RET     NZ
@@ -355,6 +345,8 @@ DO_SYSINIT:
         LD      A, 0FFH
         LD      (TICKN), A
 
+	LD HL,BNK_VERSION
+
         ; Notify emulator of initialization
         LD      A, FUNC_SYSINIT
         OUT     (XIOS_DISPATCH), A
@@ -363,30 +355,6 @@ DO_SYSINIT:
         EI
         RET
 
-DO_SWTUSER:
-        ; Switch to user bank
-        LD      A, FUNC_SWTUSER
-        OUT     (XIOS_DISPATCH), A
-        RET
-
-DO_SWTSYS:
-        ; Switch to system bank
-        LD      A, FUNC_SWTSYS
-        OUT     (XIOS_DISPATCH), A
-        RET
-
-DO_PDISP:
-        ; Process dispatcher - called to switch processes
-        ; Trap to emulator to re-enable interrupts and return
-        LD      A, FUNC_PDISP
-        OUT     (XIOS_DISPATCH), A
-        RET
-
-DO_XDOSENT:
-        ; XDOS entry point
-        ; Jump directly to XIOSJMP XDOS entry (FC00H + 57H = FC57H)
-        ; This is patched by GENSYS to point to real XDOS
-        JP      0FC57H
 
 ; =============================================================================
 ; Interrupt Handler - 60Hz tick

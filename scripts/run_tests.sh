@@ -1,4 +1,7 @@
 #!/bin/bash
+set -o errexit
+#set -o verbose
+#set -o xtrace
 #
 # MP/M II Emulator Test Runner
 #

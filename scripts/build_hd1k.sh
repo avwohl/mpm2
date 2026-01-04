@@ -1,4 +1,8 @@
 #!/bin/bash
+set -o errexit
+#set -o verbose
+#set -o xtrace
+
 # build_hd1k.sh - Create an hd1k disk image with MP/M II files
 # Part of MP/M II Emulator
 # SPDX-License-Identifier: GPL-3.0-or-later

@@ -62,7 +62,6 @@ private:
 
     // Counters
     std::atomic<uint64_t> instruction_count_;
-    int tick_count_;  // Counts to 60 for one-second flag
 
     // Timeout
     int timeout_seconds_ = 0;  // 0 = no timeout

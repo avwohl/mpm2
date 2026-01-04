@@ -15,8 +15,7 @@ Z80Runner::Z80Runner()
     : running_(false)
     , stop_requested_(false)
     , instruction_count_(0)
-    , tick_count_(0)
-{
+ {
 }
 
 Z80Runner::~Z80Runner() {
@@ -100,7 +99,6 @@ bool Z80Runner::run_polled() {
     if (first_call) {
         start_time_ = std::chrono::steady_clock::now();
         next_tick_ = start_time_;
-        tick_count_ = 0;
         instruction_count_.store(0);
         running_.store(true);
         first_call = false;
@@ -133,13 +131,6 @@ bool Z80Runner::run_polled() {
             if (xios_->clock_enabled()) {
                 // Always request the interrupt - CPU will process when IFF1 becomes 1
                 cpu_->request_rst(7);  // RST 38H
-                xios_->tick();
-            }
-
-            // Check for one-second tick
-            if (++tick_count_ >= 60) {
-                tick_count_ = 0;
-                xios_->one_second_tick();
             }
         }
 
@@ -162,22 +153,15 @@ bool Z80Runner::run_polled() {
         // Debug: track IFF1 transitions around the critical area
         static uint8_t prev_iff1 = 255;
         static uint64_t last_iff1_change = 0;
-        if (cpu_->regs.IFF1 != prev_iff1) {
-            if (instruction_count_ > 900000 && instruction_count_ < 1100000) {
-                std::cerr << "[IFF1] " << (int)prev_iff1 << " -> " << (int)cpu_->regs.IFF1
-                          << " at PC=0x" << std::hex << cpu_->regs.PC.get_pair16() << std::dec
-                          << " inst=" << instruction_count_ << "\n";
-            }
-            prev_iff1 = cpu_->regs.IFF1;
-            last_iff1_change = instruction_count_;
-        }
+
         // Warn if stuck at 0 for 1M instructions
-        static bool warned = false;
-        if (!warned && cpu_->regs.IFF1 == 0 && instruction_count_ - last_iff1_change > 1000000) {
-            warned = true;
-            std::cerr << "[IFF1 STUCK] Last change at inst=" << last_iff1_change
+        if (cpu_->regs.IFF1 == 0 && instruction_count_ - last_iff1_change > 1000000) {
+	  cpu_->regs.IFF1=1;
+	  std::cerr << "[IFF1 STUCK] Last change at inst=" << last_iff1_change
                       << ", now=" << instruction_count_ << "\n";
+	  last_iff1_change = instruction_count_;
         }
+	prev_iff1 = cpu_->regs.IFF1;
 
         cpu_->check_interrupts();
         cpu_->execute();

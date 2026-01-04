@@ -1,4 +1,8 @@
 #!/bin/bash
+set -o errexit
+#set -o verbose
+#set -o xtrace
+
 # build_all.sh - Master build script for MP/M II Emulator
 # Part of MP/M II Emulator
 # SPDX-License-Identifier: GPL-3.0-or-later

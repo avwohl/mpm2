@@ -1,6 +1,9 @@
 #!/bin/bash
 # SSH Test Harness for MP/M II Emulator
 # Tests that SSH input and output actually work
+set -o errexit
+#set -o verbose
+#set -o xtrace
 
 set -e
 

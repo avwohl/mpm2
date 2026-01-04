@@ -1,4 +1,7 @@
 #!/bin/bash
+set -o errexit
+#set -o verbose
+#set -o xtrace
 # gensys.sh - Generate MP/M II system using GENSYS
 # Part of MP/M II Emulator
 # SPDX-License-Identifier: GPL-3.0-or-later
