@@ -13,14 +13,11 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <libssh/libssh.h>
+#include <libssh/server.h>
+#include <libssh/callbacks.h>
 
 class Console;
-
-// Forward declarations for libssh types
-typedef struct ssh_session_struct* ssh_session;
-typedef struct ssh_bind_struct* ssh_bind;
-typedef struct ssh_channel_struct* ssh_channel;
-typedef struct ssh_event_struct* ssh_event;
 
 // Session state during handshake
 enum class SSHState {
@@ -47,6 +44,13 @@ public:
     bool is_ready() const { return state_ == SSHState::READY; }
     int console_id() const { return console_id_; }
 
+    // Accessors for authentication callbacks
+    SSHServer* server() const;
+    void set_authenticated(bool auth);
+    void set_channel(ssh_channel channel);
+    void setup_channel_callbacks(ssh_channel channel);
+    void setup_console();
+
 private:
     bool poll_handshake();
     bool poll_io();
@@ -58,7 +62,10 @@ private:
     int console_id_;
     bool kex_done_;
     bool sent_banner_;
+    bool authenticated_;
     SSHServer* server_;
+    ssh_server_callbacks_struct server_callbacks_;
+    ssh_channel_callbacks_struct channel_callbacks_;
 };
 
 // SSH server - accepts connections (non-blocking)

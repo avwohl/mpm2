@@ -4,6 +4,9 @@
 //
 // Uses OS-level non-blocking I/O (fcntl O_NONBLOCK) on all file descriptors.
 // No libssh blocking mode calls - pure non-blocking via fcntl and ssh_event.
+//
+// Uses the modern callback-based authentication API (ssh_server_callbacks_struct)
+// instead of the deprecated ssh_message_auth_pubkey() functions.
 
 #ifdef HAVE_LIBSSH
 
@@ -27,6 +30,108 @@ static bool set_nonblocking(int fd) {
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK) != -1;
 }
 
+// Forward declaration for callback
+class SSHSession;
+
+// ============================================================================
+// Authentication callbacks (modern libssh API)
+// ============================================================================
+
+// Called when client attempts "none" authentication (no credentials)
+static int auth_none_callback(ssh_session session, const char* user, void* userdata) {
+    (void)session;
+    (void)user;
+    SSHSession* ssh_sess = static_cast<SSHSession*>(userdata);
+    if (ssh_sess && ssh_sess->server() && ssh_sess->server()->no_auth()) {
+        // No authentication required - accept
+        ssh_sess->set_authenticated(true);
+        return SSH_AUTH_SUCCESS;
+    }
+    return SSH_AUTH_DENIED;
+}
+
+// Called when client attempts public key authentication
+// signature_state: SSH_PUBLICKEY_STATE_NONE = probe (is key acceptable?)
+//                  SSH_PUBLICKEY_STATE_VALID = signature verified, grant access
+static int auth_pubkey_callback(ssh_session session, const char* user,
+                                struct ssh_key_struct* pubkey,
+                                char signature_state, void* userdata) {
+    (void)session;
+    (void)user;
+    SSHSession* ssh_sess = static_cast<SSHSession*>(userdata);
+    if (!ssh_sess || !ssh_sess->server()) {
+        return SSH_AUTH_DENIED;
+    }
+
+    // No auth mode - accept any key
+    if (ssh_sess->server()->no_auth()) {
+        if (signature_state == SSH_PUBLICKEY_STATE_VALID) {
+            ssh_sess->set_authenticated(true);
+            return SSH_AUTH_SUCCESS;
+        }
+        // Key probe - say it's acceptable
+        return SSH_AUTH_SUCCESS;
+    }
+
+    // Get key type and base64 blob for comparison
+    const char* key_type = ssh_key_type_to_char(ssh_key_type(pubkey));
+    char* b64_key = nullptr;
+    if (ssh_pki_export_pubkey_base64(pubkey, &b64_key) != SSH_OK || !b64_key) {
+        return SSH_AUTH_DENIED;
+    }
+
+    std::string key_str = std::string(key_type) + " " + b64_key;
+    ssh_string_free_char(b64_key);
+
+    if (!ssh_sess->server()->is_key_authorized(key_str)) {
+        // Key not in authorized_keys
+        return SSH_AUTH_DENIED;
+    }
+
+    // Key is authorized
+    if (signature_state == SSH_PUBLICKEY_STATE_VALID) {
+        // Signature verified - grant access
+        ssh_sess->set_authenticated(true);
+        return SSH_AUTH_SUCCESS;
+    }
+
+    // Key probe - tell client to sign (return success means "try this key")
+    return SSH_AUTH_SUCCESS;
+}
+
+// Channel callbacks for PTY and shell requests
+static int channel_pty_request_callback(ssh_session session, ssh_channel channel,
+                                        const char* term, int width, int height,
+                                        int pxwidth, int pxheight, void* userdata) {
+    (void)session; (void)channel; (void)term;
+    (void)width; (void)height; (void)pxwidth; (void)pxheight;
+    (void)userdata;
+    return 0;  // 0 = accept
+}
+
+static int channel_shell_request_callback(ssh_session session, ssh_channel channel, void* userdata) {
+    (void)session; (void)channel;
+    SSHSession* ssh_sess = static_cast<SSHSession*>(userdata);
+    if (ssh_sess) {
+        ssh_sess->setup_console();
+    }
+    return 0;  // 0 = accept
+}
+
+// Called when client opens a channel session
+static ssh_channel channel_open_callback(ssh_session session, void* userdata) {
+    SSHSession* ssh_sess = static_cast<SSHSession*>(userdata);
+    if (ssh_sess) {
+        ssh_channel channel = ssh_channel_new(session);
+        if (channel) {
+            // Set up channel callbacks for PTY and shell requests
+            ssh_sess->setup_channel_callbacks(channel);
+            return channel;
+        }
+    }
+    return nullptr;
+}
+
 // ============================================================================
 // SSHSession - handles one connection with non-blocking I/O
 // ============================================================================
@@ -39,11 +144,58 @@ SSHSession::SSHSession(ssh_session session, SSHServer* server)
     , console_id_(-1)
     , kex_done_(false)
     , sent_banner_(false)
+    , authenticated_(false)
     , server_(server)
+    , server_callbacks_{}
+    , channel_callbacks_{}
 {
     // Create event context (don't add session until after KEX)
     event_ = ssh_event_new();
 }
+
+SSHServer* SSHSession::server() const {
+    return server_;
+}
+
+void SSHSession::set_authenticated(bool auth) {
+    authenticated_ = auth;
+    if (auth) {
+        state_ = SSHState::CHANNEL_OPEN;
+    }
+}
+
+void SSHSession::set_channel(ssh_channel channel) {
+    channel_ = channel;
+}
+
+void SSHSession::setup_channel_callbacks(ssh_channel channel) {
+    channel_ = channel;
+
+    // Initialize channel callbacks
+    memset(&channel_callbacks_, 0, sizeof(channel_callbacks_));
+    channel_callbacks_.size = sizeof(channel_callbacks_);
+    channel_callbacks_.userdata = this;
+    channel_callbacks_.channel_pty_request_function = channel_pty_request_callback;
+    channel_callbacks_.channel_shell_request_function = channel_shell_request_callback;
+    ssh_callbacks_init(&channel_callbacks_);
+    ssh_set_channel_callbacks(channel, &channel_callbacks_);
+}
+
+void SSHSession::setup_console() {
+    Console* con = ConsoleManager::instance().find_free();
+    if (!con) {
+        std::cerr << "[SSH] No free console\n";
+        state_ = SSHState::CLOSED;
+        return;
+    }
+
+    console_id_ = con->id();
+    con->set_connected(true);
+    state_ = SSHState::READY;
+
+    std::cerr << "[SSH] New connection on console " << console_id_ << "\n";
+}
+
 
 SSHSession::~SSHSession() {
     // Release console
@@ -95,6 +247,24 @@ bool SSHSession::poll_handshake() {
             int rc = ssh_handle_key_exchange(session_);
             if (rc == SSH_OK) {
                 kex_done_ = true;
+
+                // Set up server callbacks for authentication (modern API)
+                // Also handle channel open via callback for proper integration
+                server_callbacks_.size = sizeof(server_callbacks_);
+                server_callbacks_.userdata = this;
+                server_callbacks_.auth_none_function = auth_none_callback;
+                server_callbacks_.auth_pubkey_function = auth_pubkey_callback;
+                server_callbacks_.channel_open_request_session_function = channel_open_callback;
+                ssh_callbacks_init(&server_callbacks_);
+                ssh_set_server_callbacks(session_, &server_callbacks_);
+
+                // Tell client which auth methods we support
+                if (server_ && server_->no_auth()) {
+                    ssh_set_auth_methods(session_, SSH_AUTH_METHOD_NONE | SSH_AUTH_METHOD_PUBLICKEY);
+                } else {
+                    ssh_set_auth_methods(session_, SSH_AUTH_METHOD_PUBLICKEY);
+                }
+
                 // Now safe to add to event
                 if (event_) {
                     ssh_event_add_session(event_, session_);
@@ -111,95 +281,20 @@ bool SSHSession::poll_handshake() {
 
         case SSHState::AUTHENTICATING:
         case SSHState::CHANNEL_OPEN: {
+            // Auth, channel open, PTY, and shell are all handled by callbacks
+            // Just drain any messages and reply default to unexpected ones
             ssh_message msg = ssh_message_get(session_);
             if (msg) {
                 int type = ssh_message_type(msg);
-                int subtype = ssh_message_subtype(msg);
 
-                if (type == SSH_REQUEST_AUTH) {
-                    // Check authentication
-                    if (server_ && server_->no_auth()) {
-                        // No authentication required - accept anything
-                        ssh_message_auth_reply_success(msg, 0);
-                        state_ = SSHState::CHANNEL_OPEN;
-                    } else if (subtype == SSH_AUTH_METHOD_PUBLICKEY) {
-                        // Public key authentication using deprecated but working API
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-                        ssh_key pubkey = ssh_message_auth_pubkey(msg);
-#pragma GCC diagnostic pop
-                        if (pubkey) {
-                            // Get key type and base64 blob for comparison
-                            const char* key_type = ssh_key_type_to_char(ssh_key_type(pubkey));
-                            char* b64_key = nullptr;
-                            if (ssh_pki_export_pubkey_base64(pubkey, &b64_key) == SSH_OK && b64_key) {
-                                std::string key_str = std::string(key_type) + " " + b64_key;
-                                ssh_string_free_char(b64_key);
-
-                                if (server_ && server_->is_key_authorized(key_str)) {
-                                    // Key is authorized
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-                                    if (ssh_message_auth_publickey_state(msg) == SSH_PUBLICKEY_STATE_VALID) {
-#pragma GCC diagnostic pop
-                                        // Signature verified - grant access
-                                        ssh_message_auth_reply_success(msg, 0);
-                                        state_ = SSHState::CHANNEL_OPEN;
-                                    } else {
-                                        // Key OK but need signature - tell client to sign
-                                        ssh_message_auth_reply_pk_ok_simple(msg);
-                                    }
-                                } else {
-                                    // Key not in authorized_keys
-                                    ssh_message_reply_default(msg);
-                                }
-                            } else {
-                                ssh_message_reply_default(msg);
-                            }
-                        } else {
-                            ssh_message_reply_default(msg);
-                        }
-                    } else if (subtype == SSH_AUTH_METHOD_NONE) {
-                        // Client asking what auth methods are supported
-                        ssh_message_auth_set_methods(msg, SSH_AUTH_METHOD_PUBLICKEY);
-                        ssh_message_reply_default(msg);
-                    } else {
-                        // Other auth methods (password, etc.) - reject
-                        ssh_message_auth_set_methods(msg, SSH_AUTH_METHOD_PUBLICKEY);
-                        ssh_message_reply_default(msg);
-                    }
-                } else if (type == SSH_REQUEST_CHANNEL_OPEN) {
-                    if (subtype == SSH_CHANNEL_SESSION) {
-                        channel_ = ssh_message_channel_request_open_reply_accept(msg);
-                    } else {
-                        ssh_message_reply_default(msg);
-                    }
-                } else if (type == SSH_REQUEST_CHANNEL && channel_) {
-                    if (subtype == SSH_CHANNEL_REQUEST_PTY) {
-                        ssh_message_channel_request_reply_success(msg);
-                    } else if (subtype == SSH_CHANNEL_REQUEST_SHELL) {
-                        ssh_message_channel_request_reply_success(msg);
-
-                        // Find a free console
-                        Console* con = ConsoleManager::instance().find_free();
-                        if (!con) {
-                            std::cerr << "[SSH] No free console\n";
-                            state_ = SSHState::CLOSED;
-                            ssh_message_free(msg);
-                            return false;
-                        }
-
-                        console_id_ = con->id();
-                        con->set_connected(true);
-                        state_ = SSHState::READY;
-
-                        std::cerr << "[SSH] New connection on console " << console_id_ << "\n";
-                    } else {
-                        ssh_message_reply_default(msg);
-                    }
-                } else {
-                    ssh_message_reply_default(msg);
+                // Auth and channel open are handled by callbacks - don't touch them
+                if (type == SSH_REQUEST_AUTH || type == SSH_REQUEST_CHANNEL_OPEN) {
+                    ssh_message_free(msg);
+                    break;
                 }
+
+                // Other messages get default reply
+                ssh_message_reply_default(msg);
                 ssh_message_free(msg);
             }
             break;
