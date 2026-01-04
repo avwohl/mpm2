@@ -25,6 +25,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/build"
 ASM_DIR="$PROJECT_DIR/asm"
 DISKS_DIR="$PROJECT_DIR/disks"
+TOOLS_DIR="$PROJECT_DIR/tools"
 CPMEMU="${CPMEMU:-$HOME/src/cpmemu/src/cpmemu}"
 WORK_DIR="/tmp/gensys_work"
 CPM_DISK="${CPM_DISK:-$HOME/src/cpmemu/util/cpm_disk.py}"
@@ -156,15 +157,11 @@ echo "Patching MPMLDR.COM serial number..."
 # (disk image version may be corrupted or have wrong format)
 cp "$PROJECT_DIR/mpm2_external/mpm2dist/MPMLDR.COM" mpmldr.com
 
-# Extract serial from RESBDOS.SPR
-# The serial is 6 bytes after "RESEARCH " at offset 0x1F9-0x1FE: 00 14 01 00 05 68
-# MPMLDR has matching bytes at offset 129-134, but bytes 5-6 (offset 133-134) need patching
-# MPMLDR 133-134 must match RESBDOS 509-510 (bytes 5-6 of the 6-byte serial)
-SERIAL_B5=$(dd if=resbdos.spr bs=1 skip=509 count=1 2>/dev/null | xxd -p)
-SERIAL_B6=$(dd if=resbdos.spr bs=1 skip=510 count=1 2>/dev/null | xxd -p)
-# Patch MPMLDR at offset 133-134 with RESBDOS bytes 509-510
-printf "\\x$SERIAL_B5" | dd of=mpmldr.com bs=1 seek=133 conv=notrunc 2>/dev/null
-printf "\\x$SERIAL_B6" | dd of=mpmldr.com bs=1 seek=134 conv=notrunc 2>/dev/null
+# Patch serial number: copy 2 bytes from RESBDOS.SPR offset 509-510 to MPMLDR offset 133-134
+# The serial is 6 bytes after "RESEARCH " at offset 0x1F9-0x1FE in RESBDOS.SPR
+# MPMLDR has matching bytes at offset 129-134, bytes 5-6 (133-134) must match
+python3 "$TOOLS_DIR/dri_patch.py" -o mpmldr.com --base mpmldr.com \
+    --copy resbdos.spr:509:2@133
 
 # Create boot image
 echo "Creating boot image..."
