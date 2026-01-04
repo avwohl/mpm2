@@ -12,6 +12,7 @@
 #include <libssh/libssh.h>
 #include <libssh/server.h>
 #include <libssh/callbacks.h>
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -122,8 +123,11 @@ bool SSHSession::poll_handshake() {
                         ssh_message_auth_reply_success(msg, 0);
                         state_ = SSHState::CHANNEL_OPEN;
                     } else if (subtype == SSH_AUTH_METHOD_PUBLICKEY) {
-                        // Public key authentication
+                        // Public key authentication using deprecated but working API
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
                         ssh_key pubkey = ssh_message_auth_pubkey(msg);
+#pragma GCC diagnostic pop
                         if (pubkey) {
                             // Get key type and base64 blob for comparison
                             const char* key_type = ssh_key_type_to_char(ssh_key_type(pubkey));
@@ -134,7 +138,10 @@ bool SSHSession::poll_handshake() {
 
                                 if (server_ && server_->is_key_authorized(key_str)) {
                                     // Key is authorized
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
                                     if (ssh_message_auth_publickey_state(msg) == SSH_PUBLICKEY_STATE_VALID) {
+#pragma GCC diagnostic pop
                                         // Signature verified - grant access
                                         ssh_message_auth_reply_success(msg, 0);
                                         state_ = SSHState::CHANNEL_OPEN;

@@ -94,6 +94,15 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Cross-platform file size (macOS vs Linux)
+filesize() {
+    if [[ "$(uname)" == "Darwin" ]]; then
+        stat -f%z "$1"
+    else
+        stat -c%s "$1"
+    fi
+}
 ASM_DIR="$PROJECT_DIR/asm"
 BUILD_DIR="$PROJECT_DIR/build"
 DISKS_DIR="$PROJECT_DIR/disks"
@@ -131,12 +140,12 @@ rm -f *.rel *.spr *.SPR
 # The emulator's port dispatch handles actual disk I/O regardless of format
 LDRBIOS="ldrbios"
 um80 -o "${LDRBIOS}.rel" "${LDRBIOS}.asm"
-# LDRBIOS loads at 0x1700, so link with that origin
-ul80 -p 1700 -o "${LDRBIOS}.bin" "${LDRBIOS}.rel"
+# LDRBIOS has ORG 0x1700 in source, use -p 0 to avoid double relocation
+ul80 -p 0 -o "${LDRBIOS}.bin" "${LDRBIOS}.rel"
 
 # Create stripped version for boot area (skip 0x1700 bytes of ORG padding)
 dd if="${LDRBIOS}.bin" of="${LDRBIOS}_boot.bin" bs=1 skip=$((0x1700)) 2>/dev/null
-LDRBIOS_CODE_SIZE=$(stat -f%z "${LDRBIOS}_boot.bin")
+LDRBIOS_CODE_SIZE=$(filesize "${LDRBIOS}_boot.bin")
 echo "  Output: $ASM_DIR/${LDRBIOS}.bin (with ORG padding)"
 echo "  Output: $ASM_DIR/${LDRBIOS}_boot.bin ($LDRBIOS_CODE_SIZE bytes, for boot area at 0x1700)"
 echo ""
@@ -153,7 +162,7 @@ um80 -o "${COLDBOOT}.rel" "${COLDBOOT}.asm"
 ul80 -p 0 -o "${COLDBOOT}.bin" "${COLDBOOT}.rel"
 
 # Pad to exactly 512 bytes (one physical sector)
-COLDBOOT_SIZE=$(stat -f%z "${COLDBOOT}.bin")
+COLDBOOT_SIZE=$(filesize "${COLDBOOT}.bin")
 if [ "$COLDBOOT_SIZE" -lt 512 ]; then
     dd if=/dev/zero bs=1 count=$((512 - COLDBOOT_SIZE)) >> "${COLDBOOT}.bin" 2>/dev/null
     echo "  Padded ${COLDBOOT}.bin to 512 bytes"
