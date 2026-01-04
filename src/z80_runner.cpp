@@ -45,6 +45,7 @@ bool Z80Runner::boot_from_disk() {
     Disk* disk = DiskSystem::instance().get(0);
     if (!disk || !disk->is_open()) {
         std::cerr << "Cannot boot: no disk mounted on drive A:\n";
+	exit(1);
         return false;
     }
 
@@ -58,6 +59,7 @@ bool Z80Runner::boot_from_disk() {
     uint8_t boot_sector[512];
     if (disk->read_sector(boot_sector) != 0) {
         std::cerr << "Failed to read boot sector\n";
+	exit(1);
         return false;
     }
 
@@ -136,44 +138,9 @@ bool Z80Runner::run_polled() {
             }
         }
 
-        // Handle HALT
-        if (cpu_->is_halted()) {
-            // Auto-start clock if CPU halts with interrupts enabled
-            static bool halt_auto_started = false;
-            if (!halt_auto_started && cpu_->regs.IFF1 && !xios_->clock_enabled()) {
-                xios_->start_clock();
-                halt_auto_started = true;
-            }
-
-            if (cpu_->check_interrupts()) {
-                cpu_->clear_halted();
-            } else {
-                // When halted with IFF1=1 but no interrupt pending, request one now
-                if (cpu_->regs.IFF1 && xios_->clock_enabled()) {
-                    cpu_->request_rst(RST_INTERRUPT);
-                    if (cpu_->check_interrupts()) {
-                        cpu_->clear_halted();
-                        // Don't continue - return to main loop to let SSH drain queues
-                    }
-                }
-                break;  // Return to main loop to allow SSH/console polling
-            }
-        }
-
-        // Track IFF1 changes (disabled for normal operation)
-        // static uint8_t prev_iff1 = 0;
-        // static int iff1_change_count = 0;
-        // if (cpu_->regs.IFF1 != prev_iff1) {
-        //     if (iff1_change_count++ < 50) {
-        //         uint16_t pc = cpu_->regs.PC.get_pair16();
-        //         std::cerr << "[IFF1] " << (int)prev_iff1 << " -> " << (int)cpu_->regs.IFF1
-        //                   << " at PC=0x" << std::hex << pc << std::dec
-        //                   << " instr=" << instruction_count_ << "\n";
-        //     }
-        //     prev_iff1 = cpu_->regs.IFF1;
-        // }
-
-        cpu_->check_interrupts();
+	if (cpu_->check_interrupts()) {
+	  cpu_->clear_halted();
+	}
         cpu_->execute();
         instruction_count_++;
     }

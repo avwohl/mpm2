@@ -213,13 +213,10 @@ bool SSHSession::poll_io() {
     char buf[256];
     int n = ssh_channel_read_nonblocking(channel_, buf, sizeof(buf), 0);
     if (n > 0) {
-        std::cerr << "[SSH IN] Got " << n << " bytes: ";
         for (int i = 0; i < n; i++) {
             uint8_t ch = static_cast<uint8_t>(buf[i]);
-            std::cerr << "0x" << std::hex << (int)ch << std::dec << " ";
             con->input_queue().try_write(ch);
         }
-        std::cerr << "\n";
     } else if (n == SSH_ERROR) {
         state_ = SSHState::CLOSED;
         return false;
@@ -233,10 +230,6 @@ bool SSHSession::poll_io() {
         outbuf[outlen++] = static_cast<char>(ch);
     }
     if (outlen > 0) {
-        static int drain_count = 0;
-        if (++drain_count <= 20) {
-            std::cerr << "[SSH OUT] Draining " << outlen << " chars from console " << console_id_ << "\n";
-        }
         int written = ssh_channel_write(channel_, outbuf, outlen);
         if (written < 0) {
             state_ = SSHState::CLOSED;
