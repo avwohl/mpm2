@@ -119,7 +119,8 @@ bool Z80Runner::run_polled() {
             }
         }
 
-	const int RST_INTERRUPT(7);
+	// Use RST 1 for timer, leaving RST 7 free for DDT debugger
+	const int RST_INTERRUPT(1);
         // Check for timer interrupt (60Hz tick)
         if (now >= next_tick_) {
             next_tick_ = now + TICK_INTERVAL;

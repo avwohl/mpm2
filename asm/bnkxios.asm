@@ -1,6 +1,6 @@
 	;; printed at start increment every change to be sure we
 ;; get the right version
-BNK_VERSION	EQU 24
+BNK_VERSION	EQU 25
 ; bnkxios_port.asm - MP/M II BNKXIOS using I/O port dispatch
 ; Part of MP/M II Emulator
 ; SPDX-License-Identifier: GPL-3.0-or-later
@@ -57,6 +57,10 @@ FLAGSET:        EQU     133     ; XDOS flag set
 
 ; Number of consoles
 NMBCNS:         EQU     4       ; consoles for SSH users
+
+; Timer interrupt - use RST 1, leaving RST 7 free for DDT debugger
+RST_TICK:       EQU     1
+RST_TICK_ADDR:  EQU     RST_TICK * 8    ; RST 1 = address 0x08
 
 ; =============================================================================
 ; BNKXIOS Jump Vector
@@ -381,14 +385,14 @@ DO_SYSINIT:
         LD      HL, COMMONBASE+12       ; XDOS entry in jump table
         LD      (0006H), HL
 
-        ; Set JMP at 0x0038 (RST 7) -> interrupt handler (INTHND)
+        ; Set JMP at RST_TICK_ADDR -> interrupt handler (INTHND)
         LD      A, 0C3H                 ; JP opcode
-        LD      (0038H), A
+        LD      (RST_TICK_ADDR), A
         LD      HL, INTHND
-        LD      (0039H), HL
+        LD      (RST_TICK_ADDR+1), HL
 
-        ; Set interrupt mode 1 (Z80)
-        IM      1
+        ; Set interrupt mode 0 (execute RST instruction from data bus)
+        IM      0
 
         ; Enable TICKN immediately - XDOS's STARTCLOCK call isn't reliable in emulator
         ; (In real hardware, STARTCLOCK is called by dispatcher when delay list is empty)
@@ -411,7 +415,7 @@ DO_SYSINIT:
 
 ; =============================================================================
 ; Interrupt Handler - 60Hz tick
-; Called via RST 38H (set up by SYSINIT)
+; Called via RST 1 at 0x08 (IM 0, set up by SYSINIT)
 ; =============================================================================
 
 INTHND:
