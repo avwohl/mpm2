@@ -230,12 +230,13 @@ void XIOS::do_polldevice() {
 	result = 0xFF;
       }
     } else {
-      // Console output - ready if queue has space
-      bool full = con && con->output_queue().full();
-      if (!full) {
+      // Console output - ready if not connected OR queue has space
+      // When not connected, always say ready to avoid blocking processes
+      // (output chars will be dropped when queue is full)
+      bool ready = !con || !con->is_connected() || !con->output_queue().full();
+      if (ready) {
         result = 0xFF;
       }
-      // Queue full is normal when no SSH client is connected - don't log it
     }
 
     cpu_->regs.AF.set_high(result);

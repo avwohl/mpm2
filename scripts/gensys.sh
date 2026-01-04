@@ -93,7 +93,8 @@ if [ ! -f "$DISKS_DIR/mpm2_hd1k.img" ]; then
     exit 1
 fi
 
-# Create work directory
+# Create clean work directory (remove old files that could interfere with GENSYS prompts)
+rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
 

@@ -382,8 +382,7 @@ fi
 copy_to_hd1k "$OUTPUT" "$TEMP_DIR"
 
 # Create startup files for each console
-# Disabled - causes timing issues with test harness
-#create_startup_files "$OUTPUT"
+create_startup_files "$OUTPUT"
 
 # Show results
 show_contents "$OUTPUT"
