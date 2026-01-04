@@ -90,11 +90,7 @@ void MpmCpu::handle_bank_select(uint8_t bank) {
     }
 }
 
-void MpmCpu::halt(void) {
-    // Z80 HALT instruction - CPU waits for interrupt
-    // In MP/M II context, this is the normal idle loop
-    halted_ = true;
-}
+// halt() now inherited from qkz80 base class
 
 void MpmCpu::execute(void) {
     // Debug disabled for cleaner boot output
@@ -122,5 +118,5 @@ void MpmCpu::unimplemented_opcode(qkz80_uint8 opcode, qkz80_uint16 pc) {
     }
     std::cerr << std::dec << std::endl;
 
-    halted_ = true;
+    set_halted();
 }
