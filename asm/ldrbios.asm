@@ -129,22 +129,6 @@ SELDSK:
         ; C=drive number (0=A, etc.)
         ; Returns HL=DPH address, or 0 if error
 
-        ; Print debug message
-        PUSH    BC
-        LD      HL, SELDSK_MSG
-        CALL    PRTSTR
-        LD      A, C
-        ADD     A, 'A'          ; Convert to letter
-        LD      C, A
-        CALL    CONOUT
-        LD      C, ':'
-        CALL    CONOUT
-        LD      C, 0DH
-        CALL    CONOUT
-        LD      C, 0AH
-        CALL    CONOUT
-        POP     BC
-
         LD      A, C
         CP      4               ; Only A-D supported
         JR      NC, SELDSK_ERR
@@ -260,15 +244,7 @@ PRTSTR:
 ; =============================================================================
 
 BOOTMSG:
-        DB      0DH, 0AH
-        DB      '[LDRBIOS] MP/M II Loader BIOS (hd1k 8MB)', 0DH, 0AH
-        DB      '[LDRBIOS] DPB: 64 SPT, 4K blocks, 2 reserved tracks', 0DH, 0AH
         DB      0
-
-SELDSK_MSG:
-        DB      '[LDRBIOS] SELDSK drive ', 0
-READ_MSG:
-        DB      '[LDRBIOS] READ', 0DH, 0AH, 0
 
 ; Current disk parameters
 CURDSK: DB      0               ; Current disk

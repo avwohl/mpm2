@@ -106,10 +106,14 @@ end sftp$send$reply;
 sftp$hello: procedure external;
 end sftp$hello;
 
+sftp$debug: procedure(code) external;
+    declare code byte;
+end sftp$debug;
+
 /* delay for ticks (1 tick = ~16.67ms, 60 ticks = 1 second) */
-delay: procedure(ticks);
+/* implemented in sftp_glue.asm to avoid ??AUTO storage relocation issues */
+delay: procedure(ticks) external;
     declare ticks address;
-    call bdos(xdos$delay, ticks);
 end delay;
 
 /* set reply status with optional more flag */
@@ -122,21 +126,24 @@ set$reply$status: procedure(status, length);
 end set$reply$status;
 
 /* setup fcb from request buffer */
+/* NOTE: PL/M compiler bug with indexed array assignments was fixed in uplm80.
+   Previously this used assembly workaround (copy$fcb$name) but now uses
+   direct PL/M code since the register clobbering bug is fixed. */
 setup$fcb: procedure;
     declare i byte;
-    /* clear fcb */
-    do i = 0 to 35;
-        fcb(i) = 0;
-    end;
-    /* drive (0=default, 1=a, 2=b, ...) */
+    /* fcb[0] = drive + 1 */
     fcb(0) = get$buf$byte(1) + 1;
-    /* filename (bytes 4-11 of request) */
+    /* copy filename: buf[4-11] -> fcb[1-8] */
     do i = 0 to 7;
-        fcb(1 + i) = get$buf$byte(4 + i);
+        fcb(1+i) = get$buf$byte(4+i);
     end;
-    /* extension (bytes 12-14 of request) */
+    /* copy extension: buf[12-14] -> fcb[9-11] */
     do i = 0 to 2;
-        fcb(9 + i) = get$buf$byte(12 + i);
+        fcb(9+i) = get$buf$byte(12+i);
+    end;
+    /* clear remaining fcb fields */
+    do i = 12 to 35;
+        fcb(i) = 0;
     end;
 end setup$fcb;
 
@@ -288,7 +295,9 @@ process$request: procedure;
     declare req$type byte;
     declare user byte;
 
+    call sftp$debug(6);  /* trace: entering process_request */
     req$type = get$buf$byte(0);
+    call sftp$debug(7);  /* trace: after first get_buf_byte */
     user = get$buf$byte(2);
 
     /* save current user and switch to requested user */
@@ -326,6 +335,7 @@ sftp$main: procedure public;
 
     /* signal startup to C++ emulator */
     call sftp$hello;
+    call sftp$debug(1);  /* trace: entering main */
 
     /* initialize counter */
     poll$counter = 0;
@@ -333,19 +343,29 @@ sftp$main: procedure public;
     /* start with short poll interval */
     poll$interval = 1;
 
+    call sftp$debug(2);  /* trace: entering loop */
+
     do while 1;
         /* increment poll counter */
         poll$counter = poll$counter + 1;
 
-        /* delay before polling */
-        call delay(poll$interval);
+        call sftp$debug(3);  /* trace: before delay */
+
+        /* always delay at least 1 tick to yield CPU */
+        call delay(1);
+
+        call sftp$debug(4);  /* trace: after delay */
 
         /* check for pending work */
         work$ready = sftp$poll$work;
 
+        call sftp$debug(5);  /* trace: after poll */
+
         if work$ready <> 0 then do;
             /* get the request into sftp$buf */
             call sftp$get$request;
+
+            call sftp$debug(10);  /* trace: after sftp$get$request */
 
             /* process it */
             call process$request;

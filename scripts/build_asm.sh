@@ -184,6 +184,18 @@ BNKXIOS="bnkxios"
 um80 -o "${BNKXIOS}.rel" "${BNKXIOS}.asm"
 ul80 --prl -p 0 -o "${BNKXIOS}.spr" "${BNKXIOS}.rel"
 
+# Ensure dsize=0 in SPR header (GENSYS requires this for banked XIOS)
+# dsize field is at bytes 4-5 in the SPR header
+python3 -c "
+import sys
+with open('${BNKXIOS}.spr', 'r+b') as f:
+    data = bytearray(f.read())
+    data[4] = 0  # dsize low byte
+    data[5] = 0  # dsize high byte
+    f.seek(0)
+    f.write(data)
+"
+
 echo "  Output: $ASM_DIR/${BNKXIOS}.spr"
 echo ""
 

@@ -12,6 +12,7 @@ SftpBridge& SftpBridge::instance() {
 }
 
 // Parse CP/M filename into 8.3 components
+// Handles wildcards: * expands to fill with ?, ? matches any single char
 static void parse_filename(const std::string& name,
                            uint8_t* fname8, uint8_t* ext3) {
     // Initialize with spaces
@@ -22,12 +23,34 @@ static void parse_filename(const std::string& name,
     std::string base = (dot != std::string::npos) ? name.substr(0, dot) : name;
     std::string ext = (dot != std::string::npos) ? name.substr(dot + 1) : "";
 
-    // Copy and uppercase
-    for (size_t i = 0; i < std::min(base.size(), size_t(8)); i++) {
-        fname8[i] = std::toupper(static_cast<unsigned char>(base[i]));
+    // Copy base name, handle wildcards
+    bool fill_rest = false;
+    for (size_t i = 0; i < 8; i++) {
+        if (fill_rest) {
+            fname8[i] = '?';
+        } else if (i < base.size()) {
+            if (base[i] == '*') {
+                fname8[i] = '?';
+                fill_rest = true;
+            } else {
+                fname8[i] = std::toupper(static_cast<unsigned char>(base[i]));
+            }
+        }
     }
-    for (size_t i = 0; i < std::min(ext.size(), size_t(3)); i++) {
-        ext3[i] = std::toupper(static_cast<unsigned char>(ext[i]));
+
+    // Copy extension, handle wildcards
+    fill_rest = false;
+    for (size_t i = 0; i < 3; i++) {
+        if (fill_rest) {
+            ext3[i] = '?';
+        } else if (i < ext.size()) {
+            if (ext[i] == '*') {
+                ext3[i] = '?';
+                fill_rest = true;
+            } else {
+                ext3[i] = std::toupper(static_cast<unsigned char>(ext[i]));
+            }
+        }
     }
 }
 
@@ -95,34 +118,59 @@ uint32_t SftpBridge::enqueue_request(SftpRequest req) {
 
 std::optional<SftpReply> SftpBridge::wait_for_reply(uint32_t request_id,
                                                      int timeout_ms) {
-    std::unique_lock<std::mutex> lock(mutex_);
-
     auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::milliseconds(timeout_ms);
 
-    while (true) {
-        // Check for matching reply
-        std::queue<SftpReply> temp;
-        std::optional<SftpReply> result;
+    while (std::chrono::steady_clock::now() < deadline) {
+        // Check for matching reply (brief lock)
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            std::queue<SftpReply> temp;
+            std::optional<SftpReply> result;
 
-        while (!pending_replies_.empty()) {
-            SftpReply reply = std::move(pending_replies_.front());
-            pending_replies_.pop();
-            if (reply.request_id == request_id) {
-                result = std::move(reply);
-            } else {
-                temp.push(std::move(reply));
+            while (!pending_replies_.empty()) {
+                SftpReply reply = std::move(pending_replies_.front());
+                pending_replies_.pop();
+                if (reply.request_id == request_id) {
+                    result = std::move(reply);
+                } else {
+                    temp.push(std::move(reply));
+                }
             }
+            pending_replies_ = std::move(temp);
+
+            if (result) return result;
         }
-        pending_replies_ = std::move(temp);
 
-        if (result) return result;
+        // Run Z80 to allow RSP to process (without holding lock)
+        if (z80_tick_) {
+            z80_tick_();
+        }
+        // If no callback, we just spin - caller should set callback
+    }
 
-        // Wait for new reply or timeout
-        if (reply_cv_.wait_until(lock, deadline) == std::cv_status::timeout) {
-            return std::nullopt;
+    return std::nullopt;  // Timeout
+}
+
+std::optional<SftpReply> SftpBridge::try_get_reply(uint32_t request_id) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // Check for matching reply (non-blocking)
+    std::queue<SftpReply> temp;
+    std::optional<SftpReply> result;
+
+    while (!pending_replies_.empty()) {
+        SftpReply reply = std::move(pending_replies_.front());
+        pending_replies_.pop();
+        if (reply.request_id == request_id) {
+            result = std::move(reply);
+        } else {
+            temp.push(std::move(reply));
         }
     }
+    pending_replies_ = std::move(temp);
+
+    return result;
 }
 
 bool SftpBridge::has_pending_request() const {

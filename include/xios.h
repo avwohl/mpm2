@@ -60,6 +60,9 @@ constexpr uint8_t XIOS_SFTP_HELLO  = 0x69;  // RSP startup notification (debug)
 constexpr uint8_t XIOS_SFTP_ENTRY  = 0x6A;  // BRS entry point reached (debug)
 constexpr uint8_t XIOS_SFTP_JMPADDR = 0x6B; // Report jump target address (BC=address)
 constexpr uint8_t XIOS_SFTP_EPVAL   = 0x6C; // Report ENTRY_POINT value (BC=value)
+constexpr uint8_t XIOS_SFTP_DEBUG   = 0x6D; // Debug trace (C=code)
+constexpr uint8_t XIOS_SFTP_RSPBASE = 0x6E; // Debug: report RSPBASE value (BC=value)
+constexpr uint8_t XIOS_SFTP_BDOSENT = 0x6F; // Debug: report bdos$entry value (BC=value)
 
 // MP/M II flags (set by interrupt handlers)
 constexpr uint8_t FLAG_TICK     = 1;   // System tick (16.67ms)
@@ -124,6 +127,7 @@ private:
     void do_sftp_entry();
     void do_sftp_jmpaddr();
     void do_sftp_epval();
+    void do_sftp_debug();
 
     qkz80* cpu_;
     BankedMemory* mem_;
@@ -139,6 +143,9 @@ private:
     // Clock control
     std::atomic<bool> tick_enabled_;
     std::atomic<bool> systeminit_done_;
+
+    // Debug state
+    uint8_t last_bdos_func_ = 0;
 };
 
 #endif // XIOS_H

@@ -48,6 +48,22 @@ The XIOS (Extended I/O System) provides MP/M II's hardware abstraction. Entry po
 
 ## Development Guidelines
 
+### SFTP File I/O - RSP Bridge Only
+
+**CRITICAL: All SFTP file operations (directory listing, file read, file write, stat, etc.) MUST go through the Z80 RSP bridge. DO NOT implement direct C++ disk access for SFTP.**
+
+The SFTP RSP runs as a Resident System Process in MP/M II and handles file operations via BDOS calls. This ensures:
+- Proper file locking semantics
+- Consistent view with MP/M II processes
+- User area handling
+
+Files involved:
+- `asm/sftp_brs.plm` - Z80 RSP code (PL/M)
+- `src/sftp_bridge.cpp` - C++ request/reply queue
+- `src/xios.cpp` - XIOS dispatch for SFTP (0x60-0x69)
+
+The only direct disk access allowed is `get_mounted_drives()` to list available drives.
+
 ### Loading Binary Data
 
 **Always load binary data from assembled files rather than manually constructing byte sequences in code.** This applies to:

@@ -20,7 +20,16 @@
 #include <libssh/sftp.h>
 
 class Console;
-struct SftpDirEntry;  // Forward declaration
+
+// Simple directory entry for SFTP (used locally, populated via RSP bridge)
+struct SftpDirEntry {
+    std::string name;
+    uint8_t user;
+    uint32_t size;
+    bool is_directory;
+    bool is_system;
+    bool is_read_only;
+};
 
 // Session state during handshake
 enum class SSHState {
@@ -87,8 +96,19 @@ private:
         int user;
         std::vector<SftpDirEntry> entries;
         size_t index;  // Current read position
+        bool enumeration_complete = false;  // Directory listing complete?
     };
     std::map<void*, std::unique_ptr<OpenDir>> open_dirs_;
+
+    // Pending SFTP operation state (for async RSP requests)
+    struct PendingSftpOp {
+        sftp_client_message msg = nullptr;  // Message awaiting reply
+        uint32_t request_id = 0;            // Bridge request ID
+        int op_type = 0;                    // SSH_FXP_* type
+        void* handle = nullptr;             // Associated handle (for dir enum)
+        bool search_first = true;           // For directory enumeration
+    };
+    PendingSftpOp pending_sftp_;
 
     // SFTP file handles
     struct OpenFile {

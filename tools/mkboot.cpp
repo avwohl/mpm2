@@ -53,6 +53,7 @@ int main(int argc, char* argv[]) {
     std::string bnkxios_file;
     std::string mpmldr_file;
     std::string output_file;
+    size_t output_size = 65536;  // Default to full 64KB
 
     static struct option long_options[] = {
         {"ldrbios", required_argument, nullptr, 'l'},
@@ -60,18 +61,20 @@ int main(int argc, char* argv[]) {
         {"bnkxios", required_argument, nullptr, 'b'},
         {"mpmldr",  required_argument, nullptr, 'm'},
         {"output",  required_argument, nullptr, 'o'},
+        {"size",    required_argument, nullptr, 's'},
         {"help",    no_argument,       nullptr, 'h'},
         {nullptr,   0,                 nullptr, 0}
     };
 
     int opt;
-    while ((opt = getopt_long(argc, argv, "l:x:b:m:o:h", long_options, nullptr)) != -1) {
+    while ((opt = getopt_long(argc, argv, "l:x:b:m:o:s:h", long_options, nullptr)) != -1) {
         switch (opt) {
             case 'l': ldrbios_file = optarg; break;
             case 'x': xios_file = optarg; break;
             case 'b': bnkxios_file = optarg; break;
             case 'm': mpmldr_file = optarg; break;
             case 'o': output_file = optarg; break;
+            case 's': output_size = std::stoul(optarg); break;
             case 'h':
                 print_usage(argv[0]);
                 return 0;
@@ -110,28 +113,21 @@ int main(int argc, char* argv[]) {
     image[0x0006] = 0x2E;
     image[0x0007] = 0x03;  // JP 0x032E (MPMLDR's internal LDRBDOS)
 
+    // RST 1 (0x0008): Timer interrupt handler
+    // This is used by z80_runner for 60Hz ticks. SYSINIT will overwrite this
+    // with the proper handler once MP/M II initializes.
+    // For now, just do EI + RET to allow boot to proceed.
+    image[0x0008] = 0xFB;  // EI
+    image[0x0009] = 0xC9;  // RET
+
     // RST 7 / RST 38H (0x0038): JP to XIOS tick handler at 0xFC80
+    // (Also set up RST 7 for potential debugger use)
     image[0x0038] = 0xC3;  // JP
     image[0x0039] = 0x80;
     image[0x003A] = 0xFC;  // 0xFC80
 
-    // MPMLDR makes direct calls to 0xC300 area (BIOS-like jump table)
-    // Set up a minimal jump table at 0xC300 that redirects to LDRBIOS
-    // 0xC300: JP LDRBIOS+0 (BOOT)
-    // 0xC303: JP LDRBIOS+3 (WBOOT)
-    // ... but MPMLDR uses these for CONOUT etc
-    // Actually, let's just map common entries:
-    // 0xC300 = JP 0x1700 (BOOT)
-    // 0xC303 = JP 0x1703 (WBOOT)
-    // 0xC306 = JP 0x1706 (CONST)
-    // 0xC309 = JP 0x1709 (CONIN)
-    // 0xC30C = JP 0x170C (CONOUT)
-    for (int i = 0; i < 17; i++) {  // Standard 17 BIOS entries
-        image[0xC300 + i*3 + 0] = 0xC3;  // JP
-        image[0xC300 + i*3 + 1] = (0x1700 + i*3) & 0xFF;
-        image[0xC300 + i*3 + 2] = ((0x1700 + i*3) >> 8) & 0xFF;
-    }
-    std::cout << "Set up BIOS redirect table at 0xC300 -> 0x1700\n";
+    // LDRBIOS has its own jump table at 0x1700, MPMLDR calls it directly
+    // No redirect table needed at 0xC300
 
     // 0x005C-0x007F: Default FCB (for MPMLDR to find MPM.SYS)
     // Set up FCB for "MPM     SYS" on drive A:
@@ -233,8 +229,8 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    out.write(reinterpret_cast<const char*>(image.data()), image.size());
-    std::cout << "Created boot image: " << output_file << " (65536 bytes)\n";
+    out.write(reinterpret_cast<const char*>(image.data()), output_size);
+    std::cout << "Created boot image: " << output_file << " (" << output_size << " bytes)\n";
 
     return 0;
 }

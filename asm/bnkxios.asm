@@ -117,12 +117,15 @@ SYSDAT:
 ; =============================================================================
 
 DO_BOOT:
-DO_WBOOT:
         ; Cold boot - returns HL = commonbase address
+        ; GENSYS calls this to find where common memory structures are
+        LD      HL, COMMONBASE
+        RET
+
+DO_WBOOT:
+        ; Warm boot - terminate process via XDOS
         LD      A, FUNC_BOOT
         OUT     (XIOS_DISPATCH), A
-
-        ; Warm boot - terminate process via XDOS
         LD      C, 0
         JP      XDOS            ; System reset, terminate process
 

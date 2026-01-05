@@ -12,6 +12,7 @@
 #include <condition_variable>
 #include <queue>
 #include <optional>
+#include <functional>
 
 // SFTP request types (sent to Z80)
 enum class SftpRequestType : uint8_t {
@@ -102,16 +103,23 @@ struct SftpReply {
     static SftpReply deserialize(const uint8_t* buf, size_t buf_size);
 };
 
+// Callback type for running Z80 during wait
+using Z80TickCallback = std::function<void()>;
+
 // Bridge class for managing request/reply queue
 // Thread-safe for C++ SSH handlers to enqueue requests
 class SftpBridge {
 public:
     static SftpBridge& instance();
 
+    // Set callback for running Z80 during wait_for_reply
+    void set_z80_tick_callback(Z80TickCallback cb) { z80_tick_ = cb; }
+
     // C++ side (called from SSH handler thread)
     uint32_t enqueue_request(SftpRequest req);
     std::optional<SftpReply> wait_for_reply(uint32_t request_id,
                                             int timeout_ms = 5000);
+    std::optional<SftpReply> try_get_reply(uint32_t request_id);  // Non-blocking
 
     // Test function - sends TEST request and returns poll counter, -1 on error
     int test_rsp_communication(int timeout_ms = 5000);
@@ -132,6 +140,7 @@ private:
     std::queue<SftpReply> pending_replies_;
 
     uint32_t next_request_id_ = 1;
+    Z80TickCallback z80_tick_;
 };
 
 #endif // SFTP_BRIDGE_H

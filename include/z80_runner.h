@@ -8,6 +8,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <string>
 
 class qkz80;
 class MpmCpu;
@@ -67,6 +68,9 @@ private:
     int timeout_seconds_ = 0;  // 0 = no timeout
     std::chrono::steady_clock::time_point start_time_;
     std::atomic<bool> timed_out_{false};
+
+    // Boot image file path (optional - if set, load from file instead of disk)
+    std::string boot_image_path_;
 };
 
 #endif // Z80_RUNNER_H

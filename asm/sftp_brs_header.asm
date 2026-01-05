@@ -47,13 +47,29 @@ BRSNAME:
 ; Use runtime address calculation to work around GENSYS relocation bug
 ENTRY_POINT:
         LD      SP, STACK_END           ; Set up proper stack
+        ; DEBUG: Signal that entry point was reached
+        LD      A, 6AH                  ; Debug function code
+        OUT     (0E0H), A               ; Dispatch to XIOS
         ; Compute SFTPMAIN address at runtime:
-        ; ENTRY_POINT is at offset 0x000C, gets relocated correctly to 0x8E0C
-        ; SFTPMAIN is at offset 0x04xx, but JP target wouldn't be relocated
+        ; ENTRY_POINT is at offset 0x000C, gets relocated correctly
+        ; SFTPMAIN is at offset 0x04EA, but JP target wouldn't be relocated by GENSYS
         ; Instead: load ENTRY_POINT (relocated), add constant offset
+        ; NOTE: Using hardcoded offset because linker expression computes wrong value
+        ;       After fixing PL/M compiler: SFTPMAIN=0x0501, ENTRY_POINT=0x000C
+        ;       Offset = 0x0501 - 0x000C = 0x04F5
         LD      HL, ENTRY_POINT         ; This address IS relocated (high byte = 0x00)
-        LD      DE, SFTPMAIN - ENTRY_POINT  ; Constant offset, no relocation needed
+        ; DEBUG: Report HL value before adding offset
+        LD      B, H
+        LD      C, L
+        LD      A, 6CH                  ; Debug: report ENTRY_POINT value
+        OUT     (0E0H), A
+        LD      DE, 04F5H               ; Hardcoded: SFTPMAIN(0501) - ENTRY_POINT(000C)
         ADD     HL, DE                  ; HL = actual SFTPMAIN address
+        ; DEBUG: Report final HL value via XIOS (C=low, B=high)
+        LD      B, H
+        LD      C, L
+        LD      A, 6BH                  ; Debug: report computed address
+        OUT     (0E0H), A
         JP      (HL)                    ; Jump via register - no relocation issue
 
 ; Entry address for RET - pointed to by INITSP

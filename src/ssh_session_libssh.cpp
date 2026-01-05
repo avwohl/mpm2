@@ -143,10 +143,12 @@ static int channel_subsystem_request_callback(ssh_session session, ssh_channel c
 
 // Called when client opens a channel session
 static ssh_channel channel_open_callback(ssh_session session, void* userdata) {
+    std::cerr << "[SSH] channel_open_callback invoked\n";
     SSHSession* ssh_sess = static_cast<SSHSession*>(userdata);
     if (ssh_sess) {
         ssh_channel channel = ssh_channel_new(session);
         if (channel) {
+            std::cerr << "[SSH] Channel created, setting up callbacks\n";
             // Set up channel callbacks for PTY and shell requests
             ssh_sess->setup_channel_callbacks(channel);
             return channel;
@@ -327,7 +329,9 @@ bool SSHSession::poll_handshake() {
     switch (state_) {
         case SSHState::KEY_EXCHANGE: {
             int rc = ssh_handle_key_exchange(session_);
+            std::cerr << "[SSH] KEY_EXCHANGE: ssh_handle_key_exchange returned " << rc << "\n";
             if (rc == SSH_OK) {
+                std::cerr << "[SSH] KEY_EXCHANGE completed successfully\n";
                 kex_done_ = true;
 
                 // Set up server callbacks for authentication (modern API)
@@ -363,22 +367,13 @@ bool SSHSession::poll_handshake() {
 
         case SSHState::AUTHENTICATING:
         case SSHState::CHANNEL_OPEN: {
-            // Auth, channel open, PTY, and shell are all handled by callbacks
-            // Just drain any messages and reply default to unexpected ones
-            ssh_message msg = ssh_message_get(session_);
-            if (msg) {
-                int type = ssh_message_type(msg);
-
-                // Auth and channel open are handled by callbacks - don't touch them
-                if (type == SSH_REQUEST_AUTH || type == SSH_REQUEST_CHANNEL_OPEN) {
-                    ssh_message_free(msg);
-                    break;
-                }
-
-                // Other messages get default reply
-                ssh_message_reply_default(msg);
-                ssh_message_free(msg);
-            }
+            // Auth and channel callbacks handle most messages automatically.
+            // We only need to drain messages that aren't handled by callbacks
+            // to prevent them from piling up.
+            // NOTE: Don't call ssh_message_get() for types that callbacks handle,
+            // as that would consume the message before the callback sees it.
+            // The ssh_event_dopoll() at the top of poll() handles invoking callbacks.
+            // We only need to handle unexpected message types here.
             break;
         }
 
@@ -396,7 +391,10 @@ bool SSHSession::poll_io() {
     }
 
     // Check if channel is still open
-    if (ssh_channel_is_closed(channel_) || ssh_channel_is_eof(channel_)) {
+    // Note: For SFTP sessions, only check is_closed(), not is_eof()
+    // EOF on an SFTP channel doesn't mean the session should end
+    if (ssh_channel_is_closed(channel_)) {
+        std::cerr << "[SSH] Channel is_closed=1\n";
         state_ = SSHState::CLOSED;
         return false;
     }
@@ -404,6 +402,13 @@ bool SSHSession::poll_io() {
     // SFTP sessions have their own polling
     if (is_sftp_) {
         return poll_sftp();
+    }
+
+    // For non-SFTP sessions, EOF means disconnect
+    if (ssh_channel_is_eof(channel_)) {
+        std::cerr << "[SSH] Channel is_eof=1 (non-SFTP)\n";
+        state_ = SSHState::CLOSED;
+        return false;
     }
 
     // Handle any pending SSH messages (env vars, window changes, etc.)
@@ -492,10 +497,99 @@ bool SSHSession::poll_sftp() {
     }
 
     // Check if channel is still open
-    if (ssh_channel_is_closed(channel_) || ssh_channel_is_eof(channel_)) {
-        std::cerr << "[SFTP] Channel closed or EOF\n";
+    // Note: Only check is_closed(), not is_eof() - EOF doesn't end SFTP sessions
+    if (ssh_channel_is_closed(channel_)) {
+        std::cerr << "[SFTP] Channel closed\n";
         state_ = SSHState::CLOSED;
         return false;
+    }
+
+    // Check for pending async operation first
+    if (pending_sftp_.msg != nullptr) {
+        // Try to get reply (non-blocking)
+        auto reply = SftpBridge::instance().try_get_reply(pending_sftp_.request_id);
+        if (!reply) {
+            // Still waiting - return and let Z80 run
+            return true;
+        }
+
+        // Got reply - process based on operation type
+        if (pending_sftp_.op_type == SSH_FXP_OPENDIR) {
+            // Directory enumeration in progress
+            auto it = open_dirs_.find(pending_sftp_.handle);
+            if (it != open_dirs_.end()) {
+                OpenDir* dir = it->second.get();
+
+                if (reply->status == SftpReplyStatus::OK && reply->data.size() >= 32) {
+                    // Parse 32-byte CP/M directory entry
+                    SftpDirEntry entry;
+                    std::string name;
+                    for (int i = 1; i <= 8; i++) {
+                        char c = reply->data[i] & 0x7F;
+                        if (c != ' ') name += std::tolower(c);
+                    }
+                    bool has_ext = false;
+                    for (int i = 9; i <= 11; i++) {
+                        char c = reply->data[i] & 0x7F;
+                        if (c != ' ') {
+                            if (!has_ext) { name += '.'; has_ext = true; }
+                            name += std::tolower(c);
+                        }
+                    }
+                    entry.name = name;
+                    entry.user = reply->data[0];
+                    entry.is_read_only = (reply->data[9] & 0x80) != 0;
+                    entry.is_system = (reply->data[10] & 0x80) != 0;
+                    entry.is_directory = false;
+                    uint8_t rc_byte = reply->data[15];
+                    uint8_t ex_byte = reply->data[12];
+                    entry.size = (ex_byte * 128 + rc_byte) * 128;
+                    dir->entries.push_back(entry);
+
+                    // Request next entry
+                    SftpRequest search_req;
+                    search_req.type = SftpRequestType::DIR_SEARCH;
+                    search_req.drive = dir->drive;
+                    search_req.user = dir->user;
+                    search_req.filename = "*.*";
+                    search_req.flags = 1;  // Search next
+                    pending_sftp_.request_id = SftpBridge::instance().enqueue_request(search_req);
+                    pending_sftp_.search_first = false;
+                    return true;  // Continue waiting
+                } else {
+                    // Enumeration complete (not found or error)
+                    dir->enumeration_complete = true;
+                    std::cerr << "[SFTP] OPENDIR complete: " << dir->entries.size() << " entries\n";
+
+                    // Create handle data for response
+                    ssh_string handle_str = ssh_string_new(sizeof(void*));
+                    ssh_string_fill(handle_str, &pending_sftp_.handle, sizeof(void*));
+                    sftp_reply_handle(pending_sftp_.msg, handle_str);
+                    ssh_string_free(handle_str);
+                    sftp_client_message_free(pending_sftp_.msg);
+                    pending_sftp_.msg = nullptr;
+                }
+            }
+        } else if (pending_sftp_.op_type == SSH_FXP_STAT) {
+            // STAT operation complete
+            if (reply->status == SftpReplyStatus::OK && reply->data.size() >= 32) {
+                uint8_t rc_byte = reply->data[15];
+                uint8_t ex_byte = reply->data[12];
+                uint32_t file_size = (ex_byte * 128 + rc_byte) * 128;
+                bool read_only = (reply->data[9] & 0x80) != 0;
+
+                struct sftp_attributes_struct attrs = {};
+                attrs.permissions = (read_only ? 0444 : 0644) | S_IFREG;
+                attrs.size = file_size;
+                attrs.flags = SSH_FILEXFER_ATTR_PERMISSIONS | SSH_FILEXFER_ATTR_SIZE;
+                sftp_reply_attr(pending_sftp_.msg, &attrs);
+            } else {
+                sftp_reply_status(pending_sftp_.msg, SSH_FX_NO_SUCH_FILE, "File not found");
+            }
+            sftp_client_message_free(pending_sftp_.msg);
+            pending_sftp_.msg = nullptr;
+        }
+        return true;
     }
 
     // Try to get an SFTP client message (non-blocking)
@@ -556,26 +650,22 @@ bool SSHSession::poll_sftp() {
                 attrs.size = 0;
                 rc = sftp_reply_attr(msg, &attrs);
             } else if (parsed.is_file()) {
-                // Check if file exists
+                // Check if file exists via RSP bridge (async)
                 std::cerr << "[SFTP] STAT: looking for file '" << parsed.filename
                           << "' drive=" << parsed.drive << " user=" << parsed.user << std::endl;
-                auto entries = read_directory(parsed.drive, parsed.user);
-                std::cerr << "[SFTP] STAT: directory has " << entries.size() << " entries" << std::endl;
-                bool found = false;
-                for (const auto& entry : entries) {
-                    if (entry.name == parsed.filename) {
-                        // S_IFREG marks this as a regular file
-                        attrs.permissions = (entry.is_read_only ? 0444 : 0644) | S_IFREG;
-                        attrs.size = entry.size;
-                        found = true;
-                        break;
-                    }
-                }
-                if (found) {
-                    rc = sftp_reply_attr(msg, &attrs);
-                } else {
-                    rc = sftp_reply_status(msg, SSH_FX_NO_SUCH_FILE, "File not found");
-                }
+
+                SftpRequest search_req;
+                search_req.type = SftpRequestType::DIR_SEARCH;
+                search_req.drive = parsed.drive;
+                search_req.user = (parsed.user >= 0) ? parsed.user : 0;
+                search_req.filename = parsed.filename;
+                search_req.flags = 0;  // Search first
+
+                // Start async operation
+                pending_sftp_.msg = msg;
+                pending_sftp_.request_id = SftpBridge::instance().enqueue_request(search_req);
+                pending_sftp_.op_type = SSH_FXP_STAT;
+                return true;  // Will reply when RSP responds
             } else {
                 rc = sftp_reply_status(msg, SSH_FX_NO_SUCH_FILE, "Path not found");
             }
@@ -609,11 +699,31 @@ bool SSHSession::poll_sftp() {
                     dir->entries.push_back(entry);
                 }
             } else if (parsed.drive >= 0) {
-                // List files on drive/user
+                // List files on drive/user via RSP bridge (async)
                 int user = (parsed.user >= 0) ? parsed.user : 0;
-                dir->entries = read_directory(parsed.drive, user);
+                dir->user = user;
+
+                // Create handle now (we'll enumerate async)
+                void* handle = reinterpret_cast<void*>(next_handle_id_++);
+                open_dirs_[handle] = std::move(dir);
+
+                // Start async directory enumeration
+                SftpRequest search_req;
+                search_req.type = SftpRequestType::DIR_SEARCH;
+                search_req.drive = parsed.drive;
+                search_req.user = user;
+                search_req.filename = "*.*";
+                search_req.flags = 0;  // Search first
+
+                pending_sftp_.msg = msg;
+                pending_sftp_.request_id = SftpBridge::instance().enqueue_request(search_req);
+                pending_sftp_.op_type = SSH_FXP_OPENDIR;
+                pending_sftp_.handle = handle;
+                pending_sftp_.search_first = true;
+                return true;  // Will reply when enumeration completes
             }
 
+            // Root directory - complete immediately
             std::cerr << "[SFTP] OPENDIR: " << dir->entries.size() << " entries\n";
 
             // Create handle (use pointer as handle)
@@ -982,24 +1092,35 @@ void SSHServer::stop() {
     }
 }
 
+static int poll_call_count = 0;
 void SSHServer::poll() {
     if (!running_) return;
+
+    if (++poll_call_count % 10000 == 1) {
+        std::cerr << "[SSH] poll() #" << poll_call_count << " sessions=" << sessions_.size() << "\n" << std::flush;
+    }
 
     poll_accept();
     poll_sessions();
 }
 
+static int accept_count = 0;
 void SSHServer::poll_accept() {
     // Try to accept a new connection (non-blocking)
     ssh_session session = ssh_new();
     if (!session) return;
 
     int rc = ssh_bind_accept(sshbind_, session);
+    if (++accept_count % 10000 == 0) {
+        std::cerr << "[SSH] accept #" << accept_count << " rc=" << rc << " err=" << ssh_get_error(sshbind_) << "\n" << std::flush;
+    }
     if (rc != SSH_OK) {
         // No connection waiting or error
         ssh_free(session);
         return;
     }
+
+    std::cerr << "[SSH] New connection accepted!\n" << std::flush;
 
     // Got a connection - set non-blocking at both OS and libssh level
     socket_t fd = ssh_get_fd(session);
@@ -1010,6 +1131,7 @@ void SSHServer::poll_accept() {
 
     // Create session object - handshake will proceed in poll()
     sessions_.push_back(std::make_unique<SSHSession>(session, this));
+    std::cerr << "[SSH] Session created, total sessions: " << sessions_.size() << "\n";
 }
 
 void SSHServer::poll_sessions() {

@@ -347,40 +347,62 @@ int main(int argc, char* argv[]) {
     else if (ssh_enabled) {
         // SSH mode - poll SSH and CPU in single thread
         auto start_time = std::chrono::steady_clock::now();
-        bool rsp_test_done = false;
+        int rsp_test_state = 0;  // 0=wait, 1=sent, 2=done
         int rsp_test_delay_sec = 15;
+        uint32_t rsp_test_id = 0;
+        auto rsp_test_send_time = start_time;
 
         while (!g_shutdown_requested && !z80.timed_out()) {
             ssh_server.poll();  // Check for new connections and session I/O
             if (!z80.run_polled()) break;
 
-            // Run RSP test after delay if requested
-            if (test_rsp && !rsp_test_done) {
+            // Run RSP test after delay if requested (non-blocking)
+            if (test_rsp && rsp_test_state < 2) {
                 auto elapsed = std::chrono::steady_clock::now() - start_time;
-                if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() >= rsp_test_delay_sec) {
-                    rsp_test_done = true;
+
+                if (rsp_test_state == 0 &&
+                    std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() >= rsp_test_delay_sec) {
+                    // Send test request
+                    rsp_test_state = 1;
+                    rsp_test_send_time = std::chrono::steady_clock::now();
                     std::cout << "\n=== SFTP RSP Communication Test ===\n";
                     std::cout << "Sending TEST request to RSP...\n";
 
-                    int result = SftpBridge::instance().test_rsp_communication(10000);
+                    SftpRequest req;
+                    req.type = SftpRequestType::TEST;
+                    req.drive = 0;
+                    req.user = 0;
+                    req.flags = 0;
+                    req.offset = 0;
+                    req.length = 0;
+                    rsp_test_id = SftpBridge::instance().enqueue_request(std::move(req));
+                }
 
-                    if (result >= 0) {
-                        std::cout << "SUCCESS: RSP responded with poll counter = " << result << "\n";
-                        std::cout << "=== RSP Test PASSED ===\n\n";
-                    } else if (result == -1) {
-                        std::cout << "FAILED: Timeout waiting for RSP reply\n";
-                        std::cout << "(RSP may not be running or XIOS dispatch not working)\n";
-                        std::cout << "=== RSP Test FAILED ===\n\n";
-                    } else if (result == -2) {
-                        std::cout << "FAILED: RSP returned error status\n";
-                        std::cout << "=== RSP Test FAILED ===\n\n";
+                if (rsp_test_state == 1) {
+                    // Check for reply (non-blocking)
+                    auto reply = SftpBridge::instance().try_get_reply(rsp_test_id);
+                    if (reply) {
+                        rsp_test_state = 2;
+                        if (reply->status == SftpReplyStatus::OK) {
+                            std::cout << "SUCCESS: RSP responded!\n";
+                            std::cout << "=== RSP Test PASSED ===\n\n";
+                        } else {
+                            std::cout << "FAILED: RSP returned error status\n";
+                            std::cout << "=== RSP Test FAILED ===\n\n";
+                        }
                     } else {
-                        std::cout << "FAILED: Invalid reply data (code " << result << ")\n";
-                        std::cout << "=== RSP Test FAILED ===\n\n";
+                        // Check for timeout
+                        auto wait_time = std::chrono::steady_clock::now() - rsp_test_send_time;
+                        if (std::chrono::duration_cast<std::chrono::seconds>(wait_time).count() >= 10) {
+                            rsp_test_state = 2;
+                            std::cout << "FAILED: Timeout waiting for RSP reply\n";
+                            std::cout << "(RSP may not be running or XIOS dispatch not working)\n";
+                            std::cout << "=== RSP Test FAILED ===\n\n";
+                        }
                     }
 
-                    // Exit after test if no SSH connections
-                    if (ssh_server.session_count() == 0) {
+                    // Exit after test completes if no SSH connections
+                    if (rsp_test_state == 2 && ssh_server.session_count() == 0) {
                         g_shutdown_requested = 1;
                     }
                 }
