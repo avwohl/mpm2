@@ -289,6 +289,12 @@ int main(int argc, char* argv[]) {
         ssh_enabled = true;
         std::cout << "SSH server listening on port " << ssh_port << "\n";
         std::cout << "Connect with: ssh -p " << ssh_port << " user@localhost\n\n";
+
+        // Set up Z80 tick callback for SFTP bridge
+        // This allows wait_for_reply() to run Z80 cycles while waiting
+        SftpBridge::instance().set_z80_tick_callback([&z80]() {
+            z80.run_polled();
+        });
     }
 #endif
 

@@ -58,6 +58,34 @@ asm/*.prn
 asm/*.rel
 asm/*.SPR
 asm/*.spr
+asm/*.BRS
+asm/*.RSP
+asm/*.sym
+asm/*.mac
+asm/*.off
+asm/*.raw
+
+# PL/M compiler intermediate files
+asm/sftp_brs_asm.asm
+asm/sftp_brs_cpm.mac
+
+# Symbol files
+asm/symbols*.txt
+asm/sftp_symbols.txt
+
+# Test files
+asm/test.*
+
+# Root-level build artifacts (copied from asm/)
+*.BRS
+*.RSP
+*.spr
+*.SPR
+*.sys
+*.SYS
+gensys.cfg
+gensys.com
+todo.txt
 
 # Generated boot images and system files
 disks/*.bin

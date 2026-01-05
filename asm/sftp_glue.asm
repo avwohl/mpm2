@@ -10,6 +10,7 @@
         CSEG
 
         EXTRN   RSPBASE         ; RSP common module base address
+        EXTRN   ENTRY_POINT     ; Entry point (high byte=0, correctly relocated)
 
 ;----------------------------------------------------------------------
 ; DELAY - Custom delay implementation that bypasses ??AUTO issue
@@ -117,10 +118,17 @@ SFTPPOLLWORK:
 ; GETSFTPBUFADDR - Return address of SFTP buffer in bank 0
 ; The buffer is local to this module (not in common memory)
 ; Returns: BC = SFTPBUF address, HL = same
+;
+; IMPORTANT: Uses runtime address calculation to work around GENSYS bug.
+; GENSYS only relocates bytes that are 0x00. SFTPBUF is at 0x0A40 which
+; has non-zero high byte (0x0A), so LD HL,SFTPBUF won't be relocated.
+; Instead: load ENTRY_POINT (correctly relocated) and add constant offset.
 ;----------------------------------------------------------------------
 GETSFTPBUFADDR:
-        ld      hl, SFTPBUF     ; Local buffer in bank 0
-        ld      b, h            ; BC = SFTPBUF address
+        ld      hl, ENTRY_POINT         ; This IS relocated (high byte = 0x00)
+        ld      de, 0A34H               ; Offset: SFTPBUF(0A40) - ENTRY_POINT(000C)
+        add     hl, de                  ; HL = actual SFTPBUF address
+        ld      b, h                    ; BC = SFTPBUF address
         ld      c, l
         ret
 
