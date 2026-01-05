@@ -120,13 +120,13 @@ SFTPPOLLWORK:
 ; Returns: BC = SFTPBUF address, HL = same
 ;
 ; IMPORTANT: Uses runtime address calculation to work around GENSYS bug.
-; GENSYS only relocates bytes that are 0x00. SFTPBUF is at 0x0A40 which
+; GENSYS only relocates bytes that are 0x00. SFTPBUF is at 0x0AE6 which
 ; has non-zero high byte (0x0A), so LD HL,SFTPBUF won't be relocated.
 ; Instead: load ENTRY_POINT (correctly relocated) and add constant offset.
 ;----------------------------------------------------------------------
 GETSFTPBUFADDR:
         ld      hl, ENTRY_POINT         ; This IS relocated (high byte = 0x00)
-        ld      de, 0A34H               ; Offset: SFTPBUF(0A40) - ENTRY_POINT(000C)
+        ld      de, 0ADEH               ; Offset: SFTPBUF(0AEA) - ENTRY_POINT(000C)
         add     hl, de                  ; HL = actual SFTPBUF address
         ld      b, h                    ; BC = SFTPBUF address
         ld      c, l
@@ -146,9 +146,9 @@ GETBUFBYTE:
         ld      e, (hl)         ; E = offset low
         inc     hl
         ld      d, (hl)         ; D = offset high (should be 0)
+        push    de              ; save offset (GETSFTPBUFADDR clobbers DE!)
         call    GETSFTPBUFADDR  ; HL = buffer base
         ; DEBUG: report buffer base address
-        push    de              ; save offset
         ld      b, h
         ld      c, l
         ld      a, 80H          ; Debug: GETBUFBYTE buffer addr
@@ -191,8 +191,12 @@ SETBUFBYTE:
         ld      e, (hl)         ; E = offset low
         inc     hl
         ld      d, (hl)         ; D = offset high (should be 0)
-        ld      a, c            ; A = value
-        call    GETSFTPBUFADDR  ; HL = buffer base (clobbers BC)
+        ld      a, c            ; A = value (save value before call)
+        push    de              ; save offset (GETSFTPBUFADDR clobbers DE!)
+        push    af              ; save value
+        call    GETSFTPBUFADDR  ; HL = buffer base (clobbers BC and DE)
+        pop     af              ; restore value
+        pop     de              ; restore offset
         add     hl, de          ; HL = buffer + offset
         ld      (hl), a         ; Store byte
         ret

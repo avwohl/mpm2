@@ -25,6 +25,7 @@ declare bdos$delete  literally '013h';   /* 19: delete file */
 declare bdos$read    literally '014h';   /* 20: read sequential */
 declare bdos$write   literally '015h';   /* 21: write sequential */
 declare bdos$make    literally '016h';   /* 22: make file */
+declare bdos$rename  literally '017h';   /* 23: rename file */
 declare bdos$setdma  literally '01ah';   /* 26: set dma address */
 declare bdos$setuser literally '020h';   /* 32: set user */
 
@@ -36,6 +37,7 @@ declare req$file$delete literally '3';
 declare req$file$create literally '4';
 declare req$file$close literally '5';
 declare req$file$open  literally '6';
+declare req$file$rename literally '7';
 
 /* sftp reply status (must match sftp_bridge.h) */
 declare status$ok         literally '0';
@@ -358,6 +360,35 @@ do$file$close: procedure;
         call set$reply$status(status$ok, 0);
 end do$file$close;
 
+/* process file rename request */
+/* BDOS 23 expects: FCB[0-11]=old name, FCB[16-27]=new name */
+do$file$rename: procedure;
+    declare result byte;
+    declare i byte;
+
+    /* setup old filename in fcb[0-11] */
+    call setup$fcb;
+
+    /* copy new filename from buf[21-31] to fcb[16-27] */
+    /* fcb[16] = drive (0 = same drive) */
+    fcb(16) = 0;
+    /* copy new name: buf[21-28] -> fcb[17-24] */
+    do i = 0 to 7;
+        fcb(17+i) = get$buf$byte(21+i);
+    end;
+    /* copy new ext: buf[29-31] -> fcb[25-27] */
+    do i = 0 to 2;
+        fcb(25+i) = get$buf$byte(29+i);
+    end;
+
+    result = bdos(bdos$rename, .fcb);
+
+    if result = 0ffh then
+        call set$reply$status(status$not$found, 0);
+    else
+        call set$reply$status(status$ok, 0);
+end do$file$rename;
+
 /* process test request - returns poll counter */
 do$test: procedure;
     /* return poll counter as 2 bytes in reply data */
@@ -395,6 +426,8 @@ process$request: procedure;
         call do$file$delete;
     else if req$type = req$file$close then
         call do$file$close;
+    else if req$type = req$file$rename then
+        call do$file$rename;
     else if req$type = req$test then
         call do$test;
     else

@@ -82,6 +82,11 @@ void SftpRequest::serialize(uint8_t* buf, size_t buf_size) const {
     if (copy_len > 0) {
         std::memcpy(&buf[SFTP_DATA_OFS], data.data(), copy_len);
     }
+
+    // For rename: store new filename at data offset (11 bytes: 8 name + 3 ext)
+    if (type == SftpRequestType::FILE_RENAME && !new_filename.empty()) {
+        parse_filename(new_filename, &buf[SFTP_DATA_OFS], &buf[SFTP_DATA_OFS + 8]);
+    }
 }
 
 SftpReply SftpReply::deserialize(const uint8_t* buf, size_t buf_size) {

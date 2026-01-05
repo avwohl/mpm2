@@ -23,6 +23,7 @@ enum class SftpRequestType : uint8_t {
     FILE_CREATE = 4,   // Create file (BDOS 22)
     FILE_CLOSE = 5,    // Close file (BDOS 16)
     FILE_OPEN = 6,     // Open file (BDOS 15)
+    FILE_RENAME = 7,   // Rename file (BDOS 23)
     TEST = 255,        // Test - returns poll counter
 };
 
@@ -84,6 +85,7 @@ struct SftpRequest {
     uint8_t user;               // User area 0-15
     uint8_t flags;              // Type-specific flags
     std::string filename;       // CP/M 8.3 format
+    std::string new_filename;   // For rename: new CP/M 8.3 name
     uint32_t offset;            // File offset for read/write
     uint16_t length;            // Requested length
     std::vector<uint8_t> data;  // Write data

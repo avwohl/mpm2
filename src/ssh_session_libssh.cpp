@@ -1237,6 +1237,107 @@ bool SSHSession::poll_sftp() {
             break;
         }
 
+        case SSH_FXP_RENAME: {
+            std::string old_path = filename ? filename : "";
+            const char* new_path_cstr = sftp_client_message_get_data(msg);
+            std::string new_path = new_path_cstr ? new_path_cstr : "";
+
+            SftpPath old_parsed = parse_sftp_path(old_path);
+            SftpPath new_parsed = parse_sftp_path(new_path);
+
+            std::cerr << "[SFTP] RENAME: " << old_path << " -> " << new_path
+                      << " (drive=" << old_parsed.drive << " user=" << old_parsed.user
+                      << " old=" << old_parsed.filename << " new=" << new_parsed.filename << ")\n";
+
+            if (!old_parsed.is_file() || !new_parsed.is_file()) {
+                rc = sftp_reply_status(msg, SSH_FX_NO_SUCH_FILE, "Not a file");
+                break;
+            }
+
+            // Must be same drive and user for CP/M rename
+            if (old_parsed.drive != new_parsed.drive || old_parsed.user != new_parsed.user) {
+                rc = sftp_reply_status(msg, SSH_FX_OP_UNSUPPORTED, "Cannot rename across drives/users");
+                break;
+            }
+
+            // Rename file via RSP bridge
+            SftpRequest ren_req;
+            ren_req.type = SftpRequestType::FILE_RENAME;
+            ren_req.drive = old_parsed.drive;
+            ren_req.user = old_parsed.user;
+            ren_req.filename = old_parsed.filename;
+            ren_req.new_filename = new_parsed.filename;
+
+            uint32_t req_id = SftpBridge::instance().enqueue_request(ren_req);
+            auto ren_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
+
+            if (!ren_reply || ren_reply->status != SftpReplyStatus::OK) {
+                std::cerr << "[SFTP] RENAME: failed\n";
+                rc = sftp_reply_status(msg, SSH_FX_NO_SUCH_FILE, "Rename failed");
+                break;
+            }
+
+            std::cerr << "[SFTP] RENAME: success\n";
+            rc = sftp_reply_status(msg, SSH_FX_OK, "OK");
+            break;
+        }
+
+        case SSH_FXP_EXTENDED: {
+            // Handle extended operations (e.g., posix-rename@openssh.com)
+            const char* submessage = sftp_client_message_get_submessage(msg);
+            std::string ext_name = submessage ? submessage : "";
+            std::cerr << "[SFTP] EXTENDED: " << ext_name << "\n";
+
+            if (ext_name == "posix-rename@openssh.com") {
+                // posix-rename: oldpath is filename, newpath is in data
+                std::string old_path = filename ? filename : "";
+                const char* new_path_cstr = sftp_client_message_get_data(msg);
+                std::string new_path = new_path_cstr ? new_path_cstr : "";
+
+                SftpPath old_parsed = parse_sftp_path(old_path);
+                SftpPath new_parsed = parse_sftp_path(new_path);
+
+                std::cerr << "[SFTP] POSIX-RENAME: " << old_path << " -> " << new_path
+                          << " (drive=" << old_parsed.drive << " user=" << old_parsed.user
+                          << " old=" << old_parsed.filename << " new=" << new_parsed.filename << ")\n";
+
+                if (!old_parsed.is_file() || !new_parsed.is_file()) {
+                    rc = sftp_reply_status(msg, SSH_FX_NO_SUCH_FILE, "Not a file");
+                    break;
+                }
+
+                // Must be same drive and user for CP/M rename
+                if (old_parsed.drive != new_parsed.drive || old_parsed.user != new_parsed.user) {
+                    rc = sftp_reply_status(msg, SSH_FX_OP_UNSUPPORTED, "Cannot rename across drives/users");
+                    break;
+                }
+
+                // Rename file via RSP bridge
+                SftpRequest ren_req;
+                ren_req.type = SftpRequestType::FILE_RENAME;
+                ren_req.drive = old_parsed.drive;
+                ren_req.user = old_parsed.user;
+                ren_req.filename = old_parsed.filename;
+                ren_req.new_filename = new_parsed.filename;
+
+                uint32_t req_id = SftpBridge::instance().enqueue_request(ren_req);
+                auto ren_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
+
+                if (!ren_reply || ren_reply->status != SftpReplyStatus::OK) {
+                    std::cerr << "[SFTP] POSIX-RENAME: failed\n";
+                    rc = sftp_reply_status(msg, SSH_FX_NO_SUCH_FILE, "Rename failed");
+                    break;
+                }
+
+                std::cerr << "[SFTP] POSIX-RENAME: success\n";
+                rc = sftp_reply_status(msg, SSH_FX_OK, "OK");
+            } else {
+                std::cerr << "[SFTP] Unknown extended operation: " << ext_name << "\n";
+                rc = sftp_reply_status(msg, SSH_FX_OP_UNSUPPORTED, "Unknown extended operation");
+            }
+            break;
+        }
+
         default:
             std::cerr << "[SFTP] Unsupported operation: " << (int)type << "\n";
             rc = sftp_reply_status(msg, SSH_FX_OP_UNSUPPORTED, "Operation not supported");
