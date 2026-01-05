@@ -76,11 +76,17 @@ void XIOS::do_const() {
                 << " DE=0x" << std::hex << cpu_->regs.DE.get_pair16()
                 << " PC=0x" << pc << std::dec << "\n";
       throw std::invalid_argument("invalid console status");
-    } 
+    }
 
     Console* con = ConsoleManager::instance().get(console);
-    uint8_t status = con ? con->const_status() : 0x00;
 
+    // TEST: Drop I/O for unconnected consoles to isolate blocking issue
+    if (!con || !con->is_connected()) {
+        cpu_->regs.AF.set_high(0x00);  // No input available
+        return;
+    }
+
+    uint8_t status = con->const_status();
     cpu_->regs.AF.set_high(status);
 }
 
@@ -92,11 +98,17 @@ void XIOS::do_conin() {
                 << " DE=0x" << std::hex << cpu_->regs.DE.get_pair16()
                 << " PC=0x" << pc << std::dec << "\n";
       throw std::invalid_argument("invalid console conin");
-    } 
+    }
 
     Console* con = ConsoleManager::instance().get(console);
-    uint8_t ch = con ? con->read_char() : 0x1A;  // EOF default if no console
 
+    // TEST: Drop I/O for unconnected consoles to isolate blocking issue
+    if (!con || !con->is_connected()) {
+        cpu_->regs.AF.set_high(0x00);  // Return null char
+        return;
+    }
+
+    uint8_t ch = con->read_char();
     cpu_->regs.AF.set_high(ch);
 }
 
@@ -109,12 +121,12 @@ void XIOS::do_conout() {
                 << " DE=0x" << std::hex << cpu_->regs.DE.get_pair16()
                 << " PC=0x" << pc << std::dec << "\n";
       throw std::invalid_argument("invalid console conout");
-    } 
-    uint8_t ch = cpu_->regs.BC.get_low();        // C = character
+    }
 
+    uint8_t ch = cpu_->regs.BC.get_low();  // C = character
     Console* con = ConsoleManager::instance().get(console);
     if (con) {
-        con->write_char(ch);
+        con->write_char(ch);  // Queue even if not connected
     }
 }
 
@@ -224,19 +236,26 @@ void XIOS::do_polldevice() {
     bool is_input = (device & 1) != 0; 
 
     Console* con = ConsoleManager::instance().get(console);
+
+    // TEST: Drop I/O for unconnected consoles to isolate blocking issue
+    if (!con || !con->is_connected()) {
+      // Not connected: input never ready, output always ready
+      result = is_input ? 0x00 : 0xFF;
+      cpu_->regs.AF.set_high(result);
+      return;
+    }
+
     if (is_input) {
-      uint8_t status = con ? con->const_status() : 0;
+      uint8_t status = con->const_status();
       if (status) {
-	result = 0xFF;
-      }
-    } else {
-      // Console output - ready if not connected OR queue has space
-      // When not connected, always say ready to avoid blocking processes
-      // (output chars will be dropped when queue is full)
-      bool ready = !con || !con->is_connected() || !con->output_queue().full();
-      if (ready) {
         result = 0xFF;
       }
+    } else {
+      // Console output - check queue has space
+      if (!con->output_queue().full()) {
+        result = 0xFF;  // Connected with space, ready
+      }
+      // If connected but queue full, return 0 (not ready) for flow control
     }
 
     cpu_->regs.AF.set_high(result);

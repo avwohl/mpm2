@@ -5,6 +5,8 @@
 #include "disk.h"
 #include "banked_mem.h"
 #include <cstring>
+#include <iostream>
+#include <iomanip>
 
 Disk::Disk()
     : read_only_(false)
