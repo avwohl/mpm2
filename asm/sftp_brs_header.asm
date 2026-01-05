@@ -55,15 +55,15 @@ ENTRY_POINT:
         ; SFTPMAIN is at offset 0x04EA, but JP target wouldn't be relocated by GENSYS
         ; Instead: load ENTRY_POINT (relocated), add constant offset
         ; NOTE: Using hardcoded offset because linker expression computes wrong value
-        ;       After fixing PL/M compiler: SFTPMAIN=0x0501, ENTRY_POINT=0x000C
-        ;       Offset = 0x0501 - 0x000C = 0x04F5
+        ;       After adding batching code: SFTPMAIN=0x0646, ENTRY_POINT=0x000C
+        ;       Offset = 0x0646 - 0x000C = 0x063A
         LD      HL, ENTRY_POINT         ; This address IS relocated (high byte = 0x00)
         ; DEBUG: Report HL value before adding offset
         LD      B, H
         LD      C, L
         LD      A, 6CH                  ; Debug: report ENTRY_POINT value
         OUT     (0E0H), A
-        LD      DE, 04F5H               ; Hardcoded: SFTPMAIN(0501) - ENTRY_POINT(000C)
+        LD      DE, 063AH               ; Hardcoded: SFTPMAIN(0646) - ENTRY_POINT(000C)
         ADD     HL, DE                  ; HL = actual SFTPMAIN address
         ; DEBUG: Report final HL value via XIOS (C=low, B=high)
         LD      B, H

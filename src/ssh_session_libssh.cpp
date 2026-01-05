@@ -520,55 +520,70 @@ bool SSHSession::poll_sftp() {
             if (it != open_dirs_.end()) {
                 OpenDir* dir = it->second.get();
 
+                // Check if we got entries (status OK and data contains entries)
+                // Reply format: [status][count_lo][count_hi][entry0][entry1]...
+                // Each entry is 32 bytes
+                // Note: more_data flag is already parsed by SftpReply::deserialize
+                bool more_data = reply->more_data;
+
                 if (reply->status == SftpReplyStatus::OK && reply->data.size() >= 32) {
-                    // Parse 32-byte CP/M directory entry
-                    SftpDirEntry entry;
-                    std::string name;
-                    for (int i = 1; i <= 8; i++) {
-                        char c = reply->data[i] & 0x7F;
-                        if (c != ' ') name += std::tolower(c);
-                    }
-                    bool has_ext = false;
-                    for (int i = 9; i <= 11; i++) {
-                        char c = reply->data[i] & 0x7F;
-                        if (c != ' ') {
-                            if (!has_ext) { name += '.'; has_ext = true; }
-                            name += std::tolower(c);
+                    // Parse all 32-byte CP/M directory entries in this batch
+                    size_t offset = 0;
+                    while (offset + 32 <= reply->data.size()) {
+                        SftpDirEntry entry;
+                        std::string name;
+                        for (int i = 1; i <= 8; i++) {
+                            char c = reply->data[offset + i] & 0x7F;
+                            if (c != ' ') name += std::tolower(c);
                         }
+                        bool has_ext = false;
+                        for (int i = 9; i <= 11; i++) {
+                            char c = reply->data[offset + i] & 0x7F;
+                            if (c != ' ') {
+                                if (!has_ext) { name += '.'; has_ext = true; }
+                                name += std::tolower(c);
+                            }
+                        }
+                        entry.name = name;
+                        entry.user = reply->data[offset + 0];
+                        entry.is_read_only = (reply->data[offset + 9] & 0x80) != 0;
+                        entry.is_system = (reply->data[offset + 10] & 0x80) != 0;
+                        entry.is_directory = false;
+                        uint8_t rc_byte = reply->data[offset + 15];
+                        uint8_t ex_byte = reply->data[offset + 12];
+                        entry.size = (ex_byte * 128 + rc_byte) * 128;
+                        dir->entries.push_back(entry);
+                        offset += 32;
                     }
-                    entry.name = name;
-                    entry.user = reply->data[0];
-                    entry.is_read_only = (reply->data[9] & 0x80) != 0;
-                    entry.is_system = (reply->data[10] & 0x80) != 0;
-                    entry.is_directory = false;
-                    uint8_t rc_byte = reply->data[15];
-                    uint8_t ex_byte = reply->data[12];
-                    entry.size = (ex_byte * 128 + rc_byte) * 128;
-                    dir->entries.push_back(entry);
 
-                    // Request next entry
-                    SftpRequest search_req;
-                    search_req.type = SftpRequestType::DIR_SEARCH;
-                    search_req.drive = dir->drive;
-                    search_req.user = dir->user;
-                    search_req.filename = "*.*";
-                    search_req.flags = 1;  // Search next
-                    pending_sftp_.request_id = SftpBridge::instance().enqueue_request(search_req);
-                    pending_sftp_.search_first = false;
-                    return true;  // Continue waiting
-                } else {
-                    // Enumeration complete (not found or error)
-                    dir->enumeration_complete = true;
-                    std::cerr << "[SFTP] OPENDIR complete: " << dir->entries.size() << " entries\n";
+                    std::cerr << "[SFTP] OPENDIR batch: " << (offset / 32)
+                              << " entries, more=" << more_data << "\n";
 
-                    // Create handle data for response
-                    ssh_string handle_str = ssh_string_new(sizeof(void*));
-                    ssh_string_fill(handle_str, &pending_sftp_.handle, sizeof(void*));
-                    sftp_reply_handle(pending_sftp_.msg, handle_str);
-                    ssh_string_free(handle_str);
-                    sftp_client_message_free(pending_sftp_.msg);
-                    pending_sftp_.msg = nullptr;
+                    if (more_data) {
+                        // Request more entries
+                        SftpRequest search_req;
+                        search_req.type = SftpRequestType::DIR_SEARCH;
+                        search_req.drive = dir->drive;
+                        search_req.user = dir->user;
+                        search_req.filename = "*.*";
+                        search_req.flags = 1;  // Search next
+                        pending_sftp_.request_id = SftpBridge::instance().enqueue_request(search_req);
+                        pending_sftp_.search_first = false;
+                        return true;  // Continue waiting
+                    }
                 }
+
+                // Enumeration complete (no more data or not found)
+                dir->enumeration_complete = true;
+                std::cerr << "[SFTP] OPENDIR complete: " << dir->entries.size() << " entries\n";
+
+                // Create handle data for response
+                ssh_string handle_str = ssh_string_new(sizeof(void*));
+                ssh_string_fill(handle_str, &pending_sftp_.handle, sizeof(void*));
+                sftp_reply_handle(pending_sftp_.msg, handle_str);
+                ssh_string_free(handle_str);
+                sftp_client_message_free(pending_sftp_.msg);
+                pending_sftp_.msg = nullptr;
             }
         } else if (pending_sftp_.op_type == SSH_FXP_STAT) {
             // STAT operation complete
@@ -860,10 +875,11 @@ bool SSHSession::poll_sftp() {
                 break;
             }
 
-            // Read entire file via RSP bridge (BDOS reads 128 bytes at a time)
+            // Read entire file via RSP bridge (batched: up to 1920 bytes at a time)
             std::vector<uint8_t> file_data;
             bool read_error = false;
-            while (true) {
+            bool more_data = true;
+            while (more_data) {
                 SftpRequest read_req;
                 read_req.type = SftpRequestType::FILE_READ;
                 read_req.drive = parsed.drive;
@@ -879,8 +895,11 @@ bool SSHSession::poll_sftp() {
                     break;
                 }
 
+                // Check status and MORE_DATA flag (already parsed by deserialize)
+                more_data = read_reply->more_data;
+
                 if (read_reply->status == SftpReplyStatus::ERROR_NOT_FOUND) {
-                    // EOF reached
+                    // EOF reached (no data in first read = file not found/empty)
                     break;
                 }
 
@@ -890,12 +909,14 @@ bool SSHSession::poll_sftp() {
                     break;
                 }
 
-                // Append data
+                // Append data (batched read returns up to 1920 bytes)
                 file_data.insert(file_data.end(),
                                  read_reply->data.begin(),
                                  read_reply->data.end());
 
-                std::cerr << "[SFTP] OPEN: read 128 bytes, total=" << file_data.size() << "\n";
+                std::cerr << "[SFTP] OPEN: read " << read_reply->data.size()
+                          << " bytes, total=" << file_data.size()
+                          << ", more=" << more_data << "\n";
             }
 
             // Close file via RSP

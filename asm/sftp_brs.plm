@@ -46,7 +46,16 @@ declare status$invalid    literally '4';
 declare status$exists     literally '5';
 declare status$more$data  literally '080h';
 
-/* external: shared buffer in common module (256 bytes) */
+/* buffer size and batching constants */
+/* buffer is 2KB, header is 3 bytes, each dir entry is 32 bytes */
+/* max entries = (2048 - 3) / 32 = 63 */
+declare max$dir$entries literally '63';
+/* max data bytes for file read/write = 2048 - 3 = 2045 */
+/* but keep it aligned to 128-byte records: 16 * 128 = 2048, minus header = 2045 */
+/* use 1920 bytes = 15 records to leave room for header */
+declare max$file$data literally '1920';
+
+/* external: shared buffer in bank 0 (2KB) */
 /* request buffer layout:
    [0]     type
    [1]     drive (0=a, 1=b, ...)
@@ -147,12 +156,17 @@ setup$fcb: procedure;
     end;
 end setup$fcb;
 
-/* process directory search request */
+/* process directory search request - batched version */
+/* returns multiple directory entries in one reply */
+/* reply format: [status][count_lo][count_hi][entry0][entry1]... */
 do$dir$search: procedure;
     declare result byte;
     declare flags byte;
-    declare offset address;
+    declare dma$offset address;
+    declare buf$offset address;
+    declare entry$count address;
     declare i byte;
+    declare done byte;
 
     flags = get$buf$byte(3);
     call setup$fcb;
@@ -160,23 +174,45 @@ do$dir$search: procedure;
     /* set dma for directory entry */
     call bdos(bdos$setdma, .dma$buf);
 
-    /* search first or next based on flags */
+    /* initialize */
+    entry$count = 0;
+    buf$offset = 3;  /* start of data in reply buffer */
+    done = 0;
+
+    /* first search based on flags */
     if flags = 0 then
         result = bdos(bdos$search1, .fcb);
     else
         result = bdos(bdos$searchn, .fcb);
 
-    if result = 0ffh then do;
-        /* not found */
+    /* loop to collect multiple entries */
+    do while (result <> 0ffh) and (entry$count < max$dir$entries) and (done = 0);
+        /* copy 32-byte directory entry to reply buffer */
+        dma$offset = result * 32;  /* offset into dma buffer (0, 32, 64, or 96) */
+        do i = 0 to 31;
+            call set$buf$byte(buf$offset + i, dma$buf(dma$offset + i));
+        end;
+        buf$offset = buf$offset + 32;
+        entry$count = entry$count + 1;
+
+        /* search for next entry */
+        result = bdos(bdos$searchn, .fcb);
+    end;
+
+    if entry$count = 0 then do;
+        /* no entries found */
         call set$reply$status(status$not$found, 0);
     end;
     else do;
-        /* found - copy 32-byte directory entry to reply */
-        offset = result * 32;  /* offset into dma buffer */
-        do i = 0 to 31;
-            call set$buf$byte(3 + i, dma$buf(offset + i));
-        end;
-        call set$reply$status(status$ok, 32);
+        /* return entries - set MORE_DATA flag if more entries exist */
+        if result <> 0ffh then
+            call set$buf$byte(0, status$ok + status$more$data);
+        else
+            call set$buf$byte(0, status$ok);
+        /* store data length in bytes (entry_count * 32) in bytes 1-2 */
+        /* C++ deserializer expects length in bytes, not entry count */
+        call set$buf$byte(1, low(buf$offset - 3));
+        call set$buf$byte(2, high(buf$offset - 3));
     end;
 end do$dir$search;
 
@@ -195,51 +231,91 @@ do$file$open: procedure;
         call set$reply$status(status$ok, 0);
 end do$file$open;
 
-/* process file read request */
+/* process file read request - batched version */
+/* reads multiple 128-byte records until EOF or buffer full */
 do$file$read: procedure;
     declare result byte;
     declare i byte;
+    declare buf$offset address;
+    declare bytes$read address;
 
-    call bdos(bdos$setdma, .dma$buf);
-    result = bdos(bdos$read, .fcb);
+    buf$offset = 3;  /* start of data in reply buffer */
+    bytes$read = 0;
 
-    if result <> 0 then do;
-        /* eof or error */
-        call set$reply$status(status$not$found, 0);
-    end;
-    else do;
-        /* copy 128 bytes to reply */
-        do i = 0 to 127;
-            call set$buf$byte(3 + i, dma$buf(i));
+    /* read records until EOF or buffer full */
+    do while bytes$read < max$file$data;
+        call bdos(bdos$setdma, .dma$buf);
+        result = bdos(bdos$read, .fcb);
+
+        if result <> 0 then do;
+            /* eof or error - stop reading */
+            if bytes$read = 0 then do;
+                /* no data read at all - return not found */
+                call set$reply$status(status$not$found, 0);
+                return;
+            end;
+            /* return what we have */
+            call set$reply$status(status$ok, bytes$read);
+            return;
         end;
-        call set$reply$status(status$ok, 128);
+
+        /* copy 128 bytes to reply buffer */
+        do i = 0 to 127;
+            call set$buf$byte(buf$offset + i, dma$buf(i));
+        end;
+        buf$offset = buf$offset + 128;
+        bytes$read = bytes$read + 128;
     end;
+
+    /* buffer full - indicate more data may exist */
+    call set$buf$byte(0, status$ok + status$more$data);
+    call set$buf$byte(1, low(bytes$read));
+    call set$buf$byte(2, high(bytes$read));
 end do$file$read;
 
-/* process file write request */
+/* process file write request - batched version */
+/* writes multiple 128-byte records from request buffer */
 do$file$write: procedure;
     declare result byte;
     declare length address;
+    declare bytes$written address;
+    declare buf$offset address;
+    declare rec$len address;
     declare i byte;
 
     length = get$buf$byte(19) + (get$buf$byte(20) * 256);
-    if length > 128 then length = 128;
+    if length > max$file$data then length = max$file$data;
 
-    /* copy data from request to dma buffer */
-    do i = 0 to 127;
-        if i < length then
-            dma$buf(i) = get$buf$byte(21 + i);
-        else
-            dma$buf(i) = 01ah;  /* ctrl-z eof filler */
+    buf$offset = 21;  /* start of data in request buffer */
+    bytes$written = 0;
+
+    /* write 128-byte records */
+    do while bytes$written < length;
+        /* calculate how many bytes left */
+        rec$len = length - bytes$written;
+        if rec$len > 128 then rec$len = 128;
+
+        /* copy data from request to dma buffer */
+        do i = 0 to 127;
+            if i < rec$len then
+                dma$buf(i) = get$buf$byte(buf$offset + i);
+            else
+                dma$buf(i) = 01ah;  /* ctrl-z eof filler */
+        end;
+
+        call bdos(bdos$setdma, .dma$buf);
+        result = bdos(bdos$write, .fcb);
+
+        if result <> 0 then do;
+            call set$reply$status(status$disk$full, 0);
+            return;
+        end;
+
+        buf$offset = buf$offset + 128;
+        bytes$written = bytes$written + 128;
     end;
 
-    call bdos(bdos$setdma, .dma$buf);
-    result = bdos(bdos$write, .fcb);
-
-    if result <> 0 then
-        call set$reply$status(status$disk$full, 0);
-    else
-        call set$reply$status(status$ok, 0);
+    call set$reply$status(status$ok, 0);
 end do$file$write;
 
 /* process file create request */

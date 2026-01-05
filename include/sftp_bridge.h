@@ -38,7 +38,7 @@ enum class SftpReplyStatus : uint8_t {
 };
 
 // Request structure for Z80 buffer (packed for wire format)
-// Buffer layout (max 256 bytes in common memory):
+// Buffer layout (2KB buffer in bank 0):
 //   [0]     type (SftpRequestType)
 //   [1]     drive (0=A, 1=B, ...)
 //   [2]     user (0-15)
@@ -49,7 +49,7 @@ enum class SftpReplyStatus : uint8_t {
 //   [17-18] offset_high
 //   [19-20] length (for read/write)
 //   [21+]   data (for write)
-constexpr size_t SFTP_BUF_SIZE = 256;
+constexpr size_t SFTP_BUF_SIZE = 2048;
 constexpr size_t SFTP_FILENAME_OFS = 4;
 constexpr size_t SFTP_EXT_OFS = 12;
 constexpr size_t SFTP_OFFSET_OFS = 15;

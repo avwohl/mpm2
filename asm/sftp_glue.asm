@@ -322,8 +322,9 @@ CLRFCB: ld      (de), a
 ;----------------------------------------------------------------------
         PUBLIC  SFTPBUF
 SFTPBUF:
-        ; 256-byte buffer for SFTP data (must use DW to emit bytes)
-        REPT    128
+        ; 2048-byte buffer for SFTP data (must use DW to emit bytes)
+        ; Allows batching: ~60 dir entries (32 bytes each) or 16x 128-byte records
+        REPT    1024
         DW      0
         ENDM
 
