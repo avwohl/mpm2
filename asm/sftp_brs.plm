@@ -1,0 +1,367 @@
+/* sftp_brs.plm - sftp rsp banked module (lives in bank 0) */
+/* part of mp/m ii emulator */
+/* this module contains the actual code, stack, and local data */
+/* Note: BRS header (RSPBASE, INITSP, BRSNAME) is in sftp_brs_header.asm */
+
+sftp$brs: do;
+
+/* xios dispatch port */
+declare xios$port literally '0e0h';
+
+/* sftp xios function codes */
+declare sftp$poll literally '060h';
+declare sftp$get  literally '063h';
+declare sftp$put  literally '066h';
+
+/* xdos function numbers */
+declare xdos$delay literally '08dh';     /* 141: delay ticks */
+
+/* bdos function numbers */
+declare bdos$open    literally '00fh';   /* 15: open file */
+declare bdos$close   literally '010h';   /* 16: close file */
+declare bdos$search1 literally '011h';   /* 17: search first */
+declare bdos$searchn literally '012h';   /* 18: search next */
+declare bdos$delete  literally '013h';   /* 19: delete file */
+declare bdos$read    literally '014h';   /* 20: read sequential */
+declare bdos$write   literally '015h';   /* 21: write sequential */
+declare bdos$make    literally '016h';   /* 22: make file */
+declare bdos$setdma  literally '01ah';   /* 26: set dma address */
+declare bdos$setuser literally '020h';   /* 32: set user */
+
+/* sftp request types (must match sftp_bridge.h) */
+declare req$dir$search literally '0';
+declare req$file$read  literally '1';
+declare req$file$write literally '2';
+declare req$file$delete literally '3';
+declare req$file$create literally '4';
+declare req$file$close literally '5';
+declare req$file$open  literally '6';
+
+/* sftp reply status (must match sftp_bridge.h) */
+declare status$ok         literally '0';
+declare status$not$found  literally '1';
+declare status$disk$full  literally '2';
+declare status$read$only  literally '3';
+declare status$invalid    literally '4';
+declare status$exists     literally '5';
+declare status$more$data  literally '080h';
+
+/* external: shared buffer in common module (256 bytes) */
+/* request buffer layout:
+   [0]     type
+   [1]     drive (0=a, 1=b, ...)
+   [2]     user (0-15)
+   [3]     flags
+   [4-11]  filename (8 bytes)
+   [12-14] extension (3 bytes)
+   [15-18] offset (32-bit)
+   [19-20] length
+   [21+]   data
+*/
+/* reply buffer layout:
+   [0]     status (bit 7 = more data)
+   [1-2]   length
+   [3+]    data
+*/
+/* Buffer access via wrapper procedures (buffer is in RSP common memory) */
+get$buf$byte: procedure(offset) byte external;
+    declare offset address;
+end get$buf$byte;
+
+set$buf$byte: procedure(offset, value) external;
+    declare offset address;
+    declare value byte;
+end set$buf$byte;
+
+/* local data in bank 0 */
+declare fcb(36) byte;            /* file control block */
+declare dma$buf(128) byte;       /* dma buffer for bdos */
+declare reply$buf(256) byte;     /* local reply buffer */
+declare saved$user byte;         /* saved user number */
+declare poll$counter address;    /* test counter - increments each poll */
+
+/* test request type */
+declare req$test literally '255';
+
+/* local stack in bank 0 */
+/* Note: entry point setup moved to sftp_brs_header.asm */
+declare stack(64) address;                      /* stack space (128 bytes) */
+declare stack$top byte;                         /* stack grows down from here */
+
+/* external assembly routines (from sftp_glue.asm) */
+bdos: procedure(func, parm) byte external;
+    declare func byte;
+    declare parm address;
+end bdos;
+
+sftp$poll$work: procedure byte external;
+end sftp$poll$work;
+
+sftp$get$request: procedure byte external;
+end sftp$get$request;
+
+sftp$send$reply: procedure external;
+end sftp$send$reply;
+
+sftp$hello: procedure external;
+end sftp$hello;
+
+/* delay for ticks (1 tick = ~16.67ms, 60 ticks = 1 second) */
+delay: procedure(ticks);
+    declare ticks address;
+    call bdos(xdos$delay, ticks);
+end delay;
+
+/* set reply status with optional more flag */
+set$reply$status: procedure(status, length);
+    declare status byte;
+    declare length address;
+    call set$buf$byte(0, status);
+    call set$buf$byte(1, low(length));
+    call set$buf$byte(2, high(length));
+end set$reply$status;
+
+/* setup fcb from request buffer */
+setup$fcb: procedure;
+    declare i byte;
+    /* clear fcb */
+    do i = 0 to 35;
+        fcb(i) = 0;
+    end;
+    /* drive (0=default, 1=a, 2=b, ...) */
+    fcb(0) = get$buf$byte(1) + 1;
+    /* filename (bytes 4-11 of request) */
+    do i = 0 to 7;
+        fcb(1 + i) = get$buf$byte(4 + i);
+    end;
+    /* extension (bytes 12-14 of request) */
+    do i = 0 to 2;
+        fcb(9 + i) = get$buf$byte(12 + i);
+    end;
+end setup$fcb;
+
+/* process directory search request */
+do$dir$search: procedure;
+    declare result byte;
+    declare flags byte;
+    declare offset address;
+    declare i byte;
+
+    flags = get$buf$byte(3);
+    call setup$fcb;
+
+    /* set dma for directory entry */
+    call bdos(bdos$setdma, .dma$buf);
+
+    /* search first or next based on flags */
+    if flags = 0 then
+        result = bdos(bdos$search1, .fcb);
+    else
+        result = bdos(bdos$searchn, .fcb);
+
+    if result = 0ffh then do;
+        /* not found */
+        call set$reply$status(status$not$found, 0);
+    end;
+    else do;
+        /* found - copy 32-byte directory entry to reply */
+        offset = result * 32;  /* offset into dma buffer */
+        do i = 0 to 31;
+            call set$buf$byte(3 + i, dma$buf(offset + i));
+        end;
+        call set$reply$status(status$ok, 32);
+    end;
+end do$dir$search;
+
+/* process file open request */
+do$file$open: procedure;
+    declare result byte;
+
+    call setup$fcb;
+    call bdos(bdos$setdma, .dma$buf);
+
+    result = bdos(bdos$open, .fcb);
+
+    if result = 0ffh then
+        call set$reply$status(status$not$found, 0);
+    else
+        call set$reply$status(status$ok, 0);
+end do$file$open;
+
+/* process file read request */
+do$file$read: procedure;
+    declare result byte;
+    declare i byte;
+
+    call bdos(bdos$setdma, .dma$buf);
+    result = bdos(bdos$read, .fcb);
+
+    if result <> 0 then do;
+        /* eof or error */
+        call set$reply$status(status$not$found, 0);
+    end;
+    else do;
+        /* copy 128 bytes to reply */
+        do i = 0 to 127;
+            call set$buf$byte(3 + i, dma$buf(i));
+        end;
+        call set$reply$status(status$ok, 128);
+    end;
+end do$file$read;
+
+/* process file write request */
+do$file$write: procedure;
+    declare result byte;
+    declare length address;
+    declare i byte;
+
+    length = get$buf$byte(19) + (get$buf$byte(20) * 256);
+    if length > 128 then length = 128;
+
+    /* copy data from request to dma buffer */
+    do i = 0 to 127;
+        if i < length then
+            dma$buf(i) = get$buf$byte(21 + i);
+        else
+            dma$buf(i) = 01ah;  /* ctrl-z eof filler */
+    end;
+
+    call bdos(bdos$setdma, .dma$buf);
+    result = bdos(bdos$write, .fcb);
+
+    if result <> 0 then
+        call set$reply$status(status$disk$full, 0);
+    else
+        call set$reply$status(status$ok, 0);
+end do$file$write;
+
+/* process file create request */
+do$file$create: procedure;
+    declare result byte;
+
+    call setup$fcb;
+    call bdos(bdos$setdma, .dma$buf);
+
+    result = bdos(bdos$make, .fcb);
+
+    if result = 0ffh then
+        call set$reply$status(status$disk$full, 0);
+    else
+        call set$reply$status(status$ok, 0);
+end do$file$create;
+
+/* process file delete request */
+do$file$delete: procedure;
+    declare result byte;
+
+    call setup$fcb;
+    result = bdos(bdos$delete, .fcb);
+
+    if result = 0ffh then
+        call set$reply$status(status$not$found, 0);
+    else
+        call set$reply$status(status$ok, 0);
+end do$file$delete;
+
+/* process file close request */
+do$file$close: procedure;
+    declare result byte;
+
+    result = bdos(bdos$close, .fcb);
+
+    if result = 0ffh then
+        call set$reply$status(status$invalid, 0);
+    else
+        call set$reply$status(status$ok, 0);
+end do$file$close;
+
+/* process test request - returns poll counter */
+do$test: procedure;
+    /* return poll counter as 2 bytes in reply data */
+    call set$buf$byte(3, low(poll$counter));
+    call set$buf$byte(4, high(poll$counter));
+    call set$reply$status(status$ok, 2);
+end do$test;
+
+/* process sftp request based on type */
+process$request: procedure;
+    declare req$type byte;
+    declare user byte;
+
+    req$type = get$buf$byte(0);
+    user = get$buf$byte(2);
+
+    /* save current user and switch to requested user */
+    saved$user = bdos(bdos$setuser, 0ffh);
+    call bdos(bdos$setuser, user);
+
+    /* dispatch based on request type */
+    if req$type = req$dir$search then
+        call do$dir$search;
+    else if req$type = req$file$open then
+        call do$file$open;
+    else if req$type = req$file$read then
+        call do$file$read;
+    else if req$type = req$file$write then
+        call do$file$write;
+    else if req$type = req$file$create then
+        call do$file$create;
+    else if req$type = req$file$delete then
+        call do$file$delete;
+    else if req$type = req$file$close then
+        call do$file$close;
+    else if req$type = req$test then
+        call do$test;
+    else
+        call set$reply$status(status$invalid, 0);
+
+    /* restore user */
+    call bdos(bdos$setuser, saved$user);
+end process$request;
+
+/* main rsp loop */
+sftp$main: procedure public;
+    declare poll$interval address;
+    declare work$ready byte;
+
+    /* signal startup to C++ emulator */
+    call sftp$hello;
+
+    /* initialize counter */
+    poll$counter = 0;
+
+    /* start with short poll interval */
+    poll$interval = 1;
+
+    do while 1;
+        /* increment poll counter */
+        poll$counter = poll$counter + 1;
+
+        /* delay before polling */
+        call delay(poll$interval);
+
+        /* check for pending work */
+        work$ready = sftp$poll$work;
+
+        if work$ready <> 0 then do;
+            /* get the request into sftp$buf */
+            call sftp$get$request;
+
+            /* process it */
+            call process$request;
+
+            /* send reply from sftp$buf */
+            call sftp$send$reply;
+
+            /* reset to short poll interval when active */
+            poll$interval = 1;
+        end;
+        else do;
+            /* no work - increase poll interval up to 30 ticks (~0.5 sec) */
+            if poll$interval < 30 then
+                poll$interval = poll$interval + 5;
+        end;
+    end;
+end sftp$main;
+
+end sftp$brs;

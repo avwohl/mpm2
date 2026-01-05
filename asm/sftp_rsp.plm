@@ -1,0 +1,30 @@
+/* sftp_rsp.plm - sftp rsp common memory module */
+/* part of mp/m ii emulator */
+/* this module lives in common memory (c000-ffff) */
+/* contains only process descriptor - buffer is in BRS (bank 0) */
+
+sftp$rsp: do;
+
+/* process descriptor - must be at offset 0 */
+/* structure matches working RSPs like MPMSTAT.RSP, ABORT.RSP */
+declare pd$link     address data (0);       /* offset 0: link to next pd */
+declare pd$status   byte data (0);          /* offset 2: process status */
+declare pd$rsvd1    byte data (0);          /* offset 3: reserved (padding) */
+declare pd$rsvd2    byte data (0);          /* offset 4: reserved (padding) */
+declare pd$priority byte data (200);        /* offset 5: priority (200=low) */
+declare pd$stkptr   address data (0);       /* offset 6: stack pointer (filled by brs) */
+declare pd$name(8)  byte data ('S','F','T','P',' ',' ',' ',0a0h); /* offset 8: 8-char name + attr */
+declare pd$console  byte data (0ffh);       /* offset 16: console (ff=detached) */
+declare pd$memseg   byte data (0);          /* offset 17: memseg=0 means banked rsp! */
+declare pd$dparam   address data (0);       /* offset 18: disk parameter */
+declare pd$thread   address data (0);       /* offset 20: thread */
+declare pd$diskdma  address data (0);       /* offset 22: disk dma address */
+declare pd$disksel  byte data (0);          /* offset 24: disk select */
+declare pd$dcnt     address data (0);       /* offset 25: directory count */
+declare pd$searchl  byte data (0);          /* offset 27: search length */
+declare pd$searcha  address data (0);       /* offset 28: search address */
+declare pd$extent   address data (0);       /* offset 30: extent */
+declare pd$regs(10) address data (0,0,0,0,0,0,0,0,0,0); /* offset 32: saved registers */
+declare pd$ext      address data (0);       /* offset 52: extension pointer */
+
+end sftp$rsp;

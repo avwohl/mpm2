@@ -81,6 +81,25 @@ else
     exit 1
 fi
 
+# Copy our SFTP RSP (SFTP bridge)
+if [ -f "$ASM_DIR/SFTP.RSP" ]; then
+    echo "Using SFTP.RSP from $ASM_DIR"
+    cp "$ASM_DIR/SFTP.RSP" sftp.rsp
+    if [ -f "$ASM_DIR/SFTP.BRS" ]; then
+        cp "$ASM_DIR/SFTP.BRS" sftp.brs
+        echo "Copied SFTP.RSP and SFTP.BRS"
+    fi
+else
+    echo "Warning: SFTP.RSP not found, SFTP support disabled"
+fi
+
+# Copy MPMSTAT RSP (for testing - compare BRS relocation behavior)
+if [ -f "$DIST_DIR/MPMSTAT.RSP" ]; then
+    cp "$DIST_DIR/MPMSTAT.RSP" mpmstat.rsp
+    cp "$DIST_DIR/MPMSTAT.BRS" mpmstat.brs
+    echo "Copied MPMSTAT.RSP and MPMSTAT.BRS for testing"
+fi
+
 # Copy GENSYS config (forces binary mode for SPR/SYS files)
 cp "$SCRIPT_DIR/gensys.cfg" gensys.cfg
 
@@ -96,7 +115,7 @@ fi
 # Create expect script with clear prompt/response pairs
 cat > gensys_expect.exp << EXPECT_SCRIPT
 set timeout 10
-log_user 0
+log_user 1
 spawn $CPMEMU gensys.cfg
 
 # System configuration prompts
@@ -125,6 +144,16 @@ expect "Dayfile logging"          { send "\r" }
 
 # Accept generated tables
 expect "Accept new system data"   { send "\r" }
+
+# RSP selection - say Yes to SFTP and MPMSTAT, No to others
+# GENSYS prompts (Y/N)? for each RSP found
+expect {
+    -re "SFTP.*\\(N\\)" { send "Y\r"; exp_continue }
+    -re "MPMSTAT.*\\(N\\)" { send "Y\r"; exp_continue }
+    -re "\\(N\\).*\\?" { send "\r"; exp_continue }
+    "Enter memory segment" { }
+}
+
 # Memory segment table: bank 0 (common) + 7 user banks = 8 entries
 expect "Base,size,attrib,bank"    { send "\r" }
 expect "Base,size,attrib,bank"    { send "\r" }
@@ -183,6 +212,11 @@ cp boot.bin "$DISKS_DIR/mpm2boot.bin"
 # Create system disk (rename intermediate image to final)
 echo "Creating system disk..."
 mv "$DISKS_DIR/mpm2_hd1k.img" "$DISKS_DIR/mpm2_system.img"
+
+# Write boot image to disk's boot area (first 32 sectors = 16KB for hd1k)
+echo "Writing boot image to disk..."
+dd if=boot.bin of="$DISKS_DIR/mpm2_system.img" bs=512 count=32 conv=notrunc 2>/dev/null
+
 python3 "$CPM_DISK" delete "$DISKS_DIR/mpm2_system.img" mpm.sys mpmldr.com 2>/dev/null || true
 python3 "$CPM_DISK" add "$DISKS_DIR/mpm2_system.img" mpm.sys mpmldr.com
 

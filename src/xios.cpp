@@ -6,10 +6,17 @@
 #include "console.h"
 #include "banked_mem.h"
 #include "disk.h"
+#include "sftp_bridge.h"
 #include "qkz80.h"
 #include <iostream>
 #include <iomanip>
 #include <set>
+
+// Debug output control - set to true to enable verbose debug output
+static constexpr bool DEBUG_BOOT = false;
+static constexpr bool DEBUG_DISK = false;  // Disk read tracing
+static constexpr bool DEBUG_DISK_ERRORS = true;
+static constexpr bool DEBUG_XIOS = false;
 
 XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
     : cpu_(cpu)
@@ -21,10 +28,66 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
     , dma_addr_(0x0080)
     , dma_bank_(0)
     , tick_enabled_(false)
+    , systeminit_done_(false)
 {
 }
 
+// Global flag set when "Bank 7" is displayed
+bool g_boot_display_complete = false;
+
 void XIOS::handle_port_dispatch(uint8_t func) {
+    static int call_count = 0;
+    static int const_count = 0;
+    static int post_boot_xios_calls = 0;
+    call_count++;
+
+    // Trace XIOS calls after SYSTEMINIT (disabled by setting to 0)
+    if (DEBUG_XIOS && systeminit_done_.load() && post_boot_xios_calls < 100) {
+        post_boot_xios_calls++;
+        uint16_t pc = cpu_->regs.PC.get_pair16();
+        uint16_t sp = cpu_->regs.SP.get_pair16();
+        uint8_t bank = mem_->current_bank();
+
+        // Read return address from stack
+        uint8_t ret_lo = mem_->read_bank(bank, sp);
+        uint8_t ret_hi = mem_->read_bank(bank, sp + 1);
+        uint16_t ret_addr = ret_lo | (ret_hi << 8);
+
+        std::cerr << "[XIOS] f=" << std::hex << (int)func
+                  << " PC=" << pc << " SP=" << sp
+                  << " ret=" << ret_addr
+                  << " bk=" << std::dec << (int)bank << "\n";
+    }
+
+    // After boot display is complete, trace XIOS calls
+    if (DEBUG_XIOS && g_boot_display_complete) {
+        post_boot_xios_calls++;
+        // Log first 50 non-CONST/CONOUT calls after boot
+        if (func != XIOS_CONST && func != XIOS_CONOUT && post_boot_xios_calls <= 100) {
+            uint16_t pc = cpu_->regs.PC.get_pair16();
+            std::cerr << "[POST-BOOT XIOS #" << post_boot_xios_calls << "] func=0x"
+                      << std::hex << (int)func << " PC=0x" << pc << std::dec << std::endl;
+        }
+        // Log significant CONST polling after boot
+        if (func == XIOS_CONST && (const_count == 10000 || const_count == 100000 || const_count == 1000000)) {
+            uint16_t pc = cpu_->regs.PC.get_pair16();
+            std::cerr << "[POST-BOOT CONST #" << const_count << "] PC=0x"
+                      << std::hex << pc << std::dec << std::endl;
+        }
+    }
+
+    // Track repeated CONST calls (polling) - reduced logging
+    if (func == XIOS_CONST) {
+        const_count++;
+        // Only log significant milestones
+        if (DEBUG_XIOS && (const_count == 100000 || const_count == 1000000)) {
+            uint16_t pc = cpu_->regs.PC.get_pair16();
+            std::cerr << "[CONST poll #" << const_count << "] PC=0x"
+                      << std::hex << pc << std::dec << std::endl;
+        }
+    } else {
+        const_count = 0;
+    }
 
     switch (func) {
         case XIOS_BOOT:      do_boot(); break;
@@ -48,6 +111,12 @@ void XIOS::handle_port_dispatch(uint8_t func) {
         case XIOS_MAXCONSOLE: do_maxconsole(); break;
         case XIOS_SYSTEMINIT: do_systeminit(); break;
         case XIOS_IDLE:       do_idle(); break;
+
+        // SFTP bridge entries
+        case XIOS_SFTP_POLL:  do_sftp_poll(); break;
+        case XIOS_SFTP_GET:   do_sftp_get(); break;
+        case XIOS_SFTP_PUT:   do_sftp_put(); break;
+        case XIOS_SFTP_HELLO: do_sftp_hello(); break;
 
         default:
             // Log unknown functions with PC for debugging
@@ -76,10 +145,31 @@ void XIOS::do_const() {
                 << " DE=0x" << std::hex << cpu_->regs.DE.get_pair16()
                 << " PC=0x" << pc << std::dec << "\n";
       throw std::invalid_argument("invalid console status");
-    } 
+    }
 
     Console* con = ConsoleManager::instance().get(console);
     uint8_t status = con ? con->const_status() : 0x00;
+
+    // DEBUG: Track LDRBIOS polling during boot
+    if (DEBUG_BOOT) {
+        static int boot_const_count = 0;
+        static bool boot_phase_complete = false;
+        uint16_t pc = cpu_->regs.PC.get_pair16();
+        if (pc >= 0x1700 && pc < 0x1900) {  // LDRBIOS range
+            boot_const_count++;
+            if (boot_const_count == 10000) {
+                std::cerr << "[DEBUG] LDRBIOS polled CONST 10000 times" << std::endl;
+            }
+            if (boot_const_count == 100000) {
+                std::cerr << "[DEBUG] LDRBIOS polled CONST 100000 times - trying keypress injection" << std::endl;
+                status = 0xFF;  // Pretend character available
+            }
+        } else if (!boot_phase_complete && boot_const_count > 0) {
+            std::cerr << "[DEBUG] Boot phase ended after " << boot_const_count
+                      << " LDRBIOS CONST polls, PC now at 0x" << std::hex << pc << std::dec << std::endl;
+            boot_phase_complete = true;
+        }
+    }
 
     cpu_->regs.AF.set_high(status);
 }
@@ -103,14 +193,51 @@ void XIOS::do_conin() {
 void XIOS::do_conout() {
     // D = console number (MP/M II XIOS convention), C = character
     uint8_t console = cpu_->regs.DE.get_high();  // D = console number
+    uint8_t ch = cpu_->regs.BC.get_low();  // C = character
+
+    // Track boot completion for flags (always needed)
+    static bool boot_complete = false;
+    if (console == 0) {
+        static std::string boot_line;
+        if (ch >= 0x20 && ch < 0x7F) {
+            boot_line += (char)ch;
+        } else if (ch == 0x0D || ch == 0x0A) {
+            if (!boot_line.empty()) {
+                if (DEBUG_BOOT) {
+                    std::cerr << "[BOOT] " << boot_line << std::endl;
+                }
+                // Check if this is the last bank message
+                if (boot_line.find("Bank 7") != std::string::npos) {
+                    boot_complete = true;
+                    g_boot_display_complete = true;  // Set global flag for XIOS tracing
+                    if (DEBUG_BOOT) {
+                        std::cerr << "[DEBUG] *** MPMLDR boot display complete ***" << std::endl;
+                    }
+                }
+                boot_line.clear();
+            }
+        }
+    }
+    // Post-boot console output - just log first few per console (debug only)
+    if (DEBUG_BOOT && boot_complete) {
+        static int conout_count[8] = {0};
+        if (console < 8) {
+            conout_count[console]++;
+            // Log first 100 chars per console
+            if (conout_count[console] <= 100 && ch >= 0x20 && ch < 0x7F) {
+                std::cerr << "[CON" << (int)console << "] " << (char)ch;
+                if (ch == '\r' || ch == '\n') std::cerr << std::endl;
+            }
+        }
+    }
+
     if (console >= 8) {
       uint16_t pc = cpu_->regs.PC.get_pair16();
       std::cerr << "[CONOUT] Invalid console " << (int)console
                 << " DE=0x" << std::hex << cpu_->regs.DE.get_pair16()
                 << " PC=0x" << pc << std::dec << "\n";
       throw std::invalid_argument("invalid console conout");
-    } 
-    uint8_t ch = cpu_->regs.BC.get_low();        // C = character
+    }
 
     Console* con = ConsoleManager::instance().get(console);
     if (con) {
@@ -142,6 +269,9 @@ void XIOS::do_seldsk() {
 void XIOS::do_settrk() {
     // Assembly copies BC to HL before OUT
     current_track_ = cpu_->regs.HL.get_pair16();
+    if (current_track_ > 1000) {
+        std::cerr << "[SETTRK] T" << current_track_ << " (invalid for hd1k!)\n";
+    }
 }
 
 void XIOS::do_setsec() {
@@ -160,6 +290,36 @@ void XIOS::do_read() {
     DiskSystem::instance().set_dma(dma_addr_, dma_bank_);
 
     int result = DiskSystem::instance().read(mem_);
+
+    if (DEBUG_DISK_ERRORS && result != 0) {
+        std::cerr << "[READ ERROR] T" << current_track_ << " S" << current_sector_
+                  << " DMA=" << std::hex << dma_addr_ << std::dec
+                  << " ERR=" << result << "\n";
+    }
+
+    if (DEBUG_DISK) {
+        static int read_count = 0;
+        static int high_track_count = 0;
+        bool should_print = false;
+
+        if (read_count < 300) {  // Show first 300 reads
+            should_print = true;
+        } else if (current_track_ > 100 && high_track_count < 250) {
+            should_print = true;
+            high_track_count++;
+        }
+
+        if (should_print) {
+            std::cerr << "[READ] T" << current_track_ << " S" << current_sector_
+                      << " -> " << std::hex << dma_addr_ << std::dec;
+            if (result != 0) {
+                std::cerr << " ERR=" << result;
+            }
+            std::cerr << "\n";
+            read_count++;
+        }
+    }
+
     cpu_->regs.AF.set_high(result);
 }
 
@@ -198,6 +358,22 @@ void XIOS::do_selmemory() {
     // Track last non-zero bank as the DMA target for user data
     if (bank != 0) {
         dma_bank_ = bank;
+    }
+
+    // Debug: trace bank switches after SYSTEMINIT
+    if (systeminit_done_.load()) {
+        if (DEBUG_XIOS) {
+            static int selmem_count = 0;
+            selmem_count++;
+            if (selmem_count < 10) {
+                uint16_t pc = cpu_->regs.PC.get_pair16();
+                uint16_t sp = cpu_->regs.SP.get_pair16();
+                uint8_t old_bank = mem_->current_bank();
+                std::cerr << "[SELMEM] #" << selmem_count << " PC=" << std::hex << pc
+                          << " SP=" << sp << " bank " << std::dec << (int)old_bank
+                          << "->" << (int)bank << "\n";
+            }
+        }
     }
 
     mem_->select_bank(bank);
@@ -256,8 +432,10 @@ void XIOS::do_maxconsole() {
 
 void XIOS::do_systeminit() {
     uint16_t bnk_version = cpu_->regs.HL.get_pair16();
-    std::cerr << "[XIOS] SYSTEMINIT BNK_VERSION=" << (int)bnk_version << "\n";
-    std::cerr << "[XIOS] SYSTEMINIT called, IFF1=" << (int)cpu_->regs.IFF1 << "\n";
+    if (DEBUG_XIOS) {
+        std::cerr << "[XIOS] SYSTEMINIT BNK_VERSION=" << (int)bnk_version << "\n";
+        std::cerr << "[XIOS] SYSTEMINIT called, IFF1=" << (int)cpu_->regs.IFF1 << "\n";
+    }
 
     // Copy interrupt vectors from bank 0 to all other banks.
     // The Z80 assembly set up bank 0's page 0 with:
@@ -272,13 +450,35 @@ void XIOS::do_systeminit() {
             mem_->write_bank(bank, addr, byte);
         }
     }
-    std::cerr << "[XIOS] Copied page 0 vectors to " << (num_banks - 1) << " banks\n";
+    if (DEBUG_XIOS) {
+        std::cerr << "[XIOS] Copied page 0 vectors to " << (num_banks - 1) << " banks\n";
+    }
 
     // Initialize consoles
     ConsoleManager::instance().init();
 
     // Enable timer interrupts
     tick_enabled_.store(true);
+    systeminit_done_.store(true);
+
+    if (DEBUG_XIOS) {
+        // Debug: show return address and stack
+        uint16_t sp = cpu_->regs.SP.get_pair16();
+        uint8_t bank = mem_->current_bank();
+        uint16_t ret_lo = mem_->read_bank(bank, sp);
+        uint16_t ret_hi = mem_->read_bank(bank, sp + 1);
+        uint16_t ret_addr = ret_lo | (ret_hi << 8);
+        std::cerr << "[XIOS] SYSTEMINIT returning: SP=" << std::hex << sp
+                  << " RetAddr=" << ret_addr << " Bank=" << std::dec << (int)bank << "\n";
+
+        // Debug: show RST 1 vector (at address 0x0008) in bank 0
+        uint8_t rst1_opcode = mem_->read_bank(0, 0x0008);
+        uint8_t rst1_lo = mem_->read_bank(0, 0x0009);
+        uint8_t rst1_hi = mem_->read_bank(0, 0x000A);
+        uint16_t rst1_target = rst1_lo | (rst1_hi << 8);
+        std::cerr << "[XIOS] Bank 0 RST 1 vector: " << std::hex
+                  << (int)rst1_opcode << " " << rst1_target << std::dec << "\n";
+    }
 }
 
 void XIOS::do_idle() {
@@ -300,4 +500,56 @@ void XIOS::do_boot() {
 
 void XIOS::do_wboot() {
     // Warm boot - nothing to do, Z80 code handles return to TMP
+}
+
+// SFTP bridge handlers
+// These interface with SftpBridge to exchange requests/replies with Z80 RSP
+
+void XIOS::do_sftp_poll() {
+    // Return 0xFF if SFTP request pending, 0x00 if idle
+    bool pending = SftpBridge::instance().has_pending_request();
+    static int poll_count = 0;
+    if (pending || (++poll_count % 100 == 1)) {
+        std::cerr << "[SFTP] RSP poll: pending=" << pending << std::endl;
+    }
+    cpu_->regs.AF.set_high(pending ? 0xFF : 0x00);
+}
+
+void XIOS::do_sftp_get() {
+    // Copy SFTP request to Z80 buffer in common memory
+    // BC = address of buffer (must be in common: C000-FFFF)
+    uint16_t buf_addr = cpu_->regs.BC.get_pair16();
+
+    // Prepare buffer
+    uint8_t buf[SFTP_BUF_SIZE];
+    if (SftpBridge::instance().get_request(buf, sizeof(buf))) {
+        // Copy to common memory
+        for (size_t i = 0; i < SFTP_BUF_SIZE; i++) {
+            mem_->write_common(buf_addr + i, buf[i]);
+        }
+        cpu_->regs.AF.set_high(0x00);  // Success
+    } else {
+        cpu_->regs.AF.set_high(0xFF);  // No request available
+    }
+}
+
+void XIOS::do_sftp_put() {
+    // Read SFTP reply from Z80 buffer in common memory
+    // BC = address of buffer (must be in common: C000-FFFF)
+    uint16_t buf_addr = cpu_->regs.BC.get_pair16();
+
+    // Read from common memory
+    uint8_t buf[SFTP_BUF_SIZE];
+    for (size_t i = 0; i < SFTP_BUF_SIZE; i++) {
+        buf[i] = mem_->read_common(buf_addr + i);
+    }
+
+    SftpBridge::instance().set_reply(buf, sizeof(buf));
+    cpu_->regs.AF.set_high(0x00);  // Success
+}
+
+void XIOS::do_sftp_hello() {
+    // RSP startup notification - just print a message
+    std::cerr << "\n*** SFTP RSP STARTED ***\n" << std::endl;
+    cpu_->regs.AF.set_high(0x00);
 }

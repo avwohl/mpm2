@@ -52,6 +52,12 @@ constexpr uint8_t XIOS_XDOSENT     = 0x57;  // XDOS entry
 constexpr uint8_t XIOS_SYSDAT      = 0x5A;  // System data pointer (2-byte DW)
 constexpr uint8_t XIOS_SETPREEMP   = 0x5D;  // Set preempted flag (C=value)
 
+// SFTP bridge entries (60H-69H) - custom for this emulator
+constexpr uint8_t XIOS_SFTP_POLL   = 0x60;  // Poll for SFTP work (returns 0xFF if pending)
+constexpr uint8_t XIOS_SFTP_GET    = 0x63;  // Get SFTP request (BC=buffer addr in common)
+constexpr uint8_t XIOS_SFTP_PUT    = 0x66;  // Put SFTP reply (BC=buffer addr in common)
+constexpr uint8_t XIOS_SFTP_HELLO  = 0x69;  // RSP startup notification (debug)
+
 // MP/M II flags (set by interrupt handlers)
 constexpr uint8_t FLAG_TICK     = 1;   // System tick (16.67ms)
 constexpr uint8_t FLAG_SECOND   = 2;   // One-second flag
@@ -74,6 +80,9 @@ public:
     // Clock control (STARTCLOCK/STOPCLOCK)
     bool clock_enabled() const { return tick_enabled_.load(); }
     void start_clock() { tick_enabled_.store(true); }
+
+    // Check if SYSTEMINIT has been called (for auto-starting clock)
+    bool systeminit_called() const { return systeminit_done_.load(); }
 
     // Update DMA target bank (called when bank switching via port 0xE1)
     void update_dma_bank(uint8_t bank) { if (bank != 0) dma_bank_ = bank; }
@@ -104,6 +113,12 @@ private:
     void do_systeminit();
     void do_idle();
 
+    // SFTP bridge handlers
+    void do_sftp_poll();
+    void do_sftp_get();
+    void do_sftp_put();
+    void do_sftp_hello();
+
     qkz80* cpu_;
     BankedMemory* mem_;
     uint16_t xios_base_;
@@ -117,6 +132,7 @@ private:
 
     // Clock control
     std::atomic<bool> tick_enabled_;
+    std::atomic<bool> systeminit_done_;
 };
 
 #endif // XIOS_H

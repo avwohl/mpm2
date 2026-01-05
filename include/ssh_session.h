@@ -13,17 +13,21 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <map>
 #include <libssh/libssh.h>
 #include <libssh/server.h>
 #include <libssh/callbacks.h>
+#include <libssh/sftp.h>
 
 class Console;
+struct SftpDirEntry;  // Forward declaration
 
 // Session state during handshake
 enum class SSHState {
     KEY_EXCHANGE,
     AUTHENTICATING,
     CHANNEL_OPEN,
+    SFTP_PENDING,  // SFTP subsystem requested, init pending
     READY,
     CLOSED
 };
@@ -51,9 +55,15 @@ public:
     void setup_channel_callbacks(ssh_channel channel);
     void setup_console();
 
+    // SFTP support
+    void mark_sftp_pending() { state_ = SSHState::SFTP_PENDING; }
+    void setup_sftp();
+    bool is_sftp() const { return is_sftp_; }
+
 private:
     bool poll_handshake();
     bool poll_io();
+    bool poll_sftp();
 
     ssh_session session_;
     ssh_channel channel_;
@@ -66,6 +76,34 @@ private:
     SSHServer* server_;
     ssh_server_callbacks_struct server_callbacks_;
     ssh_channel_callbacks_struct channel_callbacks_;
+
+    // SFTP support
+    sftp_session sftp_;
+    bool is_sftp_;
+
+    // SFTP directory handles
+    struct OpenDir {
+        int drive;
+        int user;
+        std::vector<SftpDirEntry> entries;
+        size_t index;  // Current read position
+    };
+    std::map<void*, std::unique_ptr<OpenDir>> open_dirs_;
+
+    // SFTP file handles
+    struct OpenFile {
+        int drive;
+        int user;
+        std::string filename;
+        uint32_t size;
+        uint64_t offset;        // Current read position
+        bool is_read_only;
+        // Cached file data - entire file read at open via RSP bridge
+        std::vector<uint8_t> cached_data;
+    };
+    std::map<void*, std::unique_ptr<OpenFile>> open_files_;
+
+    uint32_t next_handle_id_ = 1;
 };
 
 // SSH server - accepts connections (non-blocking)
