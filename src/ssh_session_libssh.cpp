@@ -826,9 +826,72 @@ bool SSHSession::poll_sftp() {
             if (handle_str && ssh_string_len(handle_str) == sizeof(void*)) {
                 void* handle;
                 std::memcpy(&handle, ssh_string_data(handle_str), sizeof(void*));
-                // Try to close as directory or file
-                if (open_dirs_.erase(handle) == 0) {
-                    open_files_.erase(handle);
+
+                // Try to close as directory first
+                if (open_dirs_.erase(handle) > 0) {
+                    rc = sftp_reply_status(msg, SSH_FX_OK, "OK");
+                    break;
+                }
+
+                // Try to close as file
+                auto it = open_files_.find(handle);
+                if (it != open_files_.end()) {
+                    OpenFile* file = it->second.get();
+
+                    // If file was opened for writing, flush data to disk
+                    if (file->is_write && !file->cached_data.empty()) {
+                        std::cerr << "[SFTP] CLOSE: writing " << file->cached_data.size()
+                                  << " bytes to disk\n";
+
+                        // Write data in chunks (max 1920 bytes per RSP request)
+                        constexpr size_t CHUNK_SIZE = 1920;
+                        size_t offset = 0;
+                        bool write_error = false;
+
+                        while (offset < file->cached_data.size() && !write_error) {
+                            size_t chunk_len = std::min(CHUNK_SIZE, file->cached_data.size() - offset);
+
+                            SftpRequest write_req;
+                            write_req.type = SftpRequestType::FILE_WRITE;
+                            write_req.drive = file->drive;
+                            write_req.user = file->user;
+                            write_req.filename = file->filename;
+                            write_req.offset = offset;
+                            write_req.length = chunk_len;
+                            write_req.data.assign(
+                                file->cached_data.begin() + offset,
+                                file->cached_data.begin() + offset + chunk_len);
+
+                            uint32_t req_id = SftpBridge::instance().enqueue_request(write_req);
+                            auto write_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
+
+                            if (!write_reply || write_reply->status != SftpReplyStatus::OK) {
+                                std::cerr << "[SFTP] CLOSE: write error at offset " << offset << "\n";
+                                write_error = true;
+                            } else {
+                                offset += chunk_len;
+                                std::cerr << "[SFTP] CLOSE: wrote " << chunk_len
+                                          << " bytes, total=" << offset << "\n";
+                            }
+                        }
+
+                        // Close file via RSP
+                        SftpRequest close_req;
+                        close_req.type = SftpRequestType::FILE_CLOSE;
+                        close_req.drive = file->drive;
+                        close_req.user = file->user;
+                        close_req.filename = file->filename;
+                        SftpBridge::instance().enqueue_request(close_req);
+                        // Don't wait for close reply
+
+                        if (write_error) {
+                            open_files_.erase(it);
+                            rc = sftp_reply_status(msg, SSH_FX_FAILURE, "Write failed");
+                            break;
+                        }
+                    }
+
+                    open_files_.erase(it);
                 }
             }
             rc = sftp_reply_status(msg, SSH_FX_OK, "OK");
@@ -839,26 +902,128 @@ bool SSHSession::poll_sftp() {
             std::string path = filename ? filename : "";
             SftpPath parsed = parse_sftp_path(path);
 
+            // Check open flags
+            uint32_t flags = msg->flags;
+            bool want_read = (flags & SSH_FXF_READ) != 0;
+            bool want_write = (flags & SSH_FXF_WRITE) != 0;
+            bool want_creat = (flags & SSH_FXF_CREAT) != 0;
+            bool want_trunc = (flags & SSH_FXF_TRUNC) != 0;
+
             std::cerr << "[SFTP] OPEN: " << path << " drive=" << parsed.drive
-                      << " user=" << parsed.user << " file=" << parsed.filename << "\n";
+                      << " user=" << parsed.user << " file=" << parsed.filename
+                      << " flags=" << flags << " (R=" << want_read << " W=" << want_write
+                      << " C=" << want_creat << " T=" << want_trunc << ")\n";
 
             if (!parsed.is_file()) {
                 rc = sftp_reply_status(msg, SSH_FX_NO_SUCH_FILE, "Not a file");
                 break;
             }
 
-            // Check open flags
-            uint32_t flags = msg->flags;
-            bool want_read = (flags & SSH_FXF_READ) != 0;
-            bool want_write = (flags & SSH_FXF_WRITE) != 0;
-
-            // For now, only support read
             if (want_write) {
-                rc = sftp_reply_status(msg, SSH_FX_OP_UNSUPPORTED, "Write not supported");
+                // Write mode - create or truncate file
+                bool file_exists = false;
+
+                // Check if file exists via DIR_SEARCH
+                SftpRequest search_req;
+                search_req.type = SftpRequestType::DIR_SEARCH;
+                search_req.drive = parsed.drive;
+                search_req.user = parsed.user;
+                search_req.filename = parsed.filename;
+                search_req.flags = 0;  // Search first
+
+                uint32_t req_id = SftpBridge::instance().enqueue_request(search_req);
+                auto search_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
+                if (search_reply && search_reply->status == SftpReplyStatus::OK) {
+                    file_exists = true;
+                }
+
+                // If file exists and we want to truncate, delete it first
+                if (file_exists && want_trunc) {
+                    std::cerr << "[SFTP] OPEN: deleting existing file for truncate\n";
+                    SftpRequest del_req;
+                    del_req.type = SftpRequestType::FILE_DELETE;
+                    del_req.drive = parsed.drive;
+                    del_req.user = parsed.user;
+                    del_req.filename = parsed.filename;
+
+                    req_id = SftpBridge::instance().enqueue_request(del_req);
+                    auto del_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
+                    if (!del_reply || del_reply->status != SftpReplyStatus::OK) {
+                        std::cerr << "[SFTP] OPEN: failed to delete for truncate\n";
+                    }
+                    file_exists = false;
+                }
+
+                // If file doesn't exist and we want to create, create it
+                if (!file_exists && want_creat) {
+                    std::cerr << "[SFTP] OPEN: creating new file\n";
+                    SftpRequest create_req;
+                    create_req.type = SftpRequestType::FILE_CREATE;
+                    create_req.drive = parsed.drive;
+                    create_req.user = parsed.user;
+                    create_req.filename = parsed.filename;
+
+                    req_id = SftpBridge::instance().enqueue_request(create_req);
+                    auto create_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
+                    if (!create_reply || create_reply->status != SftpReplyStatus::OK) {
+                        SftpReplyStatus st = create_reply ? create_reply->status : SftpReplyStatus::ERROR_INVALID;
+                        std::cerr << "[SFTP] OPEN: create failed, status=" << (int)st << "\n";
+                        if (st == SftpReplyStatus::ERROR_DISK_FULL) {
+                            rc = sftp_reply_status(msg, SSH_FX_FAILURE, "Disk full");
+                        } else {
+                            rc = sftp_reply_status(msg, SSH_FX_FAILURE, "Cannot create file");
+                        }
+                        break;
+                    }
+                    file_exists = true;
+                }
+
+                if (!file_exists) {
+                    rc = sftp_reply_status(msg, SSH_FX_NO_SUCH_FILE, "File not found");
+                    break;
+                }
+
+                // Open file via RSP bridge
+                SftpRequest open_req;
+                open_req.type = SftpRequestType::FILE_OPEN;
+                open_req.drive = parsed.drive;
+                open_req.user = parsed.user;
+                open_req.filename = parsed.filename;
+                open_req.flags = 1;  // Write mode
+
+                req_id = SftpBridge::instance().enqueue_request(open_req);
+                auto open_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
+                if (!open_reply || open_reply->status != SftpReplyStatus::OK) {
+                    std::cerr << "[SFTP] OPEN: file open failed for write\n";
+                    rc = sftp_reply_status(msg, SSH_FX_FAILURE, "Cannot open file");
+                    break;
+                }
+
+                // Create file handle for writing
+                auto file = std::make_unique<OpenFile>();
+                file->drive = parsed.drive;
+                file->user = parsed.user;
+                file->filename = parsed.filename;
+                file->size = 0;
+                file->offset = 0;
+                file->is_read_only = false;
+                file->is_write = true;
+                file->file_created = true;
+                // cached_data will accumulate written data
+
+                void* handle = reinterpret_cast<void*>(next_handle_id_++);
+                open_files_[handle] = std::move(file);
+
+                std::cerr << "[SFTP] OPEN: write mode, file ready\n";
+
+                ssh_string handle_str = ssh_string_new(sizeof(void*));
+                ssh_string_fill(handle_str, &handle, sizeof(void*));
+                rc = sftp_reply_handle(msg, handle_str);
+                ssh_string_free(handle_str);
                 break;
             }
 
-            // Open file via RSP bridge
+            // Read mode - open existing file and cache contents
             SftpRequest open_req;
             open_req.type = SftpRequestType::FILE_OPEN;
             open_req.drive = parsed.drive;
@@ -940,7 +1105,9 @@ bool SSHSession::poll_sftp() {
             file->filename = parsed.filename;
             file->size = file_data.size();
             file->offset = 0;
-            file->is_read_only = true;  // We only support read
+            file->is_read_only = true;
+            file->is_write = false;
+            file->file_created = false;
             file->cached_data = std::move(file_data);
 
             void* handle = reinterpret_cast<void*>(next_handle_id_++);
@@ -989,6 +1156,51 @@ bool SSHSession::poll_sftp() {
 
             std::cerr << "[SFTP] READ: returning " << to_read << " bytes from cache\n";
             rc = sftp_reply_data(msg, file->cached_data.data() + offset, to_read);
+            break;
+        }
+
+        case SSH_FXP_WRITE: {
+            ssh_string handle_str = msg->handle;
+            if (!handle_str || ssh_string_len(handle_str) != sizeof(void*)) {
+                rc = sftp_reply_status(msg, SSH_FX_BAD_MESSAGE, "Invalid handle");
+                break;
+            }
+
+            void* handle;
+            std::memcpy(&handle, ssh_string_data(handle_str), sizeof(void*));
+
+            auto it = open_files_.find(handle);
+            if (it == open_files_.end()) {
+                rc = sftp_reply_status(msg, SSH_FX_BAD_MESSAGE, "Invalid file handle");
+                break;
+            }
+
+            OpenFile* file = it->second.get();
+            if (!file->is_write) {
+                rc = sftp_reply_status(msg, SSH_FX_PERMISSION_DENIED, "File not opened for writing");
+                break;
+            }
+
+            uint64_t offset = msg->offset;
+            ssh_string data_str = msg->data;
+            if (!data_str) {
+                rc = sftp_reply_status(msg, SSH_FX_BAD_MESSAGE, "No data");
+                break;
+            }
+
+            size_t data_len = ssh_string_len(data_str);
+            const uint8_t* data_ptr = reinterpret_cast<const uint8_t*>(ssh_string_data(data_str));
+
+            std::cerr << "[SFTP] WRITE: offset=" << offset << " len=" << data_len << "\n";
+
+            // Expand cached_data if needed and write at offset
+            if (offset + data_len > file->cached_data.size()) {
+                file->cached_data.resize(offset + data_len);
+            }
+            std::memcpy(file->cached_data.data() + offset, data_ptr, data_len);
+            file->size = file->cached_data.size();
+
+            rc = sftp_reply_status(msg, SSH_FX_OK, "OK");
             break;
         }
 

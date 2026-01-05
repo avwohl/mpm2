@@ -118,7 +118,10 @@ private:
         uint32_t size;
         uint64_t offset;        // Current read position
         bool is_read_only;
+        bool is_write;          // File opened for writing
+        bool file_created;      // File was created (new or truncated)
         // Cached file data - entire file read at open via RSP bridge
+        // For write mode, this accumulates written data until close
         std::vector<uint8_t> cached_data;
     };
     std::map<void*, std::unique_ptr<OpenFile>> open_files_;
