@@ -1204,6 +1204,39 @@ bool SSHSession::poll_sftp() {
             break;
         }
 
+        case SSH_FXP_REMOVE: {
+            std::string path = filename ? filename : "";
+            SftpPath parsed = parse_sftp_path(path);
+
+            std::cerr << "[SFTP] REMOVE: " << path << " drive=" << parsed.drive
+                      << " user=" << parsed.user << " file=" << parsed.filename << "\n";
+
+            if (!parsed.is_file()) {
+                rc = sftp_reply_status(msg, SSH_FX_NO_SUCH_FILE, "Not a file");
+                break;
+            }
+
+            // Delete file via RSP bridge
+            SftpRequest del_req;
+            del_req.type = SftpRequestType::FILE_DELETE;
+            del_req.drive = parsed.drive;
+            del_req.user = parsed.user;
+            del_req.filename = parsed.filename;
+
+            uint32_t req_id = SftpBridge::instance().enqueue_request(del_req);
+            auto del_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
+
+            if (!del_reply || del_reply->status != SftpReplyStatus::OK) {
+                std::cerr << "[SFTP] REMOVE: file not found\n";
+                rc = sftp_reply_status(msg, SSH_FX_NO_SUCH_FILE, "File not found");
+                break;
+            }
+
+            std::cerr << "[SFTP] REMOVE: success\n";
+            rc = sftp_reply_status(msg, SSH_FX_OK, "OK");
+            break;
+        }
+
         default:
             std::cerr << "[SFTP] Unsupported operation: " << (int)type << "\n";
             rc = sftp_reply_status(msg, SSH_FX_OP_UNSUPPORTED, "Operation not supported");
