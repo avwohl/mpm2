@@ -57,6 +57,9 @@ constexpr uint8_t XIOS_SFTP_POLL   = 0x60;  // Poll for SFTP work (returns 0xFF 
 constexpr uint8_t XIOS_SFTP_GET    = 0x63;  // Get SFTP request (BC=buffer addr in common)
 constexpr uint8_t XIOS_SFTP_PUT    = 0x66;  // Put SFTP reply (BC=buffer addr in common)
 constexpr uint8_t XIOS_SFTP_HELLO  = 0x69;  // RSP startup notification (debug)
+constexpr uint8_t XIOS_SFTP_ENTRY  = 0x6A;  // BRS entry point reached (debug)
+constexpr uint8_t XIOS_SFTP_JMPADDR = 0x6B; // Report jump target address (BC=address)
+constexpr uint8_t XIOS_SFTP_EPVAL   = 0x6C; // Report ENTRY_POINT value (BC=value)
 
 // MP/M II flags (set by interrupt handlers)
 constexpr uint8_t FLAG_TICK     = 1;   // System tick (16.67ms)
@@ -118,6 +121,9 @@ private:
     void do_sftp_get();
     void do_sftp_put();
     void do_sftp_hello();
+    void do_sftp_entry();
+    void do_sftp_jmpaddr();
+    void do_sftp_epval();
 
     qkz80* cpu_;
     BankedMemory* mem_;

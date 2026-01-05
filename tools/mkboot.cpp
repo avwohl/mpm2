@@ -90,11 +90,12 @@ int main(int argc, char* argv[]) {
     // Create 64KB memory image (all 0x00)
     std::vector<uint8_t> image(65536, 0x00);
 
-    // Set up page zero with standard CP/M vectors
-    // 0x0000: JP to warm boot (LDRBIOS+3 at 0x1703)
+    // Set up page zero with boot entry
+    // 0x0000: JP to MPMLDR at 0x0100 (boot entry point)
+    // Note: After MP/M II is running, 0x0000 will be overwritten to point to WBOOT
     image[0x0000] = 0xC3;  // JP
-    image[0x0001] = 0x03;
-    image[0x0002] = 0x17;  // JP 0x1703 (WBOOT in LDRBIOS)
+    image[0x0001] = 0x00;
+    image[0x0002] = 0x01;  // JP 0x0100 (MPMLDR entry)
 
     // 0x0003: I/O byte (not used much)
     image[0x0003] = 0x00;

@@ -9,8 +9,11 @@ set -o errexit
 # This script automates the GENSYS process:
 # 1. Creates a BNKXIOS.SPR with the specified number of consoles
 # 2. Runs GENSYS under cpmemu with default settings
-# 3. Patches MPMLDR.COM serial number to match
+# 3. Patches MPMLDR.COM serial number to match (DRI tree only)
 # 4. Creates boot image and disk
+#
+# Usage:
+#   gensys.sh [--tree=dri|src] [num_consoles]
 #
 # Default configuration:
 # - 4 consoles
@@ -25,18 +28,51 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/build"
 ASM_DIR="$PROJECT_DIR/asm"
 DISKS_DIR="$PROJECT_DIR/disks"
+TOOLS_DIR="$PROJECT_DIR/tools"
 CPMEMU="${CPMEMU:-$HOME/src/cpmemu/src/cpmemu}"
 WORK_DIR="/tmp/gensys_work"
 CPM_DISK="${CPM_DISK:-$HOME/src/cpmemu/util/cpm_disk.py}"
 
-# Number of consoles (default 4, matching asm/bnkxios.asm)
-# must match asm/bnkxios.asm:
-# NMBCNS:         EQU     4       ; consoles for SSH users
-NMBCNS=${1:-4}
+# Parse arguments
+TREE="dri"  # Default to DRI binaries
+NMBCNS=4    # Default console count
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --tree=*)
+            TREE="${1#--tree=}"
+            shift
+            ;;
+        --tree)
+            TREE="$2"
+            shift 2
+            ;;
+        [0-9]*)
+            NMBCNS="$1"
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--tree=dri|src] [num_consoles]"
+            exit 1
+            ;;
+    esac
+done
+
+# Validate tree selection
+if [ "$TREE" != "dri" ] && [ "$TREE" != "src" ]; then
+    echo "Error: Invalid tree '$TREE'. Use 'dri' or 'src'"
+    exit 1
+fi
+
+# Set binary directory based on tree
+BIN_DIR="$PROJECT_DIR/bin/$TREE"
 
 echo "MP/M II System Generation"
 echo "========================="
+echo "Tree:     $TREE"
 echo "Consoles: $NMBCNS"
+echo "Binaries: $BIN_DIR"
 echo ""
 
 # Check prerequisites
@@ -57,19 +93,28 @@ if [ ! -f "$DISKS_DIR/mpm2_hd1k.img" ]; then
     exit 1
 fi
 
-# Create work directory
+# Create clean work directory (remove old files that could interfere with GENSYS prompts)
+rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
 
-# Copy required SPR files from distribution directory
-# (disk image versions may be corrupted by cpm_disk.py extraction)
-echo "Extracting SPR files from distribution..."
-DIST_DIR="$PROJECT_DIR/mpm2_external/mpm2dist"
-for f in RESBDOS.SPR BNKBDOS.SPR XDOS.SPR BNKXDOS.SPR TMP.SPR GENSYS.COM; do
+# Copy required SPR files from selected tree
+# GENSYS.COM always from DRI (it's a build tool, no source available)
+echo "Copying SPR files from $TREE tree..."
+for f in RESBDOS.SPR BNKBDOS.SPR XDOS.SPR BNKXDOS.SPR TMP.SPR; do
     lf=$(echo "$f" | tr '[:upper:]' '[:lower:]')
-    cp "$DIST_DIR/$f" "./$lf"
-    echo "Extracted $lf -> ./$lf ($(wc -c < "./$lf" | tr -d ' ') bytes)"
+    if [ -f "$BIN_DIR/$f" ]; then
+        cp "$BIN_DIR/$f" "./$lf"
+        echo "  $lf ($(wc -c < "./$lf" | tr -d ' ') bytes) [$TREE]"
+    else
+        echo "Error: $f not found in $BIN_DIR"
+        exit 1
+    fi
 done
+# GENSYS.COM from DRI (no source available)
+DRI_BIN_DIR="$PROJECT_DIR/bin/dri"
+cp "$DRI_BIN_DIR/GENSYS.COM" "./gensys.com"
+echo "  gensys.com ($(wc -c < gensys.com | tr -d ' ') bytes) [DRI - tool]"
 
 # Copy our custom BNKXIOS.SPR (port-based I/O for emulator)
 if [ -f "$ASM_DIR/bnkxios.spr" ]; then
@@ -81,27 +126,11 @@ else
     exit 1
 fi
 
-# Copy our SFTP RSP (SFTP bridge)
-if [ -f "$ASM_DIR/SFTP.RSP" ]; then
-    echo "Using SFTP.RSP from $ASM_DIR"
-    cp "$ASM_DIR/SFTP.RSP" sftp.rsp
-    if [ -f "$ASM_DIR/SFTP.BRS" ]; then
-        cp "$ASM_DIR/SFTP.BRS" sftp.brs
-        echo "Copied SFTP.RSP and SFTP.BRS"
-    fi
-else
-    echo "Warning: SFTP.RSP not found, SFTP support disabled"
-fi
-
-# Copy MPMSTAT RSP (for testing - compare BRS relocation behavior)
-if [ -f "$DIST_DIR/MPMSTAT.RSP" ]; then
-    cp "$DIST_DIR/MPMSTAT.RSP" mpmstat.rsp
-    cp "$DIST_DIR/MPMSTAT.BRS" mpmstat.brs
-    echo "Copied MPMSTAT.RSP and MPMSTAT.BRS for testing"
-fi
-
 # Copy GENSYS config (forces binary mode for SPR/SYS files)
 cp "$SCRIPT_DIR/gensys.cfg" gensys.cfg
+
+# Remove any leftover SYSTEM.DAT that would cause GENSYS to skip first prompt
+rm -f system.dat SYSTEM.DAT
 
 # Run GENSYS under cpmemu using expect for readable prompt/response
 echo "Running GENSYS ($NMBCNS consoles, 7 user banks, C0 common base)..."
@@ -113,37 +142,47 @@ if ! command -v expect &> /dev/null; then
 fi
 
 # Create expect script with clear prompt/response pairs
+# Uses short timeout (2s) and fails immediately on any timeout
 cat > gensys_expect.exp << EXPECT_SCRIPT
-set timeout 10
-log_user 1
+set timeout 2
+log_user 0
+
+# Helper proc that fails on timeout
+proc prompt {pattern response} {
+    expect {
+        \$pattern { send "\$response\r" }
+        timeout { puts stderr "ERROR: Timeout waiting for: \$pattern"; exit 1 }
+        eof { puts stderr "ERROR: Unexpected EOF waiting for: \$pattern"; exit 1 }
+    }
+}
+
 spawn $CPMEMU gensys.cfg
 
 # System configuration prompts
-expect "Use SYSTEM.DAT"           { send "N\r" }
-expect "Top page"                 { send "\r" }
-expect "Number of TMPs"           { send "$NMBCNS\r" }
-expect "Number of Printers"       { send "\r" }
-expect "Breakpoint RST"           { send "\r" }
-expect "Compatibility Attributes" { send "\r" }
-expect "system call user stacks"  { send "Y\r" }
-expect "Z80 CPU"                  { send "\r" }
-expect "ticks/second"             { send "\r" }
-expect "System Drive"             { send "\r" }
-expect "Temporary file drive"     { send "\r" }
-expect "locked records/process"   { send "\r" }
-expect "locked records/system"    { send "\r" }
-expect "open files/process"       { send "\r" }
-expect "open files/system"        { send "\r" }
+# Note: "Use SYSTEM.DAT" only appears if file exists - we delete it above
+prompt "Top page"                 ""
+prompt "Number of TMPs"           "$NMBCNS"
+prompt "Number of Printers"       ""
+prompt "Breakpoint RST"           ""
+prompt "Compatibility Attributes" ""
+prompt "system call user stacks"  "Y"
+prompt "Z80 CPU"                  ""
+prompt "ticks/second"             ""
+prompt "System Drive"             ""
+prompt "Temporary file drive"     ""
+prompt "locked records/process"   ""
+prompt "locked records/system"    ""
+prompt "open files/process"       ""
+prompt "open files/system"        ""
 
 # Memory configuration
-# Note: MP/M II supports max 7 user memory segments
-expect "Bank switched"            { send "\r" }
-expect "memory segments"          { send "7\r" }
-expect "Common memory base"       { send "C0\r" }
-expect "Dayfile logging"          { send "\r" }
+prompt "Bank switched"            ""
+prompt "memory segments"          "7"
+prompt "Common memory base"       "C0"
+prompt "Dayfile logging"          ""
 
 # Accept generated tables
-expect "Accept new system data"   { send "\r" }
+prompt "Accept new system data"   ""
 
 # RSP selection - say Yes to SFTP and MPMSTAT, No to others
 # GENSYS prompts (Y/N)? for each RSP found
@@ -155,20 +194,28 @@ expect {
 }
 
 # Memory segment table: bank 0 (common) + 7 user banks = 8 entries
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Accept new memory segment" { send "\r" }
+prompt "Base,size,attrib,bank"    ""
+prompt "Base,size,attrib,bank"    ""
+prompt "Base,size,attrib,bank"    ""
+prompt "Base,size,attrib,bank"    ""
+prompt "Base,size,attrib,bank"    ""
+prompt "Base,size,attrib,bank"    ""
+prompt "Base,size,attrib,bank"    ""
+prompt "Base,size,attrib,bank"    ""
+prompt "Accept new memory segment" ""
 
-expect eof
+# Wait for explicit success message
+expect {
+    "GENSYS DONE" { exit 0 }
+    timeout { puts stderr "ERROR: GENSYS timed out waiting for completion"; exit 1 }
+    eof { puts stderr "ERROR: GENSYS exited unexpectedly"; exit 1 }
+}
 EXPECT_SCRIPT
 
-expect gensys_expect.exp > gensys.log 2>&1 || true
+if ! expect gensys_expect.exp 2>&1; then
+    echo "Error: GENSYS failed - see output above"
+    exit 1
+fi
 
 # Check if MPM.SYS was created
 if [ ! -f "mpm.sys" ]; then
@@ -179,21 +226,27 @@ fi
 
 echo "MPM.SYS created ($(wc -c < mpm.sys | tr -d ' ') bytes)"
 
-# Get serial number from RESBDOS.SPR and patch MPMLDR.COM
-echo "Patching MPMLDR.COM serial number..."
-# Use original MPMLDR.COM from distribution, not from disk image
-# (disk image version may be corrupted or have wrong format)
-cp "$PROJECT_DIR/mpm2_external/mpm2dist/MPMLDR.COM" mpmldr.com
-
-# Extract serial from RESBDOS.SPR
-# The serial is 6 bytes after "RESEARCH " at offset 0x1F9-0x1FE: 00 14 01 00 05 68
-# MPMLDR has matching bytes at offset 129-134, but bytes 5-6 (offset 133-134) need patching
-# MPMLDR 133-134 must match RESBDOS 509-510 (bytes 5-6 of the 6-byte serial)
-SERIAL_B5=$(dd if=resbdos.spr bs=1 skip=509 count=1 2>/dev/null | xxd -p)
-SERIAL_B6=$(dd if=resbdos.spr bs=1 skip=510 count=1 2>/dev/null | xxd -p)
-# Patch MPMLDR at offset 133-134 with RESBDOS bytes 509-510
-printf "\\x$SERIAL_B5" | dd of=mpmldr.com bs=1 seek=133 conv=notrunc 2>/dev/null
-printf "\\x$SERIAL_B6" | dd of=mpmldr.com bs=1 seek=134 conv=notrunc 2>/dev/null
+# Get MPMLDR.COM based on tree selection
+echo "Setting up MPMLDR.COM..."
+if [ "$TREE" = "src" ]; then
+    # Source-built MPMLDR has serial check disabled - no patching needed
+    if [ ! -f "$BIN_DIR/MPMLDR.COM" ]; then
+        echo "Error: Source-built MPMLDR.COM not found at $BIN_DIR/MPMLDR.COM"
+        echo "Run scripts/build_src.sh first"
+        exit 1
+    fi
+    cp "$BIN_DIR/MPMLDR.COM" mpmldr.com
+    echo "  mpmldr.com ($(wc -c < mpmldr.com | tr -d ' ') bytes) [SOURCE - no serial patch needed]"
+else
+    # DRI MPMLDR needs serial number patching
+    cp "$BIN_DIR/MPMLDR.COM" mpmldr.com
+    # Patch serial number: copy 2 bytes from RESBDOS.SPR offset 509-510 to MPMLDR offset 133-134
+    # The serial is 6 bytes after "RESEARCH " at offset 0x1F9-0x1FE in RESBDOS.SPR
+    # MPMLDR has matching bytes at offset 129-134, bytes 5-6 (133-134) must match
+    python3 "$TOOLS_DIR/dri_patch.py" -o mpmldr.com --base mpmldr.com \
+        --copy resbdos.spr:509:2@133
+    echo "  mpmldr.com ($(wc -c < mpmldr.com | tr -d ' ') bytes) [DRI - serial patched]"
+fi
 
 # Create boot image
 echo "Creating boot image..."
@@ -212,11 +265,6 @@ cp boot.bin "$DISKS_DIR/mpm2boot.bin"
 # Create system disk (rename intermediate image to final)
 echo "Creating system disk..."
 mv "$DISKS_DIR/mpm2_hd1k.img" "$DISKS_DIR/mpm2_system.img"
-
-# Write boot image to disk's boot area (first 32 sectors = 16KB for hd1k)
-echo "Writing boot image to disk..."
-dd if=boot.bin of="$DISKS_DIR/mpm2_system.img" bs=512 count=32 conv=notrunc 2>/dev/null
-
 python3 "$CPM_DISK" delete "$DISKS_DIR/mpm2_system.img" mpm.sys mpmldr.com 2>/dev/null || true
 python3 "$CPM_DISK" add "$DISKS_DIR/mpm2_system.img" mpm.sys mpmldr.com
 

@@ -10,6 +10,8 @@
 #include "disk.h"
 #include <iostream>
 #include <iomanip>
+#include <vector>
+#include <cstring>
 
 Z80Runner::Z80Runner()
     : running_(false)
@@ -51,29 +53,52 @@ bool Z80Runner::boot_from_disk() {
 
     std::cout << "Booting from disk A: sector 0...\n";
 
-    // Read sector 0 into memory at 0x0000
-    // For hd1k format, sector 0 is 512 bytes
-    disk->set_track(0);
-    disk->set_sector(0);
+    // Load the entire boot image (64KB) from the first 128 sectors
+    // This includes:
+    //   0x0000-0x00FF: Page zero (boot vectors)
+    //   0x0100-0x16FF: MPMLDR + LDRBDOS
+    //   0x1700-0x1FFF: LDRBIOS
+    //   0xC000-0xFFFF: Common area (includes BIOS jump table at 0xC300)
+    const size_t boot_image_size = 65536;
+    const size_t sector_size = disk->sector_size();
+    const size_t sectors_to_read = boot_image_size / sector_size;
 
-    uint8_t boot_sector[512];
-    if (disk->read_sector(boot_sector) != 0) {
-        std::cerr << "Failed to read boot sector\n";
-	exit(1);
-        return false;
+    std::vector<uint8_t> boot_image(boot_image_size);
+    uint8_t sector_buf[512];
+
+    for (size_t i = 0; i < sectors_to_read; i++) {
+        size_t track = i / 16;  // 16 sectors per track for hd1k
+        size_t sector = i % 16;
+        disk->set_track(track);
+        disk->set_sector(sector);
+
+        if (disk->read_sector(sector_buf) != 0) {
+            std::cerr << "Failed to read boot sector " << i << "\n";
+            exit(1);
+            return false;
+        }
+
+        size_t offset = i * sector_size;
+        std::memcpy(&boot_image[offset], sector_buf, sector_size);
     }
 
-    // Load boot sector into bank 0 at address 0x0000
-    memory_->load(0, 0x0000, boot_sector, disk->sector_size());
+    // Load into bank 0 lower memory (0x0000-0xBFFF)
+    memory_->load(0, 0x0000, boot_image.data(), 0xC000);
 
-    std::cout << "Loaded " << disk->sector_size() << " bytes from sector 0\n";
+    // Load common memory (0xC000-0xFFFF)
+    for (uint16_t addr = 0xC000; addr != 0; addr++) {  // Loops until wrap
+        memory_->write_common(addr, boot_image[addr]);
+        if (addr == 0xFFFF) break;
+    }
+
+    std::cout << "Loaded " << boot_image_size << " bytes (boot image)\n";
 
     // Verify it looks like valid code (starts with DI or JP)
-    uint8_t first_byte = boot_sector[0];
+    uint8_t first_byte = boot_image[0];
     if (first_byte != 0xF3 && first_byte != 0xC3) {
         std::cerr << "Warning: boot sector doesn't start with DI (0xF3) or JP (0xC3)\n";
         std::cerr << "First byte: 0x" << std::hex << (int)first_byte << std::dec << "\n";
-	exit(1);
+        exit(1);
     }
 
     // Set PC to 0x0000 to start execution at the cold boot loader

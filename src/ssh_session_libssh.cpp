@@ -446,11 +446,20 @@ bool SSHSession::poll_io() {
     // Read from SSH -> console input queue (non-blocking)
     char buf[256];
     int n = ssh_channel_read_nonblocking(channel_, buf, sizeof(buf), 0);
+    static int poll_count = 0;
+    poll_count++;
+    if (poll_count <= 3) {
+        std::cerr << "[SSH] poll_io #" << poll_count << " n=" << n << "\n";
+    }
     if (n > 0) {
+        std::cerr << "[SSH] Received " << n << " chars for console " << console_id_ << ": ";
         for (int i = 0; i < n; i++) {
             uint8_t ch = static_cast<uint8_t>(buf[i]);
+            if (ch >= 32 && ch < 127) std::cerr << (char)ch;
+            else std::cerr << "\\x" << std::hex << (int)ch << std::dec;
             con->input_queue().try_write(ch);
         }
+        std::cerr << "\n";
     } else if (n == SSH_ERROR) {
         state_ = SSHState::CLOSED;
         return false;
