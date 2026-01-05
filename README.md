@@ -166,6 +166,60 @@ ssh -p 2222 user@localhost
 ./build/mpm2_emu -p 2223 -d A:disks/mpm2_system.img
 ```
 
+## SFTP File Transfer
+
+The emulator includes an integrated SFTP server for transferring files to and from the MP/M II disk. This allows you to use standard SFTP clients to upload, download, and manage files.
+
+### Connecting
+
+```bash
+# Connect with sftp (same port as SSH terminal)
+sftp -P 2222 user@localhost
+```
+
+### Path Format
+
+SFTP paths use the format `/<drive>.<user>/<filename>`:
+
+| Path | Description |
+|------|-------------|
+| `/A.0/` | Drive A, user 0 |
+| `/B.3/TEST.COM` | Drive B, user 3, file TEST.COM |
+| `/A.0/*.TXT` | Wildcard pattern for .TXT files |
+
+### Supported Commands
+
+| Command | Description |
+|---------|-------------|
+| `ls /A.0/` | List directory |
+| `get /A.0/FILE.TXT` | Download file |
+| `put local.txt /A.0/FILE.TXT` | Upload file |
+| `rm /A.0/FILE.TXT` | Delete file |
+| `rename /A.0/OLD.TXT /A.0/NEW.TXT` | Rename file |
+
+### Example Session
+
+```bash
+sftp -P 2222 user@localhost
+sftp> ls /A.0/
+/A.0/GENHEX.COM     /A.0/LIB.COM     /A.0/LINK.COM
+sftp> put myfile.txt /A.0/MYFILE.TXT
+Uploading myfile.txt to /A.0/MYFILE.TXT
+sftp> ls /A.0/MYFILE.TXT
+/A.0/MYFILE.TXT
+sftp> quit
+```
+
+### How It Works
+
+SFTP operations are handled by an RSP (Resident System Process) running inside MP/M II. The C++ emulator receives SFTP protocol messages and forwards them to the Z80 RSP via a bridge interface. The RSP performs actual file operations using BDOS calls, ensuring proper file locking and consistency with MP/M II processes.
+
+Files involved:
+- `asm/sftp_brs.plm` - Z80 RSP code (PL/M-80)
+- `asm/sftp_glue.asm` - Assembly glue for BDOS calls
+- `src/sftp_bridge.cpp` - C++ request/reply bridge
+- `src/ssh_session_libssh.cpp` - SFTP protocol handling
+
 ## Project Structure
 
 ```
@@ -190,7 +244,10 @@ mpm2/
 ├── asm/
 │   ├── coldboot.asm      # Boot sector (loads MPMLDR + LDRBIOS)
 │   ├── ldrbios.asm       # Loader BIOS for boot phase
-│   └── bnkxios.asm       # Runtime XIOS (I/O port dispatch)
+│   ├── bnkxios.asm       # Runtime XIOS (I/O port dispatch)
+│   ├── sftp_brs.plm      # SFTP RSP banked code (PL/M-80)
+│   ├── sftp_glue.asm     # SFTP assembly glue for BDOS calls
+│   └── sftp_brs_header.asm # SFTP RSP header and entry point
 ├── emulator/             # C++ emulator source
 ├── include/              # C++ headers
 ├── build/                # CMake build directory (generated)

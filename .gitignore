@@ -91,6 +91,7 @@ todo.txt
 disks/*.bin
 disks/*.sys
 disks/*.com
+disks/*.bak
 
 # External MP/M II source/binaries
 # Digital Research materials - now freely available for non-commercial use
