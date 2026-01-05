@@ -213,7 +213,7 @@ NUCLEUS_TARGETS = [
     # RESBDOS is built from RESBDOS1.ASM + CONBDOS.ASM concatenated
     # (RESBDOS1 defines symbols that CONBDOS references)
     BuildTarget("RESBDOS", "spr", ["RESBDOS1.ASM", "CONBDOS.ASM"], "NUCLEUS", concat=True),
-    BuildTarget("TMP", "spr", ["TMPSUB.ASM"], "NUCLEUS"),
+    BuildTarget("TMP", "spr", ["TMPSUB.ASM"], "NUCLEUS", skip_runtime=True),
 ]
 
 # ============================================================================

@@ -4,6 +4,7 @@
 
 #include "console.h"
 #include <iostream>
+#include <cstdlib>
 
 Console::Console(int id)
     : id_(id)
@@ -27,12 +28,10 @@ uint8_t Console::read_char() {
 }
 
 void Console::write_char(uint8_t ch) {
-    // Always queue output for SSH transmission (even before connect)
-    // This allows boot messages to be read when SSH connects
+    // Queue output for SSH (even before connect, so boot messages are preserved)
     output_queue_.try_write(ch);
 
     // In local mode AND not connected: also echo to stdout
-    // Once SSH connects, output only goes through the queue
     if (local_mode_.load() && !connected_.load()) {
         std::cout.put(static_cast<char>(ch));
         std::cout.flush();
@@ -53,12 +52,16 @@ ConsoleManager& ConsoleManager::instance() {
 }
 
 void ConsoleManager::init() {
-    if (initialized_) return;
+    if (initialized_) {
+        std::cerr << "[WARN] ConsoleManager::init() called again - ignoring\n";
+        return;
+    }
 
     for (int i = 0; i < MAX_CONSOLES; i++) {
         consoles_[i] = std::make_unique<Console>(i);
     }
     initialized_ = true;
+    std::cerr << "Initialized " << MAX_CONSOLES << " consoles\n";
 }
 
 Console* ConsoleManager::get(int id) {
