@@ -46,7 +46,7 @@
 sysdatadr:
 	dw	$-$
 
-tmpentrypoint:
+tmp$entry$point:
 	jmp	tmp
 
 bdos:
@@ -192,11 +192,11 @@ tmp:
 
 ;
 ;  Temporarily swap stack pointers to avoid TMP process
-; descriptor destruction.
+; descriptor destruction during SUP file read.
 ;
-;	lxi	h,00a2h
-;	dad	sp
-;	sphl
+	lxi	h,00a2h
+	dad	sp
+	sphl
 
 	mvi	c,26
 	call	bdos
@@ -286,15 +286,20 @@ tmp:
 	mvi	c,9
 	lxi	d,startup
 	call	bdos
+;  Restore stack pointer before jumping (SUP file was processed successfully)
+	lxi	h,-00a2h
+	dad	sp
+	sphl
 	jmp	@7c
 @2:
 ;      ret = xdos (detach,0);
 	MVI	C,93H
 	CALL	XDOS
 
-;	lxi	h,-00a2h
-;	dad	sp
-;	sphl
+;  Restore stack pointer after SUP file processing
+	lxi	h,-00a2h
+	dad	sp
+	sphl
 
 ;      do forever;
 @17:
@@ -523,14 +528,14 @@ tmp:
 ; line buffer.  Note that the line buffer length is reduced
 ; from 128 to 100 bytes.
 ;
-;	lxi	h,00a2h
-;	dad	sp
-;	sphl
+	lxi	h,00a2h
+	dad	sp
+	sphl
 	mvi	c,10
 	call	bdos
-;	lxi	h,-00a2h
-;	dad	sp
-;	sphl
+	lxi	h,-00a2h
+	dad	sp
+	sphl
 
 ;        end;
 @9:
