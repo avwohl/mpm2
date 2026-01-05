@@ -129,6 +129,9 @@ fi
 # Copy GENSYS config (forces binary mode for SPR/SYS files)
 cp "$SCRIPT_DIR/gensys.cfg" gensys.cfg
 
+# Remove any leftover SYSTEM.DAT that would cause GENSYS to skip first prompt
+rm -f system.dat SYSTEM.DAT
+
 # Run GENSYS under cpmemu using expect for readable prompt/response
 echo "Running GENSYS ($NMBCNS consoles, 7 user banks, C0 common base)..."
 
@@ -139,52 +142,70 @@ if ! command -v expect &> /dev/null; then
 fi
 
 # Create expect script with clear prompt/response pairs
+# Uses short timeout (2s) and fails immediately on any timeout
 cat > gensys_expect.exp << EXPECT_SCRIPT
-set timeout 10
+set timeout 2
 log_user 0
+
+# Helper proc that fails on timeout
+proc prompt {pattern response} {
+    expect {
+        \$pattern { send "\$response\r" }
+        timeout { puts stderr "ERROR: Timeout waiting for: \$pattern"; exit 1 }
+        eof { puts stderr "ERROR: Unexpected EOF waiting for: \$pattern"; exit 1 }
+    }
+}
+
 spawn $CPMEMU gensys.cfg
 
 # System configuration prompts
-expect "Use SYSTEM.DAT"           { send "N\r" }
-expect "Top page"                 { send "\r" }
-expect "Number of TMPs"           { send "$NMBCNS\r" }
-expect "Number of Printers"       { send "\r" }
-expect "Breakpoint RST"           { send "\r" }
-expect "Compatibility Attributes" { send "\r" }
-expect "system call user stacks"  { send "Y\r" }
-expect "Z80 CPU"                  { send "\r" }
-expect "ticks/second"             { send "\r" }
-expect "System Drive"             { send "\r" }
-expect "Temporary file drive"     { send "\r" }
-expect "locked records/process"   { send "\r" }
-expect "locked records/system"    { send "\r" }
-expect "open files/process"       { send "\r" }
-expect "open files/system"        { send "\r" }
+# Note: "Use SYSTEM.DAT" only appears if file exists - we delete it above
+prompt "Top page"                 ""
+prompt "Number of TMPs"           "$NMBCNS"
+prompt "Number of Printers"       ""
+prompt "Breakpoint RST"           ""
+prompt "Compatibility Attributes" ""
+prompt "system call user stacks"  "Y"
+prompt "Z80 CPU"                  ""
+prompt "ticks/second"             ""
+prompt "System Drive"             ""
+prompt "Temporary file drive"     ""
+prompt "locked records/process"   ""
+prompt "locked records/system"    ""
+prompt "open files/process"       ""
+prompt "open files/system"        ""
 
 # Memory configuration
-# Note: MP/M II supports max 7 user memory segments
-expect "Bank switched"            { send "\r" }
-expect "memory segments"          { send "7\r" }
-expect "Common memory base"       { send "C0\r" }
-expect "Dayfile logging"          { send "\r" }
+prompt "Bank switched"            ""
+prompt "memory segments"          "7"
+prompt "Common memory base"       "C0"
+prompt "Dayfile logging"          ""
 
 # Accept generated tables
-expect "Accept new system data"   { send "\r" }
+prompt "Accept new system data"   ""
 # Memory segment table: bank 0 (common) + 7 user banks = 8 entries
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Base,size,attrib,bank"    { send "\r" }
-expect "Accept new memory segment" { send "\r" }
+prompt "Base,size,attrib,bank"    ""
+prompt "Base,size,attrib,bank"    ""
+prompt "Base,size,attrib,bank"    ""
+prompt "Base,size,attrib,bank"    ""
+prompt "Base,size,attrib,bank"    ""
+prompt "Base,size,attrib,bank"    ""
+prompt "Base,size,attrib,bank"    ""
+prompt "Base,size,attrib,bank"    ""
+prompt "Accept new memory segment" ""
 
-expect eof
+# Wait for explicit success message
+expect {
+    "GENSYS DONE" { exit 0 }
+    timeout { puts stderr "ERROR: GENSYS timed out waiting for completion"; exit 1 }
+    eof { puts stderr "ERROR: GENSYS exited unexpectedly"; exit 1 }
+}
 EXPECT_SCRIPT
 
-expect gensys_expect.exp > gensys.log 2>&1 || true
+if ! expect gensys_expect.exp 2>&1; then
+    echo "Error: GENSYS failed - see output above"
+    exit 1
+fi
 
 # Check if MPM.SYS was created
 if [ ! -f "mpm.sys" ]; then
