@@ -16,6 +16,19 @@ These tools are shipped in `bin/dri/` only. They have no corresponding source co
 
 **Note:** LINK.COM and RMAC.COM are not needed for the source build - the build system uses native `ul80` and `um80` tools instead.
 
+## GENSYS.COM Version Mismatch
+
+The source code in `mpm2_external/mpm2src/` is **MP/M II V2.0**, but the DRI binaries are **V2.1**.
+
+GENSYS.COM must use the DRI V2.1 binary because:
+- V2.0 and V2.1 have different interactive prompts
+- V2.1 adds "Enable Compatibility Attributes (N)?" prompt
+- The `gensys.sh` expect script is written for V2.1 prompts
+- Using V2.0 GENSYS.COM causes prompt timeout failures
+
+The source-built GENSYS.COM (8,832 bytes, V2.0) exists in `bin/src/` but is not used.
+The DRI GENSYS.COM (9,472 bytes, V2.1) is always used by `gensys.sh`.
+
 ## LDRBDOS (Loader BDOS)
 
 The loader's BDOS component (LDRBDOS) has no separate source. It is extracted from DRI's pre-built MPMLDR.COM at file offset 0xC00 (2,688 bytes).
@@ -58,7 +71,7 @@ These reference files are always copied from `bin/dri/` regardless of build tree
    - Uses MPMLDR (source-built with serial check disabled)
 
 4. **System generation** (`gensys.sh`):
-   - Uses GENSYS.COM from selected tree (`bin/src/` or `bin/dri/`)
+   - Uses GENSYS.COM from DRI (V2.1 required, see above)
    - Extracts LDRBDOS from DRI's MPMLDR.COM
    - Generates MPM.SYS
 
@@ -70,7 +83,7 @@ With `--tree=src`, these are compiled from `mpm2_external/mpm2src/`:
 - All SPR system components (BNKBDOS, BNKXDOS, RESBDOS, XDOS, etc.)
 - All RSP resident processes (SPOOL, MPMSTAT, ABORT, etc.)
 - MPMLDR (with serial check disabled via src/overrides/)
-- Development tools: GENSYS, DDT, GENHEX, GENMOD
+- Development tools: DDT, GENHEX, GENMOD (GENSYS built but not used - V2.0/V2.1 mismatch)
 
 Source overrides in `src/overrides/` customize:
 - MPMLDR - Serial number check disabled
