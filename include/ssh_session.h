@@ -38,6 +38,7 @@ enum class SSHState {
     CHANNEL_OPEN,
     SFTP_PENDING,  // SFTP subsystem requested, init pending
     READY,
+    DRAINING,      // EOF received, waiting for channel to close
     CLOSED
 };
 

@@ -296,11 +296,11 @@ SSHSession::~SSHSession() {
         ssh_event_free(event_);
     }
     if (channel_) {
-        ssh_channel_close(channel_);
         ssh_channel_free(channel_);
     }
     if (session_) {
-        ssh_disconnect(session_);
+        // Don't call ssh_disconnect() - let connection close naturally
+        // to avoid "Connection closed by remote host" message
         ssh_free(session_);
     }
 }
@@ -603,14 +603,31 @@ bool SSHSession::poll_sftp() {
         return true;
     }
 
+    // If draining, just wait for channel to close
+    if (state_ == SSHState::DRAINING) {
+        if (ssh_channel_is_closed(channel_)) {
+            if (DEBUG_SFTP) std::cerr << "[SFTP] Channel closed after drain\n";
+            state_ = SSHState::CLOSED;
+            return false;
+        }
+        return true;
+    }
+
     // Try to get an SFTP client message (non-blocking)
     sftp_client_message msg = sftp_get_client_message(sftp_);
     if (!msg) {
         // No message available - check if client has disconnected
-        if (ssh_channel_is_eof(channel_)) {
-            if (DEBUG_SFTP) std::cerr << "[SFTP] Channel EOF, closing session\n";
+        if (ssh_channel_is_closed(channel_)) {
+            if (DEBUG_SFTP) std::cerr << "[SFTP] Channel closed, ending session\n";
             state_ = SSHState::CLOSED;
             return false;
+        }
+        // Check for EOF - client is done, close gracefully
+        if (ssh_channel_is_eof(channel_)) {
+            if (DEBUG_SFTP) std::cerr << "[SFTP] Channel EOF, closing channel\n";
+            ssh_channel_send_eof(channel_);
+            ssh_channel_close(channel_);
+            state_ = SSHState::DRAINING;
         }
         return true;
     }
