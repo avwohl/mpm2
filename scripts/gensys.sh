@@ -126,6 +126,17 @@ else
     exit 1
 fi
 
+# Copy SFTP RSP modules if present
+if [ -f "$ASM_DIR/SFTP.RSP" ] && [ -f "$ASM_DIR/SFTP.BRS" ]; then
+    echo "Copying SFTP RSP modules from $ASM_DIR"
+    cp "$ASM_DIR/SFTP.RSP" sftp.rsp
+    cp "$ASM_DIR/SFTP.BRS" sftp.brs
+    echo "  sftp.rsp ($(wc -c < sftp.rsp | tr -d ' ') bytes)"
+    echo "  sftp.brs ($(wc -c < sftp.brs | tr -d ' ') bytes)"
+else
+    echo "Note: SFTP RSP not found - run scripts/build_sftp_rsp.sh to build"
+fi
+
 # Copy GENSYS config (forces binary mode for SPR/SYS files)
 cp "$SCRIPT_DIR/gensys.cfg" gensys.cfg
 
@@ -183,6 +194,16 @@ prompt "Dayfile logging"          ""
 
 # Accept generated tables
 prompt "Accept new system data"   ""
+
+# RSP selection - say Yes to SFTP and MPMSTAT, No to others
+# GENSYS prompts (Y/N)? for each RSP found
+expect {
+    -re "SFTP.*\\(N\\)" { send "Y\r"; exp_continue }
+    -re "MPMSTAT.*\\(N\\)" { send "Y\r"; exp_continue }
+    -re "\\(N\\).*\\?" { send "\r"; exp_continue }
+    "Enter memory segment" { }
+}
+
 # Memory segment table: bank 0 (common) + 7 user banks = 8 entries
 prompt "Base,size,attrib,bank"    ""
 prompt "Base,size,attrib,bank"    ""
@@ -238,23 +259,28 @@ else
     echo "  mpmldr.com ($(wc -c < mpmldr.com | tr -d ' ') bytes) [DRI - serial patched]"
 fi
 
-# Create boot image
+# Create boot image (16KB for system tracks)
 echo "Creating boot image..."
 "$BUILD_DIR/mkboot" \
     -l "$ASM_DIR/ldrbios.bin" \
     -b bnkxios.spr \
     -m mpmldr.com \
+    -s 16384 \
     -o boot.bin
 
 # Copy files to project
 echo "Saving files to project..."
 cp mpm.sys "$DISKS_DIR/mpm.sys"
 cp mpmldr.com "$DISKS_DIR/mpmldr.com"
-cp boot.bin "$DISKS_DIR/mpm2boot.bin"
 
 # Create system disk (rename intermediate image to final)
 echo "Creating system disk..."
 mv "$DISKS_DIR/mpm2_hd1k.img" "$DISKS_DIR/mpm2_system.img"
+
+# Write boot image to system tracks
+echo "Writing boot image to system tracks..."
+python3 "$CPM_DISK" write-boot "$DISKS_DIR/mpm2_system.img" boot.bin
+
 python3 "$CPM_DISK" delete "$DISKS_DIR/mpm2_system.img" mpm.sys mpmldr.com 2>/dev/null || true
 python3 "$CPM_DISK" add "$DISKS_DIR/mpm2_system.img" mpm.sys mpmldr.com
 
@@ -267,7 +293,7 @@ echo "  MPM.SYS:     $DISKS_DIR/mpm.sys"
 echo "  System disk: $DISKS_DIR/mpm2_system.img"
 echo ""
 echo "To run:"
-echo "  $BUILD_DIR/mpm2_emu -d A:$DISKS_DIR/mpm2_system.img"
+echo "  $BUILD_DIR/mpm2_emu -b $DISKS_DIR/mpm2boot.bin -d A:$DISKS_DIR/mpm2_system.img"
 echo ""
 echo "Configuration:"
 echo "  - $NMBCNS consoles"

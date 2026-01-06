@@ -8,6 +8,7 @@
 
 #if defined(HAVE_LIBSSH) || defined(HAVE_WOLFSSH)
 #include "ssh_session.h"
+#include "sftp_bridge.h"
 #define HAVE_SSH
 #endif
 
@@ -21,6 +22,7 @@
 
 #include <unistd.h>
 #include <fcntl.h>
+#include <chrono>
 
 // Global flag for clean shutdown
 static volatile sig_atomic_t g_shutdown_requested = 0;
@@ -80,6 +82,7 @@ void print_usage(const char* prog) {
               << "  -k, --key FILE        Host key file (default: keys/ssh_host_rsa_key)\n"
               << "  -a, --authorized-keys FILE  Authorized keys file (default: keys/authorized_keys)\n"
               << "  -n, --no-auth         Disable SSH authentication (accept any connection)\n"
+              << "  --test-rsp            Test SFTP RSP communication (runs after 5 sec boot delay)\n"
 #endif
               << "  -h, --help            Show this help\n"
               << "\n"
@@ -103,6 +106,7 @@ int main(int argc, char* argv[]) {
     std::string host_key = "keys/ssh_host_rsa_key";
     std::string authorized_keys = "keys/authorized_keys";
     bool no_auth = false;
+    bool test_rsp = false;
 #endif
 
     // Parse command line options
@@ -115,6 +119,7 @@ int main(int argc, char* argv[]) {
         {"key",           required_argument, nullptr, 'k'},
         {"authorized-keys", required_argument, nullptr, 'a'},
         {"no-auth",       no_argument,       nullptr, 'n'},
+        {"test-rsp",      no_argument,       nullptr, 'T'},
 #endif
         {"help",          no_argument,       nullptr, 'h'},
         {nullptr,         0,                 nullptr, 0}
@@ -122,7 +127,7 @@ int main(int argc, char* argv[]) {
 
     int opt;
 #ifdef HAVE_SSH
-    const char* optstring = "d:lt:p:k:a:nh";
+    const char* optstring = "d:lt:p:k:a:nTh";
 #else
     const char* optstring = "d:lt:h";
 #endif
@@ -168,6 +173,9 @@ int main(int argc, char* argv[]) {
                 break;
             case 'n':
                 no_auth = true;
+                break;
+            case 'T':
+                test_rsp = true;
                 break;
 #endif
             case 'h':
@@ -281,6 +289,12 @@ int main(int argc, char* argv[]) {
         ssh_enabled = true;
         std::cout << "SSH server listening on port " << ssh_port << "\n";
         std::cout << "Connect with: ssh -p " << ssh_port << " user@localhost\n\n";
+
+        // Set up Z80 tick callback for SFTP bridge
+        // This allows wait_for_reply() to run Z80 cycles while waiting
+        SftpBridge::instance().set_z80_tick_callback([&z80]() {
+            z80.run_polled();
+        });
     }
 #endif
 
@@ -338,9 +352,67 @@ int main(int argc, char* argv[]) {
 #ifdef HAVE_SSH
     else if (ssh_enabled) {
         // SSH mode - poll SSH and CPU in single thread
+        auto start_time = std::chrono::steady_clock::now();
+        int rsp_test_state = 0;  // 0=wait, 1=sent, 2=done
+        int rsp_test_delay_sec = 15;
+        uint32_t rsp_test_id = 0;
+        auto rsp_test_send_time = start_time;
+
         while (!g_shutdown_requested && !z80.timed_out()) {
             ssh_server.poll();  // Check for new connections and session I/O
             if (!z80.run_polled()) break;
+
+            // Run RSP test after delay if requested (non-blocking)
+            if (test_rsp && rsp_test_state < 2) {
+                auto elapsed = std::chrono::steady_clock::now() - start_time;
+
+                if (rsp_test_state == 0 &&
+                    std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() >= rsp_test_delay_sec) {
+                    // Send test request
+                    rsp_test_state = 1;
+                    rsp_test_send_time = std::chrono::steady_clock::now();
+                    std::cout << "\n=== SFTP RSP Communication Test ===\n";
+                    std::cout << "Sending TEST request to RSP...\n";
+
+                    SftpRequest req;
+                    req.type = SftpRequestType::TEST;
+                    req.drive = 0;
+                    req.user = 0;
+                    req.flags = 0;
+                    req.offset = 0;
+                    req.length = 0;
+                    rsp_test_id = SftpBridge::instance().enqueue_request(std::move(req));
+                }
+
+                if (rsp_test_state == 1) {
+                    // Check for reply (non-blocking)
+                    auto reply = SftpBridge::instance().try_get_reply(rsp_test_id);
+                    if (reply) {
+                        rsp_test_state = 2;
+                        if (reply->status == SftpReplyStatus::OK) {
+                            std::cout << "SUCCESS: RSP responded!\n";
+                            std::cout << "=== RSP Test PASSED ===\n\n";
+                        } else {
+                            std::cout << "FAILED: RSP returned error status\n";
+                            std::cout << "=== RSP Test FAILED ===\n\n";
+                        }
+                    } else {
+                        // Check for timeout
+                        auto wait_time = std::chrono::steady_clock::now() - rsp_test_send_time;
+                        if (std::chrono::duration_cast<std::chrono::seconds>(wait_time).count() >= 10) {
+                            rsp_test_state = 2;
+                            std::cout << "FAILED: Timeout waiting for RSP reply\n";
+                            std::cout << "(RSP may not be running or XIOS dispatch not working)\n";
+                            std::cout << "=== RSP Test FAILED ===\n\n";
+                        }
+                    }
+
+                    // Exit after test completes if no SSH connections
+                    if (rsp_test_state == 2 && ssh_server.session_count() == 0) {
+                        g_shutdown_requested = 1;
+                    }
+                }
+            }
         }
     }
 #endif

@@ -13,17 +13,30 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <map>
 #include <libssh/libssh.h>
 #include <libssh/server.h>
 #include <libssh/callbacks.h>
+#include <libssh/sftp.h>
 
 class Console;
+
+// Simple directory entry for SFTP (used locally, populated via RSP bridge)
+struct SftpDirEntry {
+    std::string name;
+    uint8_t user;
+    uint32_t size;
+    bool is_directory;
+    bool is_system;
+    bool is_read_only;
+};
 
 // Session state during handshake
 enum class SSHState {
     KEY_EXCHANGE,
     AUTHENTICATING,
     CHANNEL_OPEN,
+    SFTP_PENDING,  // SFTP subsystem requested, init pending
     READY,
     CLOSED
 };
@@ -51,9 +64,15 @@ public:
     void setup_channel_callbacks(ssh_channel channel);
     void setup_console();
 
+    // SFTP support
+    void mark_sftp_pending() { state_ = SSHState::SFTP_PENDING; }
+    void setup_sftp();
+    bool is_sftp() const { return is_sftp_; }
+
 private:
     bool poll_handshake();
     bool poll_io();
+    bool poll_sftp();
 
     ssh_session session_;
     ssh_channel channel_;
@@ -66,6 +85,48 @@ private:
     SSHServer* server_;
     ssh_server_callbacks_struct server_callbacks_;
     ssh_channel_callbacks_struct channel_callbacks_;
+
+    // SFTP support
+    sftp_session sftp_;
+    bool is_sftp_;
+
+    // SFTP directory handles
+    struct OpenDir {
+        int drive;
+        int user;
+        std::vector<SftpDirEntry> entries;
+        size_t index;  // Current read position
+        bool enumeration_complete = false;  // Directory listing complete?
+    };
+    std::map<void*, std::unique_ptr<OpenDir>> open_dirs_;
+
+    // Pending SFTP operation state (for async RSP requests)
+    struct PendingSftpOp {
+        sftp_client_message msg = nullptr;  // Message awaiting reply
+        uint32_t request_id = 0;            // Bridge request ID
+        int op_type = 0;                    // SSH_FXP_* type
+        void* handle = nullptr;             // Associated handle (for dir enum)
+        bool search_first = true;           // For directory enumeration
+    };
+    PendingSftpOp pending_sftp_;
+
+    // SFTP file handles
+    struct OpenFile {
+        int drive;
+        int user;
+        std::string filename;
+        uint32_t size;
+        uint64_t offset;        // Current read position
+        bool is_read_only;
+        bool is_write;          // File opened for writing
+        bool file_created;      // File was created (new or truncated)
+        // Cached file data - entire file read at open via RSP bridge
+        // For write mode, this accumulates written data until close
+        std::vector<uint8_t> cached_data;
+    };
+    std::map<void*, std::unique_ptr<OpenFile>> open_files_;
+
+    uint32_t next_handle_id_ = 1;
 };
 
 // SSH server - accepts connections (non-blocking)

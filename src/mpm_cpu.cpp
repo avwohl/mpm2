@@ -13,7 +13,14 @@ MpmCpu::MpmCpu(qkz80_cpu_mem* memory)
 {
 }
 
+// Debug flag for post-boot port tracking
+extern bool g_boot_display_complete;
+bool g_trace_instructions = false;
+int g_trace_count = 0;
+
 void MpmCpu::port_out(qkz80_uint8 port, qkz80_uint8 value) {
+    // Debug disabled for clean boot
+
     switch (port) {
         case MpmPorts::XIOS_DISPATCH:
             // XIOS dispatch: A register contains function offset
@@ -93,7 +100,6 @@ void MpmCpu::handle_bank_select(uint8_t bank) {
 // halt() now inherited from qkz80 base class
 
 void MpmCpu::execute(void) {
-    // Debug disabled for cleaner boot output
     qkz80::execute();
 }
 

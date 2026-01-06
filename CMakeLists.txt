@@ -73,6 +73,8 @@ set(SOURCES
     src/xios.cpp
     src/banked_mem.cpp
     src/disk.cpp
+    src/sftp_bridge.cpp
+    src/sftp_path.cpp
 )
 
 if(HAVE_LIBSSH)
@@ -97,7 +99,7 @@ target_link_libraries(mpm2_emu PRIVATE
 )
 
 if(HAVE_LIBSSH)
-    target_compile_definitions(mpm2_emu PRIVATE HAVE_LIBSSH)
+    target_compile_definitions(mpm2_emu PRIVATE HAVE_LIBSSH WITH_SERVER)
     target_include_directories(mpm2_emu PRIVATE ${LIBSSH_INCLUDE})
     target_link_libraries(mpm2_emu PRIVATE ${LIBSSH_LIB})
 endif()

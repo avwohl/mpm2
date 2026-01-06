@@ -9,6 +9,7 @@
 #include "console.h"
 #include "disk.h"
 #include <iostream>
+#include <fstream>
 #include <iomanip>
 #include <vector>
 #include <cstring>
@@ -25,9 +26,7 @@ Z80Runner::~Z80Runner() {
 }
 
 bool Z80Runner::boot_from_disk() {
-    // Boot from disk sector 0 - the cold start loader
-    // This reads physical sector 0 from drive A into memory at 0x0000
-    // and starts execution there.
+    // Boot the system by loading boot tracks into memory
 
     // Create memory (8 banks for MP/M II)
     memory_ = std::make_unique<BankedMemory>(8);
@@ -47,28 +46,26 @@ bool Z80Runner::boot_from_disk() {
     Disk* disk = DiskSystem::instance().get(0);
     if (!disk || !disk->is_open()) {
         std::cerr << "Cannot boot: no disk mounted on drive A:\n";
-	exit(1);
+        exit(1);
         return false;
     }
 
-    std::cout << "Booting from disk A: sector 0...\n";
+    std::cout << "Booting from disk A...\n";
 
-    // Load the entire boot image (64KB) from the first 128 sectors
-    // This includes:
-    //   0x0000-0x00FF: Page zero (boot vectors)
+    // Load system tracks (2 tracks = 32 sectors = 16KB)
+    // Contains:
+    //   0x0000-0x00FF: Page zero (JP to 0x0100)
     //   0x0100-0x16FF: MPMLDR + LDRBDOS
     //   0x1700-0x1FFF: LDRBIOS
-    //   0xC000-0xFFFF: Common area (includes BIOS jump table at 0xC300)
-    const size_t boot_image_size = 65536;
     const size_t sector_size = disk->sector_size();
-    const size_t sectors_to_read = boot_image_size / sector_size;
-
-    std::vector<uint8_t> boot_image(boot_image_size);
+    const size_t system_tracks = 2;
+    const size_t sectors_per_track = 16;
+    const size_t sectors_to_read = system_tracks * sectors_per_track;
     uint8_t sector_buf[512];
 
     for (size_t i = 0; i < sectors_to_read; i++) {
-        size_t track = i / 16;  // 16 sectors per track for hd1k
-        size_t sector = i % 16;
+        size_t track = i / sectors_per_track;
+        size_t sector = i % sectors_per_track;
         disk->set_track(track);
         disk->set_sector(sector);
 
@@ -78,23 +75,17 @@ bool Z80Runner::boot_from_disk() {
             return false;
         }
 
-        size_t offset = i * sector_size;
-        std::memcpy(&boot_image[offset], sector_buf, sector_size);
+        // Load into bank 0
+        uint16_t addr = i * sector_size;
+        for (size_t j = 0; j < sector_size; j++) {
+            memory_->write_bank(0, addr + j, sector_buf[j]);
+        }
     }
 
-    // Load into bank 0 lower memory (0x0000-0xBFFF)
-    memory_->load(0, 0x0000, boot_image.data(), 0xC000);
-
-    // Load common memory (0xC000-0xFFFF)
-    for (uint16_t addr = 0xC000; addr != 0; addr++) {  // Loops until wrap
-        memory_->write_common(addr, boot_image[addr]);
-        if (addr == 0xFFFF) break;
-    }
-
-    std::cout << "Loaded " << boot_image_size << " bytes (boot image)\n";
+    std::cout << "Loaded " << (sectors_to_read * sector_size) << " bytes from system tracks\n";
 
     // Verify it looks like valid code (starts with DI or JP)
-    uint8_t first_byte = boot_image[0];
+    uint8_t first_byte = memory_->read_bank(0, 0x0000);
     if (first_byte != 0xF3 && first_byte != 0xC3) {
         std::cerr << "Warning: boot sector doesn't start with DI (0xF3) or JP (0xC3)\n";
         std::cerr << "First byte: 0x" << std::hex << (int)first_byte << std::dec << "\n";
