@@ -58,10 +58,9 @@ These reference files are always copied from `bin/dri/` regardless of build tree
    - Uses MPMLDR (source-built with serial check disabled)
 
 4. **System generation** (`gensys.sh`):
-   - Uses GENSYS.COM from `bin/dri/` (script hardcoded to use DRI version)
+   - Uses GENSYS.COM from selected tree (`bin/src/` or `bin/dri/`)
    - Extracts LDRBDOS from DRI's MPMLDR.COM
    - Generates MPM.SYS
-   - Note: GENSYS.COM CAN be built from source but gensys.sh uses DRI version
 
 ## What IS Built from Source
 

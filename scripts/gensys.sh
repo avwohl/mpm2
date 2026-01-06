@@ -99,9 +99,8 @@ mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
 
 # Copy required SPR files from selected tree
-# GENSYS.COM always from DRI (it's a build tool, no source available)
 echo "Copying SPR files from $TREE tree..."
-for f in RESBDOS.SPR BNKBDOS.SPR XDOS.SPR BNKXDOS.SPR TMP.SPR; do
+for f in RESBDOS.SPR BNKBDOS.SPR XDOS.SPR BNKXDOS.SPR TMP.SPR GENSYS.COM; do
     lf=$(echo "$f" | tr '[:upper:]' '[:lower:]')
     if [ -f "$BIN_DIR/$f" ]; then
         cp "$BIN_DIR/$f" "./$lf"
@@ -111,10 +110,6 @@ for f in RESBDOS.SPR BNKBDOS.SPR XDOS.SPR BNKXDOS.SPR TMP.SPR; do
         exit 1
     fi
 done
-# GENSYS.COM from DRI (no source available)
-DRI_BIN_DIR="$PROJECT_DIR/bin/dri"
-cp "$DRI_BIN_DIR/GENSYS.COM" "./gensys.com"
-echo "  gensys.com ($(wc -c < gensys.com | tr -d ' ') bytes) [DRI - tool]"
 
 # Copy our custom BNKXIOS.SPR (port-based I/O for emulator)
 if [ -f "$ASM_DIR/bnkxios.spr" ]; then
