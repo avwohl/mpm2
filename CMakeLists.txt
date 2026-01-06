@@ -75,6 +75,7 @@ set(SOURCES
     src/disk.cpp
     src/sftp_bridge.cpp
     src/sftp_path.cpp
+    src/http_server.cpp
 )
 
 if(HAVE_LIBSSH)

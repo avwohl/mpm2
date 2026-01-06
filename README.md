@@ -139,6 +139,7 @@ cp ~/.ssh/id_rsa.pub keys/authorized_keys
 Options:
   -d, --disk A:FILE           Mount disk image (required)
   -l, --local                 Local console mode (output to stdout)
+  -w, --http PORT             HTTP server port (default: 8000, 0 to disable)
   -p, --port PORT             SSH listen port (default: 2222)
   -k, --key FILE              Host key file (default: keys/ssh_host_rsa_key)
   -a, --authorized-keys FILE  Authorized keys file (default: keys/authorized_keys)
@@ -220,6 +221,48 @@ Files involved:
 - `src/sftp_bridge.cpp` - C++ request/reply bridge
 - `src/ssh_session_libssh.cpp` - SFTP protocol handling
 
+## HTTP File Browser
+
+The emulator includes a read-only HTTP server for browsing and downloading files from MP/M II disks using a web browser.
+
+### Accessing
+
+Open in any web browser:
+```
+http://localhost:8000/
+```
+
+### Path Format
+
+| Path | Description |
+|------|-------------|
+| `/` | List mounted drives |
+| `/a/` | Drive A, all users |
+| `/a.0/` | Drive A, user 0 only |
+| `/a/file.txt` | Download file from drive A |
+| `/a.0/file.txt` | Download file from drive A, user 0 |
+
+- URLs are case-insensitive (`/A/FILE.TXT` and `/a/file.txt` both work)
+- Directory listings show filenames in lowercase
+- Text files (.txt, .asm, .plm, etc.) are served with Unix line endings (CR stripped)
+
+### Configuration
+
+```bash
+# Default: HTTP on port 8000
+./build/mpm2_emu -d A:disks/mpm2_system.img
+
+# Custom port
+./build/mpm2_emu -w 8080 -d A:disks/mpm2_system.img
+
+# Disable HTTP server
+./build/mpm2_emu -w 0 -d A:disks/mpm2_system.img
+```
+
+### How It Works
+
+HTTP file operations share the same RSP bridge as SFTP. When an HTTP request arrives, it queues a file request to the Z80 RSP, which performs the actual disk read via BDOS calls. Requests from HTTP and SFTP clients are serialized to ensure consistent access.
+
 ## Project Structure
 
 ```
@@ -248,7 +291,11 @@ mpm2/
 │   ├── sftp_brs.plm      # SFTP RSP banked code (PL/M-80)
 │   ├── sftp_glue.asm     # SFTP assembly glue for BDOS calls
 │   └── sftp_brs_header.asm # SFTP RSP header and entry point
-├── emulator/             # C++ emulator source
+├── src/                  # C++ emulator source
+│   ├── main.cpp          # Entry point and main loop
+│   ├── http_server.cpp   # HTTP file browser
+│   ├── sftp_bridge.cpp   # SFTP/HTTP to Z80 bridge
+│   └── ssh_session_libssh.cpp # SSH/SFTP server
 ├── include/              # C++ headers
 ├── build/                # CMake build directory (generated)
 ├── disks/                # Disk images (generated)

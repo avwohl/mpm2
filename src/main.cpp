@@ -5,10 +5,11 @@
 #include "console.h"
 #include "z80_runner.h"
 #include "disk.h"
+#include "http_server.h"
+#include "sftp_bridge.h"
 
 #if defined(HAVE_LIBSSH) || defined(HAVE_WOLFSSH)
 #include "ssh_session.h"
-#include "sftp_bridge.h"
 #define HAVE_SSH
 #endif
 
@@ -77,6 +78,7 @@ void print_usage(const char* prog) {
               << "  -d, --disk A:FILE     Mount disk image on drive A-P (required)\n"
               << "  -l, --local           Enable local console (output to stdout)\n"
               << "  -t, --timeout SECS    Timeout in seconds for debugging (0 = no timeout)\n"
+              << "  -w, --http PORT       HTTP server port (default: 8000, 0 to disable)\n"
 #ifdef HAVE_SSH
               << "  -p, --port PORT       SSH listen port (default: 2222)\n"
               << "  -k, --key FILE        Host key file (default: keys/ssh_host_rsa_key)\n"
@@ -91,7 +93,7 @@ void print_usage(const char* prog) {
               << "Examples:\n"
               << "  " << prog << " -l -d A:system.img           # Local console mode\n"
 #ifdef HAVE_SSH
-              << "  " << prog << " -d A:system.img              # SSH mode (connect with ssh -p 2222)\n"
+              << "  " << prog << " -d A:system.img              # SSH + HTTP mode\n"
 #endif
               << "\n";
 }
@@ -100,6 +102,7 @@ int main(int argc, char* argv[]) {
     // Default options
     bool local_console = false;
     int timeout_seconds = 0;
+    int http_port = 8000;  // Default HTTP port (0 to disable)
     std::vector<std::pair<int, std::string>> disk_mounts;
 #ifdef HAVE_SSH
     int ssh_port = 2222;
@@ -114,6 +117,7 @@ int main(int argc, char* argv[]) {
         {"disk",          required_argument, nullptr, 'd'},
         {"local",         no_argument,       nullptr, 'l'},
         {"timeout",       required_argument, nullptr, 't'},
+        {"http",          required_argument, nullptr, 'w'},
 #ifdef HAVE_SSH
         {"port",          required_argument, nullptr, 'p'},
         {"key",           required_argument, nullptr, 'k'},
@@ -127,9 +131,9 @@ int main(int argc, char* argv[]) {
 
     int opt;
 #ifdef HAVE_SSH
-    const char* optstring = "d:lt:p:k:a:nTh";
+    const char* optstring = "d:lt:w:p:k:a:nTh";
 #else
-    const char* optstring = "d:lt:h";
+    const char* optstring = "d:lt:w:h";
 #endif
     while ((opt = getopt_long(argc, argv, optstring, long_options, nullptr)) != -1) {
         switch (opt) {
@@ -160,6 +164,9 @@ int main(int argc, char* argv[]) {
                 break;
             case 't':
                 timeout_seconds = std::atoi(optarg);
+                break;
+            case 'w':
+                http_port = std::atoi(optarg);
                 break;
 #ifdef HAVE_SSH
             case 'p':
@@ -256,6 +263,22 @@ int main(int argc, char* argv[]) {
         z80.set_timeout(timeout_seconds);
     }
 
+    // Initialize HTTP server
+    HTTPServer http_server;
+    bool http_enabled = false;
+    if (http_port > 0) {
+        if (http_server.start(http_port)) {
+            http_enabled = true;
+        } else {
+            std::cerr << "Warning: Failed to start HTTP server on port " << http_port << "\n";
+        }
+
+        // Set up Z80 tick callback for SFTP bridge (needed for HTTP file access)
+        SftpBridge::instance().set_z80_tick_callback([&z80]() {
+            z80.run_polled();
+        });
+    }
+
 #ifdef HAVE_SSH
     // Initialize SSH server (skip if using local console)
     SSHServer ssh_server;
@@ -288,7 +311,7 @@ int main(int argc, char* argv[]) {
 
         ssh_enabled = true;
         std::cout << "SSH server listening on port " << ssh_port << "\n";
-        std::cout << "Connect with: ssh -p " << ssh_port << " user@localhost\n\n";
+        std::cout << "Connect with: ssh -p " << ssh_port << " user@localhost\n";
 
         // Set up Z80 tick callback for SFTP bridge
         // This allows wait_for_reply() to run Z80 cycles while waiting
@@ -297,6 +320,12 @@ int main(int argc, char* argv[]) {
         });
     }
 #endif
+
+    // Print HTTP status
+    if (http_enabled) {
+        std::cout << "HTTP server listening on port " << http_port << "\n";
+        std::cout << "Browse files at: http://localhost:" << http_port << "/\n";
+    }
 
     // Main loop
     std::cout << "\nPress Ctrl+C to shutdown\n\n";
@@ -319,6 +348,10 @@ int main(int argc, char* argv[]) {
                     if (con && con->is_local()) {
                         con->input_queue().try_write(static_cast<uint8_t>(ch));
                     }
+                }
+                // Poll HTTP server
+                if (http_server.is_running()) {
+                    http_server.poll();
                 }
                 // Run CPU
                 if (!z80.run_polled()) break;
@@ -344,6 +377,10 @@ int main(int argc, char* argv[]) {
                         }
                     }
                 }
+                // Poll HTTP server
+                if (http_server.is_running()) {
+                    http_server.poll();
+                }
                 // Run CPU
                 if (!z80.run_polled()) break;
             }
@@ -360,6 +397,9 @@ int main(int argc, char* argv[]) {
 
         while (!g_shutdown_requested && !z80.timed_out()) {
             ssh_server.poll();  // Check for new connections and session I/O
+            if (http_server.is_running()) {
+                http_server.poll();
+            }
             if (!z80.run_polled()) break;
 
             // Run RSP test after delay if requested (non-blocking)
@@ -424,6 +464,7 @@ int main(int argc, char* argv[]) {
     }
 
     z80.request_stop();
+    http_server.stop();
 
 #ifdef HAVE_SSH
     ssh_server.stop();

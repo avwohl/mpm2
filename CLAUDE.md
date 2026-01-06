@@ -169,6 +169,7 @@ Options:
   -d, --disk A:FILE           Mount disk image on drive A-P (required)
   -l, --local                 Enable local console (output to stdout)
   -t, --timeout SECS          Timeout in seconds for debugging
+  -w, --http PORT             HTTP server port (default: 8000, 0 to disable)
   -p, --port PORT             SSH listen port (default: 2222)
   -k, --key FILE              Host key file (default: keys/ssh_host_rsa_key)
   -a, --authorized-keys FILE  Authorized keys file (default: keys/authorized_keys)
@@ -187,6 +188,18 @@ Examples:
 ```
 
 The emulator boots from disk sector 0 of drive A using the cold start loader.
+
+### HTTP File Browser
+
+The HTTP server (default port 8000) provides read-only web access to MP/M II files:
+
+- `http://localhost:8000/` - List mounted drives
+- `http://localhost:8000/a/` - List all users on drive A
+- `http://localhost:8000/a.0/` - List user 0 only on drive A
+- `http://localhost:8000/a/file.txt` - Download file
+
+URLs are case-insensitive. Directory listings show lowercase filenames.
+Text files are served with Unix line endings (CR stripped, 0x1A EOF removed).
 
 ## Testing SSH
 
@@ -422,18 +435,24 @@ mpm2/
 │   ├── console.h
 │   ├── console_queue.h
 │   ├── disk.h
+│   ├── http_server.h      # HTTP file browser
+│   ├── sftp_bridge.h      # SFTP/HTTP to Z80 bridge
+│   ├── sftp_path.h        # Path parsing for SFTP/HTTP
 │   ├── ssh_session.h
 │   ├── xios.h
-│   └── z80_thread.h
+│   └── z80_runner.h
 ├── src/
 │   ├── banked_mem.cpp
 │   ├── console.cpp
 │   ├── disk.cpp
+│   ├── http_server.cpp    # HTTP file browser
 │   ├── main.cpp
-│   ├── ssh_session.cpp
+│   ├── mpm_cpu.cpp
+│   ├── sftp_bridge.cpp    # SFTP/HTTP to Z80 bridge
+│   ├── sftp_path.cpp
+│   ├── ssh_session_libssh.cpp
 │   ├── xios.cpp
-│   ├── z80_thread.cpp
-│   └── mpm_cpu.cpp
+│   └── z80_runner.cpp
 ├── tools/
 │   └── mkboot.cpp        # Creates boot image from LDRBIOS + MPMLDR
 ├── scripts/
