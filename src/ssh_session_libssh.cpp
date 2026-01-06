@@ -27,6 +27,9 @@
 #include <fcntl.h>
 #include <sys/select.h>
 
+// Debug output control - set to true to enable verbose debug output
+static constexpr bool DEBUG_SSH = false;
+
 // Set fd to non-blocking at OS level
 static bool set_nonblocking(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
@@ -129,7 +132,7 @@ static int channel_subsystem_request_callback(ssh_session session, ssh_channel c
     SSHSession* ssh_sess = static_cast<SSHSession*>(userdata);
 
     if (subsystem && strcmp(subsystem, "sftp") == 0) {
-        std::cerr << "[SSH] SFTP subsystem requested\n";
+        if (DEBUG_SSH) std::cerr << "[SSH] SFTP subsystem requested\n";
         if (ssh_sess) {
             // Don't initialize here - the response hasn't been sent yet.
             // Mark as pending and initialize in poll loop after response is sent.
@@ -138,18 +141,18 @@ static int channel_subsystem_request_callback(ssh_session session, ssh_channel c
         return 0;  // 0 = accept
     }
 
-    std::cerr << "[SSH] Unknown subsystem requested: " << (subsystem ? subsystem : "(null)") << "\n";
+    if (DEBUG_SSH) std::cerr << "[SSH] Unknown subsystem requested: " << (subsystem ? subsystem : "(null)") << "\n";
     return 1;  // non-zero = reject
 }
 
 // Called when client opens a channel session
 static ssh_channel channel_open_callback(ssh_session session, void* userdata) {
-    std::cerr << "[SSH] channel_open_callback invoked\n";
+    if (DEBUG_SSH) std::cerr << "[SSH] channel_open_callback invoked\n";
     SSHSession* ssh_sess = static_cast<SSHSession*>(userdata);
     if (ssh_sess) {
         ssh_channel channel = ssh_channel_new(session);
         if (channel) {
-            std::cerr << "[SSH] Channel created, setting up callbacks\n";
+            if (DEBUG_SSH) std::cerr << "[SSH] Channel created, setting up callbacks\n";
             // Set up channel callbacks for PTY and shell requests
             ssh_sess->setup_channel_callbacks(channel);
             return channel;
@@ -222,7 +225,7 @@ void SSHSession::setup_console() {
     con->set_connected(true);
     state_ = SSHState::READY;
 
-    std::cerr << "[SSH] New connection on console " << console_id_ << "\n";
+    if (DEBUG_SSH) std::cerr << "[SSH] New connection on console " << console_id_ << "\n";
 }
 
 void SSHSession::setup_sftp() {
@@ -330,9 +333,9 @@ bool SSHSession::poll_handshake() {
     switch (state_) {
         case SSHState::KEY_EXCHANGE: {
             int rc = ssh_handle_key_exchange(session_);
-            std::cerr << "[SSH] KEY_EXCHANGE: ssh_handle_key_exchange returned " << rc << "\n";
+            if (DEBUG_SSH) std::cerr << "[SSH] KEY_EXCHANGE: ssh_handle_key_exchange returned " << rc << "\n";
             if (rc == SSH_OK) {
-                std::cerr << "[SSH] KEY_EXCHANGE completed successfully\n";
+                if (DEBUG_SSH) std::cerr << "[SSH] KEY_EXCHANGE completed successfully\n";
                 kex_done_ = true;
 
                 // Set up server callbacks for authentication (modern API)
@@ -395,7 +398,7 @@ bool SSHSession::poll_io() {
     // Note: For SFTP sessions, only check is_closed(), not is_eof()
     // EOF on an SFTP channel doesn't mean the session should end
     if (ssh_channel_is_closed(channel_)) {
-        std::cerr << "[SSH] Channel is_closed=1\n";
+        if (DEBUG_SSH) std::cerr << "[SSH] Channel is_closed=1\n";
         state_ = SSHState::CLOSED;
         return false;
     }
@@ -407,7 +410,7 @@ bool SSHSession::poll_io() {
 
     // For non-SFTP sessions, EOF means disconnect
     if (ssh_channel_is_eof(channel_)) {
-        std::cerr << "[SSH] Channel is_eof=1 (non-SFTP)\n";
+        if (DEBUG_SSH) std::cerr << "[SSH] Channel is_eof=1 (non-SFTP)\n";
         state_ = SSHState::CLOSED;
         return false;
     }
@@ -452,20 +455,11 @@ bool SSHSession::poll_io() {
     // Read from SSH -> console input queue (non-blocking)
     char buf[256];
     int n = ssh_channel_read_nonblocking(channel_, buf, sizeof(buf), 0);
-    static int poll_count = 0;
-    poll_count++;
-    if (poll_count <= 3) {
-        std::cerr << "[SSH] poll_io #" << poll_count << " n=" << n << "\n";
-    }
     if (n > 0) {
-        std::cerr << "[SSH] Received " << n << " chars for console " << console_id_ << ": ";
         for (int i = 0; i < n; i++) {
             uint8_t ch = static_cast<uint8_t>(buf[i]);
-            if (ch >= 32 && ch < 127) std::cerr << (char)ch;
-            else std::cerr << "\\x" << std::hex << (int)ch << std::dec;
             con->input_queue().try_write(ch);
         }
-        std::cerr << "\n";
     } else if (n == SSH_ERROR) {
         state_ = SSHState::CLOSED;
         return false;
@@ -1394,7 +1388,7 @@ bool SSHServer::load_authorized_keys(const std::string& path) {
         }
     }
 
-    std::cerr << "[SSH] Loaded " << count << " authorized keys from " << path << "\n";
+    if (DEBUG_SSH) std::cerr << "[SSH] Loaded " << count << " authorized keys from " << path << "\n";
     return count > 0;
 }
 
@@ -1496,7 +1490,7 @@ void SSHServer::poll_accept() {
         return;
     }
 
-    std::cerr << "[SSH] New connection accepted!\n" << std::flush;
+    if (DEBUG_SSH) std::cerr << "[SSH] New connection accepted!\n" << std::flush;
 
     // Got a connection - set non-blocking at both OS and libssh level
     socket_t fd = ssh_get_fd(session);
@@ -1507,7 +1501,7 @@ void SSHServer::poll_accept() {
 
     // Create session object - handshake will proceed in poll()
     sessions_.push_back(std::make_unique<SSHSession>(session, this));
-    std::cerr << "[SSH] Session created, total sessions: " << sessions_.size() << "\n";
+    if (DEBUG_SSH) std::cerr << "[SSH] Session created, total sessions: " << sessions_.size() << "\n";
 }
 
 void SSHServer::poll_sessions() {

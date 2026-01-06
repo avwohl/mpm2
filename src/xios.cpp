@@ -13,10 +13,10 @@
 #include <set>
 
 // Debug output control - set to true to enable verbose debug output
-static constexpr bool DEBUG_BOOT = true;  // Temporarily enabled to trace post-boot output
-static constexpr bool DEBUG_DISK = false;  // Disk read tracing
+static constexpr bool DEBUG_BOOT = false;
+static constexpr bool DEBUG_DISK = false;
 static constexpr bool DEBUG_DISK_ERRORS = true;
-static constexpr bool DEBUG_XIOS = true;  // Temporarily enabled
+static constexpr bool DEBUG_XIOS = false;
 
 XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
     : cpu_(cpu)
@@ -647,12 +647,6 @@ void XIOS::do_wboot() {
 void XIOS::do_sftp_poll() {
     // Return 0xFF if SFTP request pending, 0x00 if idle
     bool pending = SftpBridge::instance().has_pending_request();
-    static int poll_count = 0;
-    poll_count++;
-    // Log every 100 polls, or always if pending
-    if (pending || (poll_count % 100) == 1) {
-        std::cerr << "[XIOS] sftp_poll #" << poll_count << ": pending=" << pending << "\n";
-    }
     cpu_->regs.AF.set_high(pending ? 0xFF : 0x00);
 }
 
