@@ -5,7 +5,7 @@ build/
 *.a
 *.so
 *.dylib
-
+**__pycache__/
 # Executables
 mpm2_emu
 mkboot

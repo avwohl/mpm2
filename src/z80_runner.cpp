@@ -166,6 +166,7 @@ bool Z80Runner::run_polled() {
 
         cpu_->execute();
         instruction_count_++;
+
     }
 
     return true;

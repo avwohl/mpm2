@@ -205,6 +205,7 @@ class RSPModule:
     brs: Optional[SPRModule] = None
     rsp_record: int = 0  # Record number in MPM.SYS
     brs_record: int = 0
+    rsp_base: int = 0  # RSP load address (set during relocation)
 
     def load(self) -> None:
         """Load RSP and optional BRS modules."""
@@ -528,7 +529,7 @@ class SystemGenerator:
         self.cur_base -= pages_needed
         base_page = self.cur_base
 
-        # Relocate module
+        # Relocate module using standard PRL bitmap
         module.relocate(base_page)
 
         print(f"  {name:12s}  {base_page:02X}00H  {pages_needed:02X}00H")
@@ -597,16 +598,26 @@ class SystemGenerator:
         # Note: BDOS/XDOS entry point (bytes 245-246) set later after BNKXIOS is loaded
 
         # Load RSPs
+        # RSPs are loaded from high to low memory (loaded later = lower address)
+        # rspl points to the LOWEST address RSP (last one loaded)
+        # Each RSP's pd_link (offset 0-1) points to the NEXT higher address RSP
+        # The highest address RSP has pd_link = 0 (end of list)
+        #
+        # Since we load highest first: first RSP has pd_link=0, subsequent RSPs
+        # have pd_link pointing to the previously loaded RSP
         rsp_link = 0
         brs_link = 0
+        prev_rsp_addr = 0  # Address of previously loaded RSP (or 0 for first)
         for rsp in self.rsps:
             base, size = self.load_and_relocate_module(rsp.rsp, f"{rsp.name:8s}RSP")
+            rsp.rsp_base = base * 256  # Store for BRS patching later
 
-            # Set up RSP process descriptor link
-            if rsp_link != 0:
-                # Patch previous RSP's link to point to this one
-                pass  # TODO: implement RSP linking
-            rsp_link = base * 256
+            # Patch this RSP's pd_link (offset 0-1) to point to previous RSP
+            # First RSP loaded has pd_link=0 (it's the highest address, end of list)
+            struct.pack_into('<H', rsp.rsp.code, 0, prev_rsp_addr)
+
+            prev_rsp_addr = base * 256  # This RSP becomes the previous for next iteration
+            rsp_link = base * 256  # Track lowest RSP for rspl
 
             modules_to_write.append(rsp.rsp)
 
@@ -680,11 +691,43 @@ class SystemGenerator:
             modules_to_write.append(self.tmp)
 
         # Load BRS modules for RSPs
+        # GENSYS builds a linked list of BRS modules:
+        # - brspl points to lowest (first loaded) BRS
+        # - Each BRS's offset 2-3 contains link to next BRS (0 for last)
+        # - INITSP is read from BRS offset 2-3 BEFORE overwriting with link
         brsp_base = 0
         nmb_brsps = 0
+        brspl = 0  # Linked list head (address of first/lowest BRS)
         for rsp in self.rsps:
             if rsp.brs:
                 base, size = self.load_and_relocate_module(rsp.brs, f"{rsp.name:8s}BRS")
+                brs_base = base * 256
+
+                # Get INITSP from BRS header (offset 2-3) AFTER relocation
+                # INITSP is already the absolute stack pointer address after relocation
+                # (it was a label reference that got relocated)
+                stack_ptr = struct.unpack('<H', rsp.brs.code[2:4])[0]
+
+                # Patch BRS offset 0-1 (RSPBASE) with RSP base address
+                struct.pack_into('<H', rsp.brs.code, 0, rsp.rsp_base)
+
+                # Patch BRS offset 2-3 with link to previous BRS (brspl)
+                # This overwrites INITSP but we saved it above
+                struct.pack_into('<H', rsp.brs.code, 2, brspl)
+                brspl = brs_base  # This BRS becomes the new list head
+
+                # Patch RSP offset 6-7 (pd_stkptr) with the saved INITSP
+                # Note: pd_link at RSP offset 0-1 was already set during RSP loading
+                struct.pack_into('<H', rsp.rsp.code, 6, stack_ptr)
+
+                # Read back pd_link for debug output
+                pd_link = struct.unpack('<H', rsp.rsp.code[0:2])[0]
+                print(f"    RSP patches: pd_link={pd_link:04X}H, stkptr={stack_ptr:04X}H")
+                # Note: brspl was already updated to brs_base above
+                # The value written to BRS offset 2-3 was the OLD brspl (before update)
+                old_brspl = struct.unpack('<H', rsp.brs.code[2:4])[0]  # Read back what we wrote
+                print(f"    BRS patches: RSPBASE={rsp.rsp_base:04X}H, link={old_brspl:04X}H")
+
                 modules_to_write.append(rsp.brs)
                 brsp_base = base  # Base of last (lowest) BRS module
                 nmb_brsps += 1
@@ -692,6 +735,8 @@ class SystemGenerator:
         self.system_data[248] = nmb_brsps  # nmb_brsps
         if nmb_brsps > 0:
             self.system_data[249] = brsp_base  # brsp_base
+            # brspl (bytes 250-251) = address of first BRS in linked list
+            struct.pack_into('<H', self.system_data, 250, brspl)
 
         # Calculate lock table space
         total_list_items = cfg.total_locked_records + cfg.total_open_files

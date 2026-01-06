@@ -90,6 +90,11 @@ fi
 echo "Step 1: Creating hd1k disk image..."
 "$SCRIPT_DIR/build_hd1k.sh" --tree="$TREE"
 
+# Step 1.5: Build SFTP RSP (required for HTTP/SFTP file access)
+echo ""
+echo "Step 1.5: Building SFTP RSP..."
+"$SCRIPT_DIR/build_sftp_rsp.sh"
+
 # Step 2: Build assembly (LDRBIOS, BNKXIOS) and C++ tools
 # (Writes boot sector to the disk image created in step 1)
 echo ""

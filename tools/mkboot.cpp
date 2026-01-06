@@ -120,11 +120,11 @@ int main(int argc, char* argv[]) {
     image[0x0008] = 0xFB;  // EI
     image[0x0009] = 0xC9;  // RET
 
-    // RST 7 / RST 38H (0x0038): JP to XIOS tick handler at 0xFC80
-    // (Also set up RST 7 for potential debugger use)
-    image[0x0038] = 0xC3;  // JP
-    image[0x0039] = 0x80;
-    image[0x003A] = 0xFC;  // 0xFC80
+    // RST 7 / RST 38H (0x0038): Interrupt mode 1 handler
+    // MP/M II will set up proper handler during SYSINIT. For boot phase,
+    // just do EI + RET to allow interrupts and return safely.
+    image[0x0038] = 0xFB;  // EI
+    image[0x0039] = 0xC9;  // RET
 
     // LDRBIOS has its own jump table at 0x1700, MPMLDR calls it directly
     // No redirect table needed at 0xC300

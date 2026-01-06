@@ -26,12 +26,37 @@ DELAY:
         ex      de, hl          ; DE = ticks
         ; func = 0x8D (XDOS_DELAY = 141)
         ld      c, 8DH          ; C = function number
+        ; DEBUG: report address of RSPBASE (the address we're reading from)
+        push    de              ; save ticks
+        push    bc              ; save func
+        ld      hl, RSPBASE     ; Get address of RSPBASE (this gets relocated)
+        ld      b, h
+        ld      c, l
+        ld      a, 73H          ; Debug: address of RSPBASE
+        out     (0E0H), a
+        pop     bc              ; restore func
+        pop     de              ; restore ticks
         ; Call BDOS entry point (in common module)
         ld      hl, (RSPBASE)   ; HL = RSP common module base
+        ; DEBUG: report RSPBASE value
+        push    de              ; save ticks
+        push    bc              ; save func
+        ld      b, h
+        ld      c, l
+        ld      a, 71H          ; Debug: RSPBASE value
+        out     (0E0H), a
+        ; Load bdos$entry
         ld      a, (hl)         ; low byte of bdos$entry
         inc     hl
         ld      h, (hl)         ; high byte of bdos$entry
         ld      l, a            ; HL = bdos$entry
+        ; DEBUG: report bdos$entry
+        ld      b, h
+        ld      c, l
+        ld      a, 72H          ; Debug: bdos$entry value
+        out     (0E0H), a
+        pop     bc              ; restore func
+        pop     de              ; restore ticks
         jp      (hl)            ; jump to BDOS (C=func, DE=parm)
 
 ;----------------------------------------------------------------------

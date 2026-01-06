@@ -61,7 +61,7 @@ constexpr uint8_t XIOS_SFTP_ENTRY  = 0x6A;  // BRS entry point reached (debug)
 constexpr uint8_t XIOS_SFTP_JMPADDR = 0x6B; // Report jump target address (BC=address)
 constexpr uint8_t XIOS_SFTP_EPVAL   = 0x6C; // Report ENTRY_POINT value (BC=value)
 constexpr uint8_t XIOS_SFTP_DEBUG   = 0x6D; // Debug trace (C=code)
-constexpr uint8_t XIOS_SFTP_RSPBASE = 0x6E; // Debug: report RSPBASE value (BC=value)
+constexpr uint8_t XIOS_SFTP_TARGET  = 0x6E; // Debug: report target byte (C=byte)
 constexpr uint8_t XIOS_SFTP_BDOSENT = 0x6F; // Debug: report bdos$entry value (BC=value)
 
 // MP/M II flags (set by interrupt handlers)

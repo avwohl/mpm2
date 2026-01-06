@@ -63,14 +63,27 @@ ENTRY_POINT:
         LD      C, L
         LD      A, 6CH                  ; Debug: report ENTRY_POINT value
         OUT     (0E0H), A
-        LD      DE, 06DCH               ; Hardcoded: SFTPMAIN(06E8) - ENTRY_POINT(000C)
+        LD      DE, 06ECH               ; Hardcoded: SFTPMAIN(06F8) - ENTRY_POINT(000C)
         ADD     HL, DE                  ; HL = actual SFTPMAIN address
         ; DEBUG: Report final HL value via XIOS (C=low, B=high)
         LD      B, H
         LD      C, L
         LD      A, 6BH                  ; Debug: report computed address
         OUT     (0E0H), A
-        JP      (HL)                    ; Jump via register - no relocation issue
+        ; DEBUG: Report byte at target address (save HL first!)
+        PUSH    HL                      ; Save jump target
+        LD      A, (HL)                 ; Read first byte at jump target
+        LD      C, A
+        LD      B, 0
+        LD      A, 6EH                  ; Debug: report target byte
+        OUT     (0E0H), A
+        POP     HL                      ; Restore jump target
+        ; DEBUG: Verify HL after POP
+        LD      B, H
+        LD      C, L
+        LD      A, 70H                  ; Debug: HL value before JP
+        OUT     (0E0H), A
+        JP      (HL)                    ; Jump to SFTPMAIN
 
 ; Entry address for RET - pointed to by INITSP
 ENTRY_ADDR:

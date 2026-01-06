@@ -25,6 +25,7 @@
 #include <cstring>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/select.h>
 
 // Set fd to non-blocking at OS level
 static bool set_nonblocking(int fd) {
@@ -1459,30 +1460,38 @@ void SSHServer::stop() {
     }
 }
 
-static int poll_call_count = 0;
 void SSHServer::poll() {
     if (!running_) return;
-
-    if (++poll_call_count % 10000 == 1) {
-        std::cerr << "[SSH] poll() #" << poll_call_count << " sessions=" << sessions_.size() << "\n" << std::flush;
-    }
 
     poll_accept();
     poll_sessions();
 }
 
-static int accept_count = 0;
 void SSHServer::poll_accept() {
-    // Try to accept a new connection (non-blocking)
+    // Check if a connection is pending before calling accept
+    // This avoids EAGAIN spam on macOS with non-blocking sockets
+    socket_t bind_fd = ssh_bind_get_fd(sshbind_);
+    if (bind_fd == SSH_INVALID_SOCKET) return;
+
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(bind_fd, &readfds);
+
+    struct timeval tv = {0, 0};  // No wait - just check
+    int ready = select(bind_fd + 1, &readfds, nullptr, nullptr, &tv);
+    if (ready <= 0) {
+        // No connection pending (ready == 0) or error (ready < 0)
+        return;
+    }
+
+    // Connection is pending - try to accept
     ssh_session session = ssh_new();
     if (!session) return;
 
     int rc = ssh_bind_accept(sshbind_, session);
-    if (++accept_count % 10000 == 0) {
-        std::cerr << "[SSH] accept #" << accept_count << " rc=" << rc << " err=" << ssh_get_error(sshbind_) << "\n" << std::flush;
-    }
     if (rc != SSH_OK) {
-        // No connection waiting or error
+        // Unexpected error since select() said a connection was ready
+        std::cerr << "[SSH] accept failed: " << ssh_get_error(sshbind_) << "\n";
         ssh_free(session);
         return;
     }

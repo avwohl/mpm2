@@ -13,10 +13,10 @@
 #include <set>
 
 // Debug output control - set to true to enable verbose debug output
-static constexpr bool DEBUG_BOOT = false;
+static constexpr bool DEBUG_BOOT = true;  // Temporarily enabled to trace post-boot output
 static constexpr bool DEBUG_DISK = false;  // Disk read tracing
 static constexpr bool DEBUG_DISK_ERRORS = true;
-static constexpr bool DEBUG_XIOS = false;
+static constexpr bool DEBUG_XIOS = true;  // Temporarily enabled
 
 XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
     : cpu_(cpu)
@@ -40,6 +40,7 @@ void XIOS::handle_port_dispatch(uint8_t func) {
     static int const_count = 0;
     static int post_boot_xios_calls = 0;
     call_count++;
+
 
     // Trace XIOS calls after SYSTEMINIT (disabled by setting to 0)
     if (DEBUG_XIOS && systeminit_done_.load() && post_boot_xios_calls < 100) {
@@ -121,14 +122,34 @@ void XIOS::handle_port_dispatch(uint8_t func) {
         case XIOS_SFTP_JMPADDR: do_sftp_jmpaddr(); break;
         case XIOS_SFTP_EPVAL: do_sftp_epval(); break;
         case XIOS_SFTP_DEBUG: do_sftp_debug(); break;
-        case XIOS_SFTP_RSPBASE: {
-            uint16_t val = cpu_->regs.BC.get_pair16();
-            std::cerr << "[RSP] RSPBASE = 0x" << std::hex << val << std::dec << "\n";
+        case XIOS_SFTP_TARGET: {
+            uint8_t val = cpu_->regs.BC.get_low();
+            std::cerr << "[XIOS] Target byte at jump addr: 0x" << std::hex << (int)val << std::dec << "\n";
             break;
         }
         case XIOS_SFTP_BDOSENT: {
             uint16_t val = cpu_->regs.BC.get_pair16();
             std::cerr << "[RSP] bdos$entry = 0x" << std::hex << val << std::dec << "\n";
+            break;
+        }
+        case 0x70: {
+            uint16_t val = cpu_->regs.BC.get_pair16();
+            std::cerr << "[XIOS] HL before JP: 0x" << std::hex << val << std::dec << "\n";
+            break;
+        }
+        case 0x71: {
+            uint16_t val = cpu_->regs.BC.get_pair16();
+            std::cerr << "[DELAY] RSPBASE points to: 0x" << std::hex << val << std::dec << "\n";
+            break;
+        }
+        case 0x72: {
+            uint16_t val = cpu_->regs.BC.get_pair16();
+            std::cerr << "[DELAY] bdos$entry = 0x" << std::hex << val << std::dec << "\n";
+            break;
+        }
+        case 0x73: {
+            uint16_t val = cpu_->regs.BC.get_pair16();
+            std::cerr << "[DELAY] RSPBASE address = 0x" << std::hex << val << std::dec << "\n";
             break;
         }
         case 0x74: {
@@ -545,6 +566,10 @@ void XIOS::do_stopclock() {
 void XIOS::do_maxconsole() {
     uint8_t num_consoles = mem_->read_common(0xFF01);
     cpu_->regs.AF.set_high(num_consoles);
+    if (DEBUG_XIOS) {
+        std::cerr << "[XIOS] MAXCONSOLE returns " << (int)num_consoles
+                  << " (read from 0xFF01)\n";
+    }
 }
 
 void XIOS::do_systeminit() {

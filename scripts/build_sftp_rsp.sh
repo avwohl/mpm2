@@ -45,6 +45,11 @@ echo "  Output: SFTP.BRS"
 ls -la SFTP.BRS
 echo ""
 
+# Note: The fixup_brs.py workaround is no longer needed since we use
+# Python GENSYS which does proper bitmap-based relocation.
+# The old DRI GENSYS had a bug where it only relocated bytes that were 0x00.
+# See scripts/fixup_brs.py for historical reference.
+
 echo ""
 echo "=============================================="
 echo "SFTP RSP Build Complete"
