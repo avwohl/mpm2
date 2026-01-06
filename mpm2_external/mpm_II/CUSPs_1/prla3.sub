@@ -1,0 +1,70 @@
+pip a:=show.plm[g8]
+seteof show.plm
+isx
+plm80 show.plm nolist debug
+era show.plm
+link show.obj,x0100,plm80.lib to show1.mod
+locate show1.mod code(0100H) stacksize(100)
+era show1.mod
+objhex show1 to show1.hex
+link show.obj,x0200,plm80.lib to show2.mod
+locate show2.mod code(0200H) stacksize(100)
+era show2.mod
+objhex show2 to show2.hex
+era show2
+cpm
+objcpm show1
+era show1.com
+pip show.hex=show1.hex,show2.hex
+era show1.hex
+era show2.hex
+zero
+genmod show.hex xshow.prl 
+era *.hex
+pip a:=stat.plm[g8]
+seteof stat.plm
+isx
+plm80 stat.plm nolist debug
+era stat.plm
+link stat.obj,x0100,plm80.lib to stat1.mod
+locate stat1.mod code(0100H) stacksize(100)
+era stat1.mod
+objhex stat1 to stat1.hex
+link stat.obj,x0200,plm80.lib to stat2.mod
+locate stat2.mod code(0200H) stacksize(100)
+era stat2.mod
+objhex stat2 to stat2.hex
+era stat2
+cpm
+objcpm stat1
+era stat1.com
+pip stat.hex=stat1.hex,stat2.hex
+era stat1.hex
+era stat2.hex
+zero
+genmod stat.hex xstat.prl 
+era *.hex
+pip a:=type.plm[g8]
+seteof type.plm
+isx
+plm80 type.plm nolist debug
+era type.plm
+link type.obj,x0100,plm80.lib to type1.mod
+locate type1.mod code(0100H) stacksize(100)
+era type1.mod
+objhex type1 to type1.hex
+link type.obj,x0200,plm80.lib to type2.mod
+locate type2.mod code(0200H) stacksize(100)
+era type2.mod
+objhex type2 to type2.hex
+era type2
+cpm
+objcpm type1
+era type1.com
+pip type.hex=type1.hex,type2.hex
+era type1.hex
+era type2.hex
+zero
+genmod type.hex xtype.prl 
+era *.hex
+

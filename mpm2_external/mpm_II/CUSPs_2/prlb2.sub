@@ -1,0 +1,71 @@
+pip a:=prlcm.plm[g8]
+seteof prlcm.plm
+isx
+plm80 prlcm.plm nolist debug
+era prlcm.plm
+link prlcm.obj,x0100,plm80.lib to prlcm1.mod
+locate prlcm1.mod code(0100H) stacksize(100)
+era prlcm1.mod
+objhex prlcm1 to prlcm1.hex
+link prlcm.obj,x0200,plm80.lib to prlcm2.mod
+locate prlcm2.mod code(0200H) stacksize(100)
+era prlcm2.mod
+objhex prlcm2 to prlcm2.hex
+era prlcm2
+cpm
+objcpm prlcm1
+era prlcm1.com
+pip prlcm.hex=prlcm1.hex,prlcm2.hex
+era prlcm1.hex
+era prlcm2.hex
+zero
+genmod prlcm.hex xprlcm.prl 
+era *.hex
+pip a:=sub.plm[g8]
+seteof sub.plm
+isx
+plm80 sub.plm nolist debug
+era sub.plm
+link sub.obj,x0100,plm80.lib to sub1.mod
+locate sub1.mod code(0100H) stacksize(100)
+era sub1.mod
+objhex sub1 to sub1.hex
+link sub.obj,x0200,plm80.lib to sub2.mod
+locate sub2.mod code(0200H) stacksize(100)
+era sub2.mod
+objhex sub2 to sub2.hex
+era sub2
+cpm
+objcpm sub1
+era sub1.com
+pip sub.hex=sub1.hex,sub2.hex
+era sub1.hex
+era sub2.hex
+zero
+genmod sub.hex xsub.prl 
+era *.hex
+pip a:=tod.plm[g8]
+seteof tod.plm
+isx
+plm80 tod.plm nolist debug
+era tod.plm
+link tod.obj,x0100,plm80.lib to tod1.mod
+locate tod1.mod code(0100H) stacksize(100)
+era tod1.mod
+objhex tod1 to tod1.hex
+link tod.obj,x0200,plm80.lib to tod2.mod
+locate tod2.mod code(0200H) stacksize(100)
+era tod2.mod
+objhex tod2 to tod2.hex
+era tod2
+cpm
+objcpm tod1
+era tod1.com
+pip tod.hex=tod1.hex,tod2.hex
+era tod1.hex
+era tod2.hex
+zero
+genmod tod.hex xtod.prl 
+era *.hex
+sub prlb3
+

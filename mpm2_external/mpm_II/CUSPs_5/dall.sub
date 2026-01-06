@@ -1,0 +1,38 @@
+pip a:=dm.plm[g9]
+seteof dm.plm
+pip a:=sn.plm[g9]
+seteof sn.plm
+pip a:=dse.plm[g9]
+seteof dse.plm
+pip a:=dsh.plm[g9]
+seteof dsh.plm
+pip a:=dso.plm[g9]
+seteof dso.plm
+pip a:=da.plm[g9]
+seteof da.plm
+pip a:=dp.plm[g9]
+seteof dp.plm
+pip a:=dts.plm[g9]
+seteof dts.plm
+isx
+plm80 dm.plm object(dm) debug nolist
+plm80 sn.plm object(sn) debug nolist
+plm80 dse.plm object(dse) debug nolist
+plm80 dsh.plm object(dsh) debug nolist
+plm80 dso.plm object(dso) debug nolist
+plm80 dp.plm object(dp) debug nolist
+plm80 da.plm object(da) debug nolist
+plm80 dts.plm object(dts) debug nolist
+link x0100,dm,sn,dse,dso,dsh,dp,da,dts,plm80.lib to d1.lnk
+locate d1.lnk code(0100H) stacksize(50)
+era d1.lnk
+objhex d1 to d1.hex
+link x0200,dm,sn,dse,dso,dsh,dp,da,dts,plm80.lib to d2.lnk
+locate d2.lnk code(0200H) stacksize(50)
+era d2.lnk
+objhex d2 to d2.hex
+cpm
+objcpm d1
+pip d.hex=d1.hex,d2.hex
+genmod d.hex xsdir.prl 
+

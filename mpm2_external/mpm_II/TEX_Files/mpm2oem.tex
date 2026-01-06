@@ -1,0 +1,326 @@
+.po 4
+
+
+
+
+                          MP/M II V2.0
+
+                    OEM REDISTRIBUTION GUIDE
+
+
+
+
+
+
+
+
+
+
+
+
+                       Copyright (C) 1981
+
+                       Post Office Box 579
+                      801 Lighthouse Avenue
+                     Pacific Grove, CA 93950
+                         (408) 649-3896
+                        TWX 910 360 5001
+
+
+                       All Rights Reserved
+
+
+
+
+
+
+
+
+         
+               Noteº   Thió documenô  containó  Digitaì 
+         Researcè proprietarù information¬ anä musô noô 
+         bå  copieä  oò  distributeä  foò  anù  purposå 
+         whatsoever¬   withouô  writteî  permissioî  oæ 
+         Digitaì Research.
+
+
+
+
+
+
+
+
+
+
+
+Š  (Company Name ____________________________ Origin # _______)
+
+
+1.   Introduction.
+
+     Thió  documenô  accompanieó  thå MP/Í  IÉ  OEÍ  Distributioî 
+Disketteó  (Controì  1/² ¦ 2/² anä Serialization© anä  serveó  tï 
+summarizå   thå  diskettå  serializatioî  procesó  whicè   allowó 
+constructioî  anä  verificatioî  oæ  MP/Í  disketteó  whicè   arå 
+distributeä bù thå OEM.
+
+     Notå  thaô  alì  thå programó includeä oî  thå  OEÍ  Controì 
+redistributioî  disketteó  1/² ¦ 2/² maù bå distributeä  tï  youò 
+customers®   Notå  alsï  thaô thå programó includeä  oî  thå  OEÍ 
+Serializatioî  redistributioî  diskettå musô noô bå  includeä  oî 
+youò  distributioî  diskette®   Further¬  notå thaô thå  symboliã 
+debuggeò (SID¬  RSID¬  oò ZSID)¬  anä anù otheò Digitaì  Researcè 
+softwarå  productó noô provideä oî youò OEÍ Controì disketteó 1/² 
+¦  2/²  arå  noô tï bå distributeä  bù  yoõ  unlesó  specificallù 
+covereä bù separatå redistributioî agreements.
+
+     Á  workinç  knowledgå  oæ thå standarä  MP/Í  IÉ  alteratioî 
+procesó  anä  thå  generatioî oæ á custoí  XIOÓ  ió  assumed¬  aó 
+describeä iî thå "MP/Í IÉ Systeí Guide."
+
+
+2.   System Serialization under CP/M
+
+     Á prograí ió provideä oî thå OEÍ Serializatioî  distributioî 
+diskettå  foò serializatioî anä verificatioî oæ diskettes®   Thió 
+program¬   calleä  MPM2SRL¬  ió  provideä  iî  botè  sourcå  anä 
+assembleä  form®   Thió serializatioî prograí ió  configureä  foò 
+executioî  undeò  thå CP/Í operatinç system®   Iô ió  recommendeä 
+thaô  yoõ  perforí thå serializatioî anä  verificatioî  functionó 
+whilå  executinç undeò CP/Í (refeò tï sectioî ³ oæ thió guidå  iæ 
+yoõ  dï  noô  havå accesó tï CP/Í oò foò otheò reasonó  musô  uså 
+MP/M IÉ  foò  youò systeí  serialization)®
+
+     Thå MPM2SRÌ prograí readó aî "origiî number¢ assigneä tï thå 
+distributoò  bù  Digitaì Researcè (giveî oî thå sectioî  ±  titlå 
+linå  oæ thió guide)¬  alonç witè á startinç seriaì number®   Thå 
+prograí  promptó thå operatoò foò thå diskettå tï bå  serialized¬ 
+eitheò  1/2¬  2/2¬  oò á combineä diskettå oæ 1/² anä  2/2®   Thå 
+prograí  alsï  promptó thå operatoò tï specifù whetheò oò  noô  á 
+"systeí  disk¢ serializatioî ió tï bå performed¬  specifying thaô 
+the system tracks need to be copied and serialized.
+
+     Thå distributor'ó customizeä controì disë (1/2¬  2/2¬ oò 1/² 
+anä  2/²  combined©  ió theî placeä intï drivå  A¬  anä  á  blanë 
+formatteä diskettå ió placeä intï drivå B®  Iæ á "systeí disk¢ ió 
+tï  bå  generated¬  thå firsô twï systeí  trackó  containinç  thå 
+MPMLDÒ  arå  theî  copieä  froí thå sourcå diskettå  tï  thå  ne÷ 
+diskette¬  anä internallù serializeä witè thå origiî anä  currenô 
+seriaì  number®   Thå copù operatioî proceedó tack-by-tracë untiì 
+thå firsô fulì tracë oæ 0E5È byteó (whicè ió thå initiaì valuå oæ Šaî IBÍ compatiblå diskettå track)®  Eacè tracë ió theî re-reaä tï 
+ensurå thaô thå copù operatioî waó correct®
+
+     Thå  lasô steğ iî thå diskettå serializatioî prograí  ió  tï 
+perforí  á  CP/Í disë reseô anä theî tï placå origiî  anä  seriaì 
+numberó  intï thå fileó specifieä iî aî FCÂ  tablå bù openinç anä 
+theî  readinç  anä  writinç thå  files®   Thå  seriaì  numbeò  ió 
+automaticallù incremented¬  anä thå consolå ió prompteä tï inserô 
+anotheò  diskette®   Thå  operatioî continueó untiì thå  operatoò 
+performó á colä start.
+
+
+     Iô  maù bå necessarù tï modifù thå MPM2SRÌ prograí iæ  drivå 
+parameteró  arå  altereä oò iæ therå arå changeó iî thå  standarä 
+fileó  requirinç serializationº  consulô thå sourcå  prograí  foò 
+drivå  dependenô  operationó aó welì aó foò thå FCÂ  tablå  whicè 
+specifieó thå individuaì fileó requirinç serialization.
+
+     The following files are specified in the FCB table:
+
+          Disk 1/2: MPM     .SYS
+                    XDOS    .SPR
+                    RESBDOS .SPR
+                    MPMLDR  .COM
+                    GENSYS  .COM
+
+          Disk 2/2: RMAC    .COM
+                    LINK    .COM
+                    LIB     .COM
+
+
+3.   System Serialization under MP/M
+
+     Iô  shoulä  bå  understooä thaô Digitaì  Researcè  doeó  noô 
+recommenä diskettå serializatioî anä verificatoî whilå  executinç 
+undeò thå MP/Í IÉ operatinç system®   Thå reasoî foò thió ió thaô 
+botè  serializatioî anä verificatioî requirå direcô calló tï  thå 
+BIOS/XIOÓ  disë  primitives®  Makinç direcô  calló  violateó  thå 
+MP/M IÉ  implementatioî  oæ á seriallù reusablå BDOÓ  unlesó  thå 
+MXDisë  queuå  ió properlù manageä tï makå certaiî thaô nï  otheò 
+procesó  ió  alloweä accesó tï thå BDOÓ  whilå  serializatioî  oò 
+verificatioî ió takinç place®
+
+     Thió  sectioî  oæ thå guidå ió intendeä foò OEMó  thaô  wilì 
+perforí  diskettå serializatioî anä verificatioî whilå  executinç 
+undeò  thå MP/Í operatinç system®   Therå arå twï changeó tï  thå 
+MPM2SRL program which must be made:
+
+     A.   Direct XIOS Disk Function Access
+
+          Iî  ordeò  tï directlù accesó XIOÓ disë  functionó  (aó 
+     requireä bù  MPM2SRL)¬  onå additionaì leveì oæ  indirectioî 
+     must be used as follows:
+
+Š     Change-
+               wboot   equ     1
+
+     To-
+               Awboot  equ     1
+
+
+
+     Following-
+               start:
+                       lxi     sp,stack
+
+     Add-
+                       lhld    Awboot
+                       inx     h
+                       mov     e,m
+                       inx     h
+                       mov     d,m
+                       xchg
+                       shld    wboot
+
+
+     Add- to beginning of 'miscellaneous data areas'
+
+               wboot:  ds      2
+
+
+
+     B.   Force MXDisk Queue Message Ownership
+
+          Thå  seconä  changå requireä  foò thå  MPM2SRÌ  prograí      
+     ensureó  thaô  nï  otheò disë activitù ió initiateä  oî  thå 
+     MP/M IÉ systeí whilå serializatioî ió beinç performed®  Thió 
+     steğ  caî bå eliminateä iæ yoõ caî guaranteå thaô  nï  otheò 
+     disë  operationó wilì bå performeä (i.e®  nï otheò  operatoò 
+     wilì  attempô tï ruî anù prograí aô anotheò console©  durinç 
+     serialization.
+
+
+     Following-
+               start:
+                       lxi     sp,stack
+
+     Add-
+                       mvi     c,openque     ;openque equ 135
+                       lxi     d,uqcb
+                       calì    bdoó          ;opeî MXDisë queue
+                       inr     a
+                       jz      notMPM        ;must not be MP/M
+                       mvi     c,readque     ;readque equ 137
+                       lxi     d,uqcb
+                       call    bdos          ;read MXDisk que msg
+
+
+Š     Change-
+               endcopy:
+                       call    srlfile
+
+     To-
+               endcopy:
+                       mvi     c,writeque    ;writeque equ 139
+                       lxi     d,uqcb
+                       call    bdos          ;write MXDisk que msg
+                       call    srlfile
+                       mvi     c,readque     ;readque equ 137
+                       lxi     d,uqcb
+                       call    bdos          ;read MXDisk que msg
+
+     Add- to beginning of 'miscellaneous data areas'
+
+               uqcb:
+                       ds      2             ;ptr filled by open
+                       dw      0             ;bfr ptr (not used)
+                       db      'MXDisk  '    ;queue name- 8 chrs
+
+
+          Further¬  notå  thaô thå serializatioî prograí caî theî 
+     bå  terminateä  witè á ctl-Ã (^C© characteò entereä  aô  thå 
+     console.
+
+
+
+4.   MP/M II OEM Redistribution Packing List
+
+     Thå  followinç  lisô summarizeó thå itemó  whicè  shoulä  bå 
+included in the OEM redistribution of MP/M II.
+
+          o  (2) Diskettes, marked 1/2 & 2/2
+                    -or-
+             (1) Diskette (if 1/2 & 2/2 combined- double density)
+
+          o  MP/M II User's Guide
+             MP/M II Programmer's Guide
+             MP/M II System Guide  (Optional)
+
+          o  Link-80 Operator's Guide
+
+          o  MAC Language Manual and Applications Guide
+
+          o  MP/M II Application Notes 01 to 14
+
+          o  RMAC 1.1 Application Note 01
+
+          o  Registration Card
+
+          o  Cover Letter
+
+          o  MP/M II Product Brief
+Š5.   MP/M II OEM Redistribution Files
+
+     Thå  followinç lisô itemizeó thå fileó whicè caî bå includeä 
+iî thå OEÍ redistributioî oæ MP/Í II.
+
+     DISK 1/2:
+
+     BNKBDOÓ  SPÒ  BNKXDOÓ  SPÒ  RESBDOÓ  SPÒ  TMĞ      SPR
+     XDOS     SPR  ABORT    SPR  MPMSTAT  RSP  SCHED    RSP
+     SPOOL    RSP  MPMSTAT  BRS  SCHED    BRS  SPOOL    BRS
+     ABORT    PRL  ASM      PRL  CONSOLE  PRL  DIR      PRL
+     DSKRESET PRL  DUMP     PRL  ED       PRL  ERA      PRL
+     ERAQ     PRL  MPMSTAT  PRL  PIP      PRL  PRINTER  PRL
+     PRLCOM   PRL  RDT      PRL  REN      PRL  SCHED    PRL
+     SDIR     PRL  SET      PRL  SHOW     PRL  SPOOL    PRL
+     STAT     PRL  STOPSPLR PRL  SUBMIT   PRL  TOD      PRL
+     TYPE     PRL  USER     PRL  DDT      COM  GENHEX   COM
+     GENMOD   COM  GENSYS   COM  LOAD     COM  MPMLDR   COM
+
+     DISK 2/2:
+
+     LINK     COM  LIB      COM  RMAC     COM  XREF     COM
+     I8085    LIB  Z80      LIB  INTER    LIB  TREADLES LIB
+     BUTTONS  LIB  SIMPIO   LIB  SEQIO    LIB  STACK    LIB
+     DISKDEF  LIB  DSTACK   LIB  COMPARE  LIB  NCOMPARE LIB
+     WHEN     LIB  DOWHILE  LIB  SELECT   LIB  DISK     DOC
+     Z80      DOC  LDRBIOS  ASM  BOOT     ASM  DEBLOCK  ASM
+     TODCNV   ASM  RESXIOS  ASM  DUMP     ASM  EXTRN    ASM
+
+
+     Thå  followinç lisô itemizeó thå fileó whicè arå includeä oî 
+thå  MP/Í  IÉ  V2.° OEÍ Serializatioî diskettå anä  musô  noô  bå 
+includeä iî thå OEÍ redistributioî oæ MP/Í II.
+
+     MPM2SRL  ASM  MPM2SRL  COM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Š
