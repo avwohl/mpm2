@@ -402,9 +402,7 @@ process$request: procedure;
     declare req$type byte;
     declare user byte;
 
-    call sftp$debug(6);  /* trace: entering process_request */
     req$type = get$buf$byte(0);
-    call sftp$debug(7);  /* trace: after first get_buf_byte */
     user = get$buf$byte(2);
 
     /* save current user and switch to requested user */
@@ -444,7 +442,6 @@ sftp$main: procedure public;
 
     /* signal startup to C++ emulator */
     call sftp$hello;
-    call sftp$debug(1);  /* trace: entering main */
 
     /* initialize counter */
     poll$counter = 0;
@@ -452,29 +449,19 @@ sftp$main: procedure public;
     /* start with short poll interval */
     poll$interval = 1;
 
-    call sftp$debug(2);  /* trace: entering loop */
-
     do while 1;
         /* increment poll counter */
         poll$counter = poll$counter + 1;
 
-        call sftp$debug(3);  /* trace: before delay */
-
         /* always delay at least 1 tick to yield CPU */
         call delay(1);
-
-        call sftp$debug(4);  /* trace: after delay */
 
         /* check for pending work */
         work$ready = sftp$poll$work;
 
-        call sftp$debug(5);  /* trace: after poll */
-
         if work$ready <> 0 then do;
             /* get the request into sftp$buf */
             call sftp$get$request;
-
-            call sftp$debug(10);  /* trace: after sftp$get$request */
 
             /* process it */
             call process$request;
