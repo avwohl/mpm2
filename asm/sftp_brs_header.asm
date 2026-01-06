@@ -16,14 +16,6 @@
 ; 2. Sets SP = INITSP (after relocation)
 ; 3. Does RET, which pops [SP] into PC
 ; So [INITSP] must contain the entry point address
-;
-; IMPORTANT: GENSYS BRS relocation bug workaround
-; GENSYS only relocates bytes that are 0x00. If an address has a non-zero
-; high byte (e.g., SFTPMAIN at offset 0x04DB), the high byte won't be
-; relocated. We work around this by computing the address at runtime:
-;   1. Load ENTRY_POINT address (which IS relocated, since its high byte is 0x00)
-;   2. Add constant offset (SFTPMAIN - ENTRY_POINT) to get actual SFTPMAIN address
-;   3. JP (HL) to jump there
 
         .Z80
         NAME    SFTP_BRS_HDR
@@ -44,50 +36,13 @@ BRSNAME:
         DB      'SFTP    '      ; Offset 4-11: 8-char name
 
 ; Offset 12: Entry code
-; Use runtime address calculation to work around GENSYS relocation bug
 ENTRY_POINT:
-        LD      SP, STACK_END           ; Set up proper stack
-        ; DEBUG: Signal that entry point was reached
-        LD      A, 6AH                  ; Debug function code
-        OUT     (0E0H), A               ; Dispatch to XIOS
-        ; Compute SFTPMAIN address at runtime:
-        ; ENTRY_POINT is at offset 0x000C, gets relocated correctly
-        ; SFTPMAIN is at offset 0x04EA, but JP target wouldn't be relocated by GENSYS
-        ; Instead: load ENTRY_POINT (relocated), add constant offset
-        ; NOTE: Using hardcoded offset because linker expression computes wrong value
-        ;       After adding rename code: SFTPMAIN=0x06E8, ENTRY_POINT=0x000C
-        ;       Offset = 0x06E8 - 0x000C = 0x06DC
-        LD      HL, ENTRY_POINT         ; This address IS relocated (high byte = 0x00)
-        ; DEBUG: Report HL value before adding offset
-        LD      B, H
-        LD      C, L
-        LD      A, 6CH                  ; Debug: report ENTRY_POINT value
-        OUT     (0E0H), A
-        LD      DE, 06ECH               ; Hardcoded: SFTPMAIN(06F8) - ENTRY_POINT(000C)
-        ADD     HL, DE                  ; HL = actual SFTPMAIN address
-        ; DEBUG: Report final HL value via XIOS (C=low, B=high)
-        LD      B, H
-        LD      C, L
-        LD      A, 6BH                  ; Debug: report computed address
-        OUT     (0E0H), A
-        ; DEBUG: Report byte at target address (save HL first!)
-        PUSH    HL                      ; Save jump target
-        LD      A, (HL)                 ; Read first byte at jump target
-        LD      C, A
-        LD      B, 0
-        LD      A, 6EH                  ; Debug: report target byte
-        OUT     (0E0H), A
-        POP     HL                      ; Restore jump target
-        ; DEBUG: Verify HL after POP
-        LD      B, H
-        LD      C, L
-        LD      A, 70H                  ; Debug: HL value before JP
-        OUT     (0E0H), A
-        JP      (HL)                    ; Jump to SFTPMAIN
+        LD      SP, STACK_END   ; Set up proper stack
+        JP      SFTPMAIN        ; Jump to main loop (gensys.py relocates correctly)
 
 ; Entry address for RET - pointed to by INITSP
 ENTRY_ADDR:
-        DW      ENTRY_POINT     ; RET pops this into PC (relocated correctly)
+        DW      ENTRY_POINT     ; RET pops this into PC
 
 ; Local stack for RSP (128 bytes)
 STACK_SPACE:

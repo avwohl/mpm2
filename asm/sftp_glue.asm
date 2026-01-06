@@ -10,7 +10,6 @@
         CSEG
 
         EXTRN   RSPBASE         ; RSP common module base address
-        EXTRN   ENTRY_POINT     ; Entry point (high byte=0, correctly relocated)
 
 ;----------------------------------------------------------------------
 ; DELAY - Custom delay implementation that bypasses ??AUTO issue
@@ -22,41 +21,13 @@
 ;----------------------------------------------------------------------
         PUBLIC  DELAY
 DELAY:
-        ; Save ticks in DE (HL = ticks on entry)
         ex      de, hl          ; DE = ticks
-        ; func = 0x8D (XDOS_DELAY = 141)
-        ld      c, 8DH          ; C = function number
-        ; DEBUG: report address of RSPBASE (the address we're reading from)
-        push    de              ; save ticks
-        push    bc              ; save func
-        ld      hl, RSPBASE     ; Get address of RSPBASE (this gets relocated)
-        ld      b, h
-        ld      c, l
-        ld      a, 73H          ; Debug: address of RSPBASE
-        out     (0E0H), a
-        pop     bc              ; restore func
-        pop     de              ; restore ticks
-        ; Call BDOS entry point (in common module)
+        ld      c, 8DH          ; C = XDOS_DELAY function (141)
         ld      hl, (RSPBASE)   ; HL = RSP common module base
-        ; DEBUG: report RSPBASE value
-        push    de              ; save ticks
-        push    bc              ; save func
-        ld      b, h
-        ld      c, l
-        ld      a, 71H          ; Debug: RSPBASE value
-        out     (0E0H), a
-        ; Load bdos$entry
         ld      a, (hl)         ; low byte of bdos$entry
         inc     hl
         ld      h, (hl)         ; high byte of bdos$entry
         ld      l, a            ; HL = bdos$entry
-        ; DEBUG: report bdos$entry
-        ld      b, h
-        ld      c, l
-        ld      a, 72H          ; Debug: bdos$entry value
-        out     (0E0H), a
-        pop     bc              ; restore func
-        pop     de              ; restore ticks
         jp      (hl)            ; jump to BDOS (C=func, DE=parm)
 
 ;----------------------------------------------------------------------
@@ -71,52 +42,22 @@ DELAY:
 ;----------------------------------------------------------------------
         PUBLIC  BDOS
 BDOS:
-        ; PL/M calling convention: caller pushes args, calls us, then pops to clean up
-        ; Stack on entry (after CALL): [ret addr] [parm] [func]
-        ; BDOS expects: C = function, DE = parameter
-        ;
+        ; Stack on entry: [ret addr] [parm] [func]
         ; Read args from stack without removing them
-        ; SP+0,1 = return address
-        ; SP+2,3 = parm (last pushed)
-        ; SP+4,5 = func (first pushed)
         ld      hl, 2
         add     hl, sp
         ld      e, (hl)         ; parm low
         inc     hl
         ld      d, (hl)         ; parm high -> DE = parm
         inc     hl
-        ld      c, (hl)         ; func low -> C = function number
-        ; DEBUG: print func and parm
-        push    bc              ; save func in C
-        push    de              ; save parm
-        ld      b, 0            ; BC = func
-        ld      a, 7EH          ; Debug: BDOS func
-        out     (0E0H), a
-        pop     bc              ; BC = parm
-        ld      a, 7FH          ; Debug: BDOS parm
-        out     (0E0H), a
-        pop     bc              ; restore func in C
+        ld      c, (hl)         ; func -> C = function number
         ; Get bdos$entry address from RSP common module
-        push    de              ; save parm (DE)
+        push    de              ; save parm
         ld      hl, (RSPBASE)   ; HL = RSP common module base
-        ; DEBUG: print RSPBASE value
-        push    bc
-        ld      b, h
-        ld      c, l
-        ld      a, 79H          ; Debug: RSPBASE
-        out     (0E0H), a
-        pop     bc
         ld      a, (hl)         ; get low byte of bdos$entry
         inc     hl
         ld      h, (hl)         ; get high byte of bdos$entry
         ld      l, a            ; HL = bdos$entry
-        ; DEBUG: print bdos$entry value
-        push    bc
-        ld      b, h
-        ld      c, l
-        ld      a, 7AH          ; Debug: bdos$entry
-        out     (0E0H), a
-        pop     bc
         pop     de              ; restore parm
         ; Re-read function number since we clobbered C
         push    hl              ; save bdos$entry
@@ -124,8 +65,7 @@ BDOS:
         add     hl, sp
         ld      c, (hl)         ; C = function number
         pop     hl              ; HL = bdos$entry
-        ; Call through bdos$entry
-        jp      (hl)            ; jump to bdos$entry (C=func, DE=parm, returns to our caller)
+        jp      (hl)            ; jump to bdos$entry (returns to our caller)
 
 ;----------------------------------------------------------------------
 ; SFTPPOLLWORK - Poll XIOS for pending SFTP work
@@ -140,61 +80,20 @@ SFTPPOLLWORK:
         ret
 
 ;----------------------------------------------------------------------
-; GETSFTPBUFADDR - Return address of SFTP buffer in bank 0
-; The buffer is local to this module (not in common memory)
-; Returns: BC = SFTPBUF address, HL = same
-;
-; IMPORTANT: Uses runtime address calculation to work around GENSYS bug.
-; GENSYS only relocates bytes that are 0x00. SFTPBUF is at 0x0AE6 which
-; has non-zero high byte (0x0A), so LD HL,SFTPBUF won't be relocated.
-; Instead: load ENTRY_POINT (correctly relocated) and add constant offset.
-;----------------------------------------------------------------------
-GETSFTPBUFADDR:
-        ld      hl, ENTRY_POINT         ; This IS relocated (high byte = 0x00)
-        ld      de, 0ADEH               ; Offset: SFTPBUF(0AEA) - ENTRY_POINT(000C)
-        add     hl, de                  ; HL = actual SFTPBUF address
-        ld      b, h                    ; BC = SFTPBUF address
-        ld      c, l
-        ret
-
-;----------------------------------------------------------------------
 ; GETBUFBYTE - Get byte from SFTPBUF at offset
 ; Entry: Stack has offset (word) - caller will clean up
 ; Exit:  A = byte value
 ;----------------------------------------------------------------------
         PUBLIC  GETBUFBYTE
 GETBUFBYTE:
-        ; Stack on entry: [ret addr][offset]
-        ; Read offset from stack without removing it (caller cleans up)
         ld      hl, 2
         add     hl, sp          ; HL points to offset
         ld      e, (hl)         ; E = offset low
         inc     hl
-        ld      d, (hl)         ; D = offset high (should be 0)
-        push    de              ; save offset (GETSFTPBUFADDR clobbers DE!)
-        call    GETSFTPBUFADDR  ; HL = buffer base
-        ; DEBUG: report buffer base address
-        ld      b, h
-        ld      c, l
-        ld      a, 80H          ; Debug: GETBUFBYTE buffer addr
-        out     (0E0H), a
-        pop     de              ; restore offset
+        ld      d, (hl)         ; D = offset high
+        ld      hl, SFTPBUF     ; HL = buffer base (gensys.py relocates correctly)
         add     hl, de          ; HL = buffer + offset
-        ; DEBUG: report final address
-        push    hl              ; save final address
-        ld      b, h
-        ld      c, l
-        ld      a, 81H          ; Debug: GETBUFBYTE final addr
-        out     (0E0H), a
-        pop     hl              ; restore final address
         ld      a, (hl)         ; A = byte value
-        ; DEBUG: report value read
-        push    af
-        ld      c, a            ; BC.low = value
-        ld      b, 0
-        ld      a, 82H          ; Debug: GETBUFBYTE value read
-        out     (0E0H), a
-        pop     af
         ret
 
 ;----------------------------------------------------------------------
@@ -206,8 +105,6 @@ GETBUFBYTE:
 ;----------------------------------------------------------------------
         PUBLIC  SETBUFBYTE
 SETBUFBYTE:
-        ; Stack on entry: [ret addr][value][offset]
-        ; Read args from stack without removing them
         ld      hl, 2
         add     hl, sp          ; HL points to value
         ld      c, (hl)         ; C = value low byte
@@ -215,15 +112,10 @@ SETBUFBYTE:
         inc     hl              ; HL points to offset
         ld      e, (hl)         ; E = offset low
         inc     hl
-        ld      d, (hl)         ; D = offset high (should be 0)
-        ld      a, c            ; A = value (save value before call)
-        push    de              ; save offset (GETSFTPBUFADDR clobbers DE!)
-        push    af              ; save value
-        call    GETSFTPBUFADDR  ; HL = buffer base (clobbers BC and DE)
-        pop     af              ; restore value
-        pop     de              ; restore offset
+        ld      d, (hl)         ; D = offset high
+        ld      hl, SFTPBUF     ; HL = buffer base (gensys.py relocates correctly)
         add     hl, de          ; HL = buffer + offset
-        ld      (hl), a         ; Store byte
+        ld      (hl), c         ; Store byte
         ret
 
 ;----------------------------------------------------------------------
@@ -233,39 +125,10 @@ SETBUFBYTE:
 ;----------------------------------------------------------------------
         PUBLIC  SFTPGETREQUEST
 SFTPGETREQUEST:
-        ; DEBUG: trace on entry
-        ld      c, 20           ; trace code 20 = entering SFTPGETREQUEST
-        ld      a, 6DH          ; SFTP_DEBUG function
-        out     (0E0H), a
-        call    GETSFTPBUFADDR  ; BC = SFTPBUF address
+        ld      bc, SFTPBUF     ; BC = SFTPBUF address (gensys.py relocates)
         ld      a, 63H          ; SFTP_GET function code
         out     (0E0H), a       ; Dispatch to XIOS
         in      a, (0E0H)       ; Get result
-        ; DEBUG: dump SP value
-        push    af              ; save result
-        push    hl
-        ld      hl, 0
-        add     hl, sp          ; HL = SP
-        ld      b, h
-        ld      c, l
-        ld      a, 77H          ; Debug: dump SP
-        out     (0E0H), a
-        ; Also dump return address (at SP+4 now after 2 pushes)
-        ld      hl, 4
-        add     hl, sp
-        ld      e, (hl)
-        inc     hl
-        ld      d, (hl)         ; DE = return address
-        ld      b, d
-        ld      c, e
-        ld      a, 78H          ; Debug: dump return addr
-        out     (0E0H), a
-        pop     hl
-        ; trace code 11 = before ret
-        ld      c, 11
-        ld      a, 6DH          ; SFTP_DEBUG function
-        out     (0E0H), a
-        pop     af              ; restore result
         ret
 
 ;----------------------------------------------------------------------
@@ -275,7 +138,7 @@ SFTPGETREQUEST:
 ;----------------------------------------------------------------------
         PUBLIC  SFTPSENDREPLY
 SFTPSENDREPLY:
-        call    GETSFTPBUFADDR  ; BC = SFTPBUF address
+        ld      bc, SFTPBUF     ; BC = SFTPBUF address (gensys.py relocates)
         ld      a, 66H          ; SFTP_PUT function code
         out     (0E0H), a       ; Dispatch to XIOS
         ret
@@ -298,8 +161,6 @@ SFTPHELLO:
 ;----------------------------------------------------------------------
         PUBLIC  SFTPDEBUG
 SFTPDEBUG:
-        ; Stack on entry: [ret addr][trace code]
-        ; Read trace code from stack without removing it
         ld      hl, 2
         add     hl, sp          ; HL points to trace code
         ld      c, (hl)         ; C = trace code
@@ -325,7 +186,7 @@ COPYFCBNAME:
         inc     hl
         ld      d, (hl)         ; DE = FCB address
         ; Get SFTPBUF address
-        call    GETSFTPBUFADDR  ; HL = SFTPBUF address
+        ld      hl, SFTPBUF     ; HL = buffer base (gensys.py relocates)
         ; Store drive (buf[1] + 1) -> fcb[0]
         inc     hl              ; HL = &buf[1] (drive)
         ld      a, (hl)
@@ -355,16 +216,13 @@ CLRFCB: ld      (de), a
 ; SFTP Buffer - Local to bank 0 BRS module
 ; This is where SFTP requests/replies are exchanged with C++
 ; The C++ XIOS handler accesses this in bank 0 memory
-; NOTE: Must use DB/DW to emit actual bytes (DS doesn't emit in PRL format)
+; NOTE: Must use DW to emit actual bytes (DS doesn't emit in PRL format)
 ;----------------------------------------------------------------------
         PUBLIC  SFTPBUF
 SFTPBUF:
-        ; 2048-byte buffer for SFTP data (must use DW to emit bytes)
-        ; Allows batching: ~60 dir entries (32 bytes each) or 16x 128-byte records
+        ; 2048-byte buffer for SFTP data
         REPT    1024
         DW      0
         ENDM
-
-; Note: INITSP_STACK has been moved to sftp_brs_header.asm
 
         END
