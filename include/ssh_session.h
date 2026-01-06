@@ -128,6 +128,10 @@ private:
     std::map<void*, std::unique_ptr<OpenFile>> open_files_;
 
     uint32_t next_handle_id_ = 1;
+
+    // Re-entrancy guard for blocking SFTP operations
+    // When true, poll_sftp() returns immediately without processing new messages
+    bool blocking_op_ = false;
 };
 
 // SSH server - accepts connections (non-blocking)

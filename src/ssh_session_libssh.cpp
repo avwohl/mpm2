@@ -28,8 +28,9 @@
 #include <sys/select.h>
 
 // Debug output control - set to true to enable verbose debug output
-static constexpr bool DEBUG_SSH = false;
-static constexpr bool DEBUG_SFTP = false;
+static constexpr bool DEBUG_SSH = true;
+static constexpr bool DEBUG_SFTP = true;
+
 
 // Set fd to non-blocking at OS level
 static bool set_nonblocking(int fd) {
@@ -251,6 +252,7 @@ void SSHSession::setup_sftp() {
     // IMPORTANT: sftp_server_init() doesn't work in non-blocking mode.
     // Temporarily switch to blocking mode for initialization, then switch back.
     // See: https://gitlab.com/libssh/libssh-mirror/-/issues/58
+    // This briefly blocks the main loop (~100ms for version exchange).
     ssh_set_blocking(session_, 1);
 
     // Initialize SFTP protocol (exchanges version info with client)
@@ -284,10 +286,11 @@ SSHSession::~SSHSession() {
         }
     }
 
-    // Clean up SFTP session
-    if (sftp_) {
-        sftp_free(sftp_);
-    }
+    // Don't call sftp_free() - it sends EOF which can cause "closed by remote host"
+    // Let ssh_free() handle cleanup
+    // if (sftp_) {
+    //     sftp_free(sftp_);
+    // }
 
     if (event_) {
         if (session_ && kex_done_) {
@@ -295,12 +298,9 @@ SSHSession::~SSHSession() {
         }
         ssh_event_free(event_);
     }
-    if (channel_) {
-        ssh_channel_free(channel_);
-    }
+    // Don't explicitly free channel - ssh_free() will handle it
+    // Calling ssh_channel_free() separately can cause "closed by remote host"
     if (session_) {
-        // Don't call ssh_disconnect() - let connection close naturally
-        // to avoid "Connection closed by remote host" message
         ssh_free(session_);
     }
 }
@@ -323,7 +323,7 @@ bool SSHSession::poll() {
         return state_ != SSHState::CLOSED;
     }
 
-    if (state_ == SSHState::READY) {
+    if (state_ == SSHState::READY || state_ == SSHState::DRAINING) {
         return poll_io();
     } else {
         return poll_handshake();
@@ -334,7 +334,7 @@ bool SSHSession::poll_handshake() {
     switch (state_) {
         case SSHState::KEY_EXCHANGE: {
             int rc = ssh_handle_key_exchange(session_);
-            if (DEBUG_SSH) std::cerr << "[SSH] KEY_EXCHANGE: ssh_handle_key_exchange returned " << rc << "\n";
+            // Only log on completion or error, not on SSH_AGAIN (-2) which is normal for non-blocking
             if (rc == SSH_OK) {
                 if (DEBUG_SSH) std::cerr << "[SSH] KEY_EXCHANGE completed successfully\n";
                 kex_done_ = true;
@@ -492,6 +492,12 @@ bool SSHSession::poll_sftp() {
         return false;
     }
 
+    // Re-entrancy guard: if we're in a blocking operation, don't process new messages
+    // This happens when wait_for_reply() -> z80_tick_() -> ssh_server.poll() -> poll_sftp()
+    if (blocking_op_) {
+        return true;  // Still active, just can't process new messages right now
+    }
+
     // Check if channel is still open
     // Note: Only check is_closed(), not is_eof() - EOF doesn't end SFTP sessions
     if (ssh_channel_is_closed(channel_)) {
@@ -603,34 +609,37 @@ bool SSHSession::poll_sftp() {
         return true;
     }
 
-    // If draining, just wait for channel to close
-    if (state_ == SSHState::DRAINING) {
-        if (ssh_channel_is_closed(channel_)) {
-            if (DEBUG_SFTP) std::cerr << "[SFTP] Channel closed after drain\n";
-            state_ = SSHState::CLOSED;
-            return false;
-        }
-        return true;
+    // Check channel state BEFORE calling sftp_get_client_message
+    // which can block/hang if the channel is in a bad state
+    if (ssh_channel_is_closed(channel_)) {
+        if (DEBUG_SFTP) std::cerr << "[SFTP] Channel closed\n";
+        state_ = SSHState::CLOSED;
+        return false;
     }
 
     // Try to get an SFTP client message (non-blocking)
     sftp_client_message msg = sftp_get_client_message(sftp_);
     if (!msg) {
-        // No message available - check if client has disconnected
-        if (ssh_channel_is_closed(channel_)) {
-            if (DEBUG_SFTP) std::cerr << "[SFTP] Channel closed, ending session\n";
+        // No message - check if client has disconnected
+        if (ssh_channel_is_eof(channel_)) {
+            if (DEBUG_SFTP) std::cerr << "[SFTP] No more messages, EOF detected\n";
+            // Just mark as closed - sftp_free() in destructor will handle EOF/cleanup
             state_ = SSHState::CLOSED;
             return false;
         }
-        // Check for EOF - client is done, close gracefully
-        if (ssh_channel_is_eof(channel_)) {
-            if (DEBUG_SFTP) std::cerr << "[SFTP] Channel EOF, closing channel\n";
-            ssh_channel_send_eof(channel_);
-            ssh_channel_close(channel_);
-            state_ = SSHState::DRAINING;
-        }
+        // No message available
         return true;
     }
+
+    // RAII guard for blocking operations - ensures blocking_op_ is reset on all exit paths
+    struct BlockingGuard {
+        bool& flag;
+        bool active = false;
+        void set() { flag = true; active = true; }
+        ~BlockingGuard() { if (active) flag = false; }
+        BlockingGuard(bool& f) : flag(f) {}
+    };
+    BlockingGuard guard(blocking_op_);
 
     // Get message type and filename
     uint8_t type = sftp_client_message_get_type(msg);
@@ -842,6 +851,9 @@ bool SSHSession::poll_sftp() {
         }
 
         case SSH_FXP_CLOSE: {
+            // May have blocking wait_for_reply() calls when flushing write data
+            guard.set();
+
             ssh_string handle_str = msg->handle;
             if (handle_str && ssh_string_len(handle_str) == sizeof(void*)) {
                 void* handle;
@@ -919,6 +931,9 @@ bool SSHSession::poll_sftp() {
         }
 
         case SSH_FXP_OPEN: {
+            // This operation has blocking wait_for_reply() calls
+            guard.set();
+
             std::string path = filename ? filename : "";
             SftpPath parsed = parse_sftp_path(path);
 
@@ -1225,6 +1240,9 @@ bool SSHSession::poll_sftp() {
         }
 
         case SSH_FXP_REMOVE: {
+            // This operation has blocking wait_for_reply() call
+            guard.set();
+
             std::string path = filename ? filename : "";
             SftpPath parsed = parse_sftp_path(path);
 
@@ -1258,6 +1276,9 @@ bool SSHSession::poll_sftp() {
         }
 
         case SSH_FXP_RENAME: {
+            // This operation has blocking wait_for_reply() call
+            guard.set();
+
             std::string old_path = filename ? filename : "";
             const char* new_path_cstr = sftp_client_message_get_data(msg);
             std::string new_path = new_path_cstr ? new_path_cstr : "";
@@ -1303,6 +1324,9 @@ bool SSHSession::poll_sftp() {
         }
 
         case SSH_FXP_EXTENDED: {
+            // This operation may have blocking wait_for_reply() call (posix-rename)
+            guard.set();
+
             // Handle extended operations (e.g., posix-rename@openssh.com)
             const char* submessage = sftp_client_message_get_submessage(msg);
             std::string ext_name = submessage ? submessage : "";

@@ -315,7 +315,9 @@ int main(int argc, char* argv[]) {
 
         // Set up Z80 tick callback for SFTP bridge
         // This allows wait_for_reply() to run Z80 cycles while waiting
-        SftpBridge::instance().set_z80_tick_callback([&z80]() {
+        // Also poll SSH server so other sessions can be serviced during SFTP ops
+        SftpBridge::instance().set_z80_tick_callback([&z80, &ssh_server]() {
+            ssh_server.poll();  // Service other SSH sessions
             z80.run_polled();
         });
     }
