@@ -663,31 +663,35 @@ void XIOS::do_sftp_get() {
     }
 
     // Debug: show request being sent
-    std::cerr << "[XIOS] sftp_get: buf_addr=0x" << std::hex << buf_addr << std::dec
-              << " type=" << (int)buf[0]
-              << " drive=" << (int)buf[1]
-              << " user=" << (int)buf[2]
-              << " flags=" << (int)buf[3]
-              << " filename=";
-    for (int i = 4; i < 12; i++) std::cerr << (char)(buf[i] >= 32 ? buf[i] : '.');
-    std::cerr << ".";
-    for (int i = 12; i < 15; i++) std::cerr << (char)(buf[i] >= 32 ? buf[i] : '.');
-    std::cerr << " hex[4..14]=";
-    for (int i = 4; i < 15; i++) std::cerr << std::hex << (int)buf[i] << " ";
-    std::cerr << std::dec << "\n";
+    if (DEBUG_XIOS) {
+        std::cerr << "[XIOS] sftp_get: buf_addr=0x" << std::hex << buf_addr << std::dec
+                  << " type=" << (int)buf[0]
+                  << " drive=" << (int)buf[1]
+                  << " user=" << (int)buf[2]
+                  << " flags=" << (int)buf[3]
+                  << " filename=";
+        for (int i = 4; i < 12; i++) std::cerr << (char)(buf[i] >= 32 ? buf[i] : '.');
+        std::cerr << ".";
+        for (int i = 12; i < 15; i++) std::cerr << (char)(buf[i] >= 32 ? buf[i] : '.');
+        std::cerr << " hex[4..14]=";
+        for (int i = 4; i < 15; i++) std::cerr << std::hex << (int)buf[i] << " ";
+        std::cerr << std::dec << "\n";
+    }
 
     // Write to Z80 bank 0 memory
     for (size_t i = 0; i < SFTP_BUF_SIZE; i++) {
         mem_->write_bank(0, buf_addr + i, buf[i]);
     }
 
-    // Verify data was written correctly
-    std::cerr << "[XIOS] verify: ";
-    for (int i = 4; i < 15; i++) {
-        uint8_t read_back = mem_->read_bank(0, buf_addr + i);
-        std::cerr << std::hex << (int)read_back << " ";
+    // Verify data was written correctly (debug only)
+    if (DEBUG_XIOS) {
+        std::cerr << "[XIOS] verify: ";
+        for (int i = 4; i < 15; i++) {
+            uint8_t read_back = mem_->read_bank(0, buf_addr + i);
+            std::cerr << std::hex << (int)read_back << " ";
+        }
+        std::cerr << std::dec << "\n";
     }
-    std::cerr << std::dec << "\n";
 
     cpu_->regs.AF.set_high(0x00);  // Success
 }
@@ -703,10 +707,12 @@ void XIOS::do_sftp_put() {
         buf[i] = mem_->read_bank(0, buf_addr + i);
     }
 
-    std::cerr << "[XIOS] sftp_put: buf_addr=0x" << std::hex << buf_addr
-              << " raw[0..5]=" << std::dec << (int)buf[0] << "," << (int)buf[1]
-              << "," << (int)buf[2] << "," << (int)buf[3]
-              << "," << (int)buf[4] << "," << (int)buf[5] << "\n";
+    if (DEBUG_XIOS) {
+        std::cerr << "[XIOS] sftp_put: buf_addr=0x" << std::hex << buf_addr
+                  << " raw[0..5]=" << std::dec << (int)buf[0] << "," << (int)buf[1]
+                  << "," << (int)buf[2] << "," << (int)buf[3]
+                  << "," << (int)buf[4] << "," << (int)buf[5] << "\n";
+    }
 
     SftpBridge::instance().set_reply(buf, sizeof(buf));
     cpu_->regs.AF.set_high(0x00);  // Success
@@ -721,21 +727,21 @@ void XIOS::do_sftp_hello() {
 
 void XIOS::do_sftp_entry() {
     // BRS entry point reached (debug)
-    std::cerr << "[XIOS] SFTP BRS entry point reached\n";
+    if (DEBUG_XIOS) std::cerr << "[XIOS] SFTP BRS entry point reached\n";
     cpu_->regs.AF.set_high(0x00);
 }
 
 void XIOS::do_sftp_jmpaddr() {
     // Debug: report computed jump address (BC = address)
     uint16_t addr = cpu_->regs.BC.get_pair16();
-    std::cerr << "[XIOS] SFTP computed jump addr: 0x" << std::hex << addr << std::dec << "\n";
+    if (DEBUG_XIOS) std::cerr << "[XIOS] SFTP computed jump addr: 0x" << std::hex << addr << std::dec << "\n";
     cpu_->regs.AF.set_high(0x00);
 }
 
 void XIOS::do_sftp_epval() {
     // Debug: report ENTRY_POINT value (BC = address)
     uint16_t addr = cpu_->regs.BC.get_pair16();
-    std::cerr << "[XIOS] SFTP ENTRY_POINT value: 0x" << std::hex << addr << std::dec << "\n";
+    if (DEBUG_XIOS) std::cerr << "[XIOS] SFTP ENTRY_POINT value: 0x" << std::hex << addr << std::dec << "\n";
     cpu_->regs.AF.set_high(0x00);
 }
 
@@ -743,7 +749,7 @@ void XIOS::do_sftp_debug() {
     // Generic debug trace: C = trace code (identifies location in RSP)
     uint8_t code = cpu_->regs.BC.get_low();
     uint16_t pc = cpu_->regs.PC.get_pair16();
-    std::cerr << "[RSP] Trace #" << (int)code << " at PC=0x" << std::hex << pc << std::dec << "\n";
+    if (DEBUG_XIOS) std::cerr << "[RSP] Trace #" << (int)code << " at PC=0x" << std::hex << pc << std::dec << "\n";
     cpu_->regs.AF.set_high(0x00);
 }
 

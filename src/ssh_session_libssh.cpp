@@ -29,6 +29,7 @@
 
 // Debug output control - set to true to enable verbose debug output
 static constexpr bool DEBUG_SSH = false;
+static constexpr bool DEBUG_SFTP = false;
 
 // Set fd to non-blocking at OS level
 static bool set_nonblocking(int fd) {
@@ -230,22 +231,22 @@ void SSHSession::setup_console() {
 
 void SSHSession::setup_sftp() {
     if (!channel_) {
-        std::cerr << "[SFTP] No channel for SFTP\n";
+        if (DEBUG_SFTP) std::cerr << "[SFTP] No channel for SFTP\n";
         state_ = SSHState::CLOSED;
         return;
     }
 
-    std::cerr << "[SFTP] Creating SFTP server session...\n";
+    if (DEBUG_SFTP) std::cerr << "[SFTP] Creating SFTP server session...\n";
 
     // Create SFTP server session on this channel
     sftp_ = sftp_server_new(session_, channel_);
     if (!sftp_) {
-        std::cerr << "[SFTP] Failed to create SFTP session: " << ssh_get_error(session_) << "\n";
+        if (DEBUG_SFTP) std::cerr << "[SFTP] Failed to create SFTP session: " << ssh_get_error(session_) << "\n";
         state_ = SSHState::CLOSED;
         return;
     }
 
-    std::cerr << "[SFTP] SFTP session created, initializing protocol...\n";
+    if (DEBUG_SFTP) std::cerr << "[SFTP] SFTP session created, initializing protocol...\n";
 
     // IMPORTANT: sftp_server_init() doesn't work in non-blocking mode.
     // Temporarily switch to blocking mode for initialization, then switch back.
@@ -255,13 +256,13 @@ void SSHSession::setup_sftp() {
     // Initialize SFTP protocol (exchanges version info with client)
     int rc = sftp_server_init(sftp_);
 
-    std::cerr << "[SFTP] sftp_server_init returned: " << rc << "\n";
+    if (DEBUG_SFTP) std::cerr << "[SFTP] sftp_server_init returned: " << rc << "\n";
 
     // Switch back to non-blocking mode
     ssh_set_blocking(session_, 0);
 
     if (rc != SSH_OK) {
-        std::cerr << "[SFTP] Failed to initialize SFTP: " << ssh_get_error(session_) << "\n";
+        if (DEBUG_SFTP) std::cerr << "[SFTP] Failed to initialize SFTP: " << ssh_get_error(session_) << "\n";
         sftp_free(sftp_);
         sftp_ = nullptr;
         state_ = SSHState::CLOSED;
@@ -270,7 +271,7 @@ void SSHSession::setup_sftp() {
 
     is_sftp_ = true;
     state_ = SSHState::READY;
-    std::cerr << "[SFTP] SFTP session established\n";
+    if (DEBUG_SFTP) std::cerr << "[SFTP] SFTP session established\n";
 }
 
 
@@ -486,7 +487,7 @@ bool SSHSession::poll_io() {
 
 bool SSHSession::poll_sftp() {
     if (!sftp_) {
-        std::cerr << "[SFTP] No SFTP session\n";
+        if (DEBUG_SFTP) std::cerr << "[SFTP] No SFTP session\n";
         state_ = SSHState::CLOSED;
         return false;
     }
@@ -494,7 +495,7 @@ bool SSHSession::poll_sftp() {
     // Check if channel is still open
     // Note: Only check is_closed(), not is_eof() - EOF doesn't end SFTP sessions
     if (ssh_channel_is_closed(channel_)) {
-        std::cerr << "[SFTP] Channel closed\n";
+        if (DEBUG_SFTP) std::cerr << "[SFTP] Channel closed\n";
         state_ = SSHState::CLOSED;
         return false;
     }
@@ -551,7 +552,7 @@ bool SSHSession::poll_sftp() {
                         offset += 32;
                     }
 
-                    std::cerr << "[SFTP] OPENDIR batch: " << (offset / 32)
+                    if (DEBUG_SFTP) std::cerr << "[SFTP] OPENDIR batch: " << (offset / 32)
                               << " entries, more=" << more_data << "\n";
 
                     if (more_data) {
@@ -570,7 +571,7 @@ bool SSHSession::poll_sftp() {
 
                 // Enumeration complete (no more data or not found)
                 dir->enumeration_complete = true;
-                std::cerr << "[SFTP] OPENDIR complete: " << dir->entries.size() << " entries\n";
+                if (DEBUG_SFTP) std::cerr << "[SFTP] OPENDIR complete: " << dir->entries.size() << " entries\n";
 
                 // Create handle data for response
                 ssh_string handle_str = ssh_string_new(sizeof(void*));
@@ -605,7 +606,12 @@ bool SSHSession::poll_sftp() {
     // Try to get an SFTP client message (non-blocking)
     sftp_client_message msg = sftp_get_client_message(sftp_);
     if (!msg) {
-        // No message available
+        // No message available - check if client has disconnected
+        if (ssh_channel_is_eof(channel_)) {
+            if (DEBUG_SFTP) std::cerr << "[SFTP] Channel EOF, closing session\n";
+            state_ = SSHState::CLOSED;
+            return false;
+        }
         return true;
     }
 
@@ -613,11 +619,13 @@ bool SSHSession::poll_sftp() {
     uint8_t type = sftp_client_message_get_type(msg);
     const char* filename = sftp_client_message_get_filename(msg);
 
-    std::cerr << "[SFTP] Message type " << (int)type;
-    if (filename) {
-        std::cerr << " path: " << filename;
+    if (DEBUG_SFTP) {
+        std::cerr << "[SFTP] Message type " << (int)type;
+        if (filename) {
+            std::cerr << " path: " << filename;
+        }
+        std::cerr << "\n";
     }
-    std::cerr << "\n";
 
     int rc = 0;
     switch (type) {
@@ -634,7 +642,7 @@ bool SSHSession::poll_sftp() {
             attrs.size = 0;
             attrs.flags = SSH_FILEXFER_ATTR_PERMISSIONS;
 
-            std::cerr << "[SFTP] REALPATH: " << path << " -> " << resolved << "\n";
+            if (DEBUG_SFTP) std::cerr << "[SFTP] REALPATH: " << path << " -> " << resolved << "\n";
             rc = sftp_reply_name(msg, resolved.c_str(), &attrs);
             break;
         }
@@ -661,7 +669,7 @@ bool SSHSession::poll_sftp() {
                 rc = sftp_reply_attr(msg, &attrs);
             } else if (parsed.is_file()) {
                 // Check if file exists via RSP bridge (async)
-                std::cerr << "[SFTP] STAT: looking for file '" << parsed.filename
+                if (DEBUG_SFTP) std::cerr << "[SFTP] STAT: looking for file '" << parsed.filename
                           << "' drive=" << parsed.drive << " user=" << parsed.user << std::endl;
 
                 SftpRequest search_req;
@@ -686,7 +694,7 @@ bool SSHSession::poll_sftp() {
             std::string path = filename ? filename : "/";
             SftpPath parsed = parse_sftp_path(path);
 
-            std::cerr << "[SFTP] OPENDIR: drive=" << parsed.drive
+            if (DEBUG_SFTP) std::cerr << "[SFTP] OPENDIR: drive=" << parsed.drive
                       << " user=" << parsed.user << "\n";
 
             // Create directory listing
@@ -734,7 +742,7 @@ bool SSHSession::poll_sftp() {
             }
 
             // Root directory - complete immediately
-            std::cerr << "[SFTP] OPENDIR: " << dir->entries.size() << " entries\n";
+            if (DEBUG_SFTP) std::cerr << "[SFTP] OPENDIR: " << dir->entries.size() << " entries\n";
 
             // Create handle (use pointer as handle)
             void* handle = reinterpret_cast<void*>(next_handle_id_++);
@@ -801,7 +809,7 @@ bool SSHSession::poll_sftp() {
 
                 rc = sftp_reply_names_add(msg, lower_name.c_str(), longname, &attrs);
                 if (rc != 0) {
-                    std::cerr << "[SFTP] sftp_reply_names_add failed: " << rc << "\n";
+                    if (DEBUG_SFTP) std::cerr << "[SFTP] sftp_reply_names_add failed: " << rc << "\n";
                     break;
                 }
                 count++;
@@ -812,7 +820,7 @@ bool SSHSession::poll_sftp() {
             } else {
                 rc = sftp_reply_status(msg, SSH_FX_EOF, "End of directory");
             }
-            std::cerr << "[SFTP] READDIR: returned " << count << " entries\n";
+            if (DEBUG_SFTP) std::cerr << "[SFTP] READDIR: returned " << count << " entries\n";
             break;
         }
 
@@ -835,7 +843,7 @@ bool SSHSession::poll_sftp() {
 
                     // If file was opened for writing, flush data to disk
                     if (file->is_write && !file->cached_data.empty()) {
-                        std::cerr << "[SFTP] CLOSE: writing " << file->cached_data.size()
+                        if (DEBUG_SFTP) std::cerr << "[SFTP] CLOSE: writing " << file->cached_data.size()
                                   << " bytes to disk\n";
 
                         // Write data in chunks (max 1920 bytes per RSP request)
@@ -861,11 +869,11 @@ bool SSHSession::poll_sftp() {
                             auto write_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
 
                             if (!write_reply || write_reply->status != SftpReplyStatus::OK) {
-                                std::cerr << "[SFTP] CLOSE: write error at offset " << offset << "\n";
+                                if (DEBUG_SFTP) std::cerr << "[SFTP] CLOSE: write error at offset " << offset << "\n";
                                 write_error = true;
                             } else {
                                 offset += chunk_len;
-                                std::cerr << "[SFTP] CLOSE: wrote " << chunk_len
+                                if (DEBUG_SFTP) std::cerr << "[SFTP] CLOSE: wrote " << chunk_len
                                           << " bytes, total=" << offset << "\n";
                             }
                         }
@@ -904,7 +912,7 @@ bool SSHSession::poll_sftp() {
             bool want_creat = (flags & SSH_FXF_CREAT) != 0;
             bool want_trunc = (flags & SSH_FXF_TRUNC) != 0;
 
-            std::cerr << "[SFTP] OPEN: " << path << " drive=" << parsed.drive
+            if (DEBUG_SFTP) std::cerr << "[SFTP] OPEN: " << path << " drive=" << parsed.drive
                       << " user=" << parsed.user << " file=" << parsed.filename
                       << " flags=" << flags << " (R=" << want_read << " W=" << want_write
                       << " C=" << want_creat << " T=" << want_trunc << ")\n";
@@ -934,7 +942,7 @@ bool SSHSession::poll_sftp() {
 
                 // If file exists and we want to truncate, delete it first
                 if (file_exists && want_trunc) {
-                    std::cerr << "[SFTP] OPEN: deleting existing file for truncate\n";
+                    if (DEBUG_SFTP) std::cerr << "[SFTP] OPEN: deleting existing file for truncate\n";
                     SftpRequest del_req;
                     del_req.type = SftpRequestType::FILE_DELETE;
                     del_req.drive = parsed.drive;
@@ -944,14 +952,14 @@ bool SSHSession::poll_sftp() {
                     req_id = SftpBridge::instance().enqueue_request(del_req);
                     auto del_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
                     if (!del_reply || del_reply->status != SftpReplyStatus::OK) {
-                        std::cerr << "[SFTP] OPEN: failed to delete for truncate\n";
+                        if (DEBUG_SFTP) std::cerr << "[SFTP] OPEN: failed to delete for truncate\n";
                     }
                     file_exists = false;
                 }
 
                 // If file doesn't exist and we want to create, create it
                 if (!file_exists && want_creat) {
-                    std::cerr << "[SFTP] OPEN: creating new file\n";
+                    if (DEBUG_SFTP) std::cerr << "[SFTP] OPEN: creating new file\n";
                     SftpRequest create_req;
                     create_req.type = SftpRequestType::FILE_CREATE;
                     create_req.drive = parsed.drive;
@@ -962,7 +970,7 @@ bool SSHSession::poll_sftp() {
                     auto create_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
                     if (!create_reply || create_reply->status != SftpReplyStatus::OK) {
                         SftpReplyStatus st = create_reply ? create_reply->status : SftpReplyStatus::ERROR_INVALID;
-                        std::cerr << "[SFTP] OPEN: create failed, status=" << (int)st << "\n";
+                        if (DEBUG_SFTP) std::cerr << "[SFTP] OPEN: create failed, status=" << (int)st << "\n";
                         if (st == SftpReplyStatus::ERROR_DISK_FULL) {
                             rc = sftp_reply_status(msg, SSH_FX_FAILURE, "Disk full");
                         } else {
@@ -989,7 +997,7 @@ bool SSHSession::poll_sftp() {
                 req_id = SftpBridge::instance().enqueue_request(open_req);
                 auto open_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
                 if (!open_reply || open_reply->status != SftpReplyStatus::OK) {
-                    std::cerr << "[SFTP] OPEN: file open failed for write\n";
+                    if (DEBUG_SFTP) std::cerr << "[SFTP] OPEN: file open failed for write\n";
                     rc = sftp_reply_status(msg, SSH_FX_FAILURE, "Cannot open file");
                     break;
                 }
@@ -1009,7 +1017,7 @@ bool SSHSession::poll_sftp() {
                 void* handle = reinterpret_cast<void*>(next_handle_id_++);
                 open_files_[handle] = std::move(file);
 
-                std::cerr << "[SFTP] OPEN: write mode, file ready\n";
+                if (DEBUG_SFTP) std::cerr << "[SFTP] OPEN: write mode, file ready\n";
 
                 ssh_string handle_str = ssh_string_new(sizeof(void*));
                 ssh_string_fill(handle_str, &handle, sizeof(void*));
@@ -1030,7 +1038,7 @@ bool SSHSession::poll_sftp() {
             auto open_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
 
             if (!open_reply || open_reply->status != SftpReplyStatus::OK) {
-                std::cerr << "[SFTP] OPEN: file not found via RSP\n";
+                if (DEBUG_SFTP) std::cerr << "[SFTP] OPEN: file not found via RSP\n";
                 rc = sftp_reply_status(msg, SSH_FX_NO_SUCH_FILE, "File not found");
                 break;
             }
@@ -1050,7 +1058,7 @@ bool SSHSession::poll_sftp() {
                 auto read_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
 
                 if (!read_reply) {
-                    std::cerr << "[SFTP] OPEN: read timeout\n";
+                    if (DEBUG_SFTP) std::cerr << "[SFTP] OPEN: read timeout\n";
                     read_error = true;
                     break;
                 }
@@ -1064,7 +1072,7 @@ bool SSHSession::poll_sftp() {
                 }
 
                 if (read_reply->status != SftpReplyStatus::OK) {
-                    std::cerr << "[SFTP] OPEN: read error status=" << (int)read_reply->status << "\n";
+                    if (DEBUG_SFTP) std::cerr << "[SFTP] OPEN: read error status=" << (int)read_reply->status << "\n";
                     read_error = true;
                     break;
                 }
@@ -1074,7 +1082,7 @@ bool SSHSession::poll_sftp() {
                                  read_reply->data.begin(),
                                  read_reply->data.end());
 
-                std::cerr << "[SFTP] OPEN: read " << read_reply->data.size()
+                if (DEBUG_SFTP) std::cerr << "[SFTP] OPEN: read " << read_reply->data.size()
                           << " bytes, total=" << file_data.size()
                           << ", more=" << more_data << "\n";
             }
@@ -1108,7 +1116,7 @@ bool SSHSession::poll_sftp() {
             void* handle = reinterpret_cast<void*>(next_handle_id_++);
             open_files_[handle] = std::move(file);
 
-            std::cerr << "[SFTP] OPEN: success, cached " << open_files_[handle]->size << " bytes\n";
+            if (DEBUG_SFTP) std::cerr << "[SFTP] OPEN: success, cached " << open_files_[handle]->size << " bytes\n";
 
             ssh_string handle_str = ssh_string_new(sizeof(void*));
             ssh_string_fill(handle_str, &handle, sizeof(void*));
@@ -1137,7 +1145,7 @@ bool SSHSession::poll_sftp() {
             uint64_t offset = msg->offset;
             uint32_t len = msg->len;
 
-            std::cerr << "[SFTP] READ: offset=" << offset << " len=" << len
+            if (DEBUG_SFTP) std::cerr << "[SFTP] READ: offset=" << offset << " len=" << len
                       << " cached_size=" << file->cached_data.size() << "\n";
 
             if (offset >= file->cached_data.size()) {
@@ -1149,7 +1157,7 @@ bool SSHSession::poll_sftp() {
             uint32_t available = file->cached_data.size() - offset;
             uint32_t to_read = std::min(len, available);
 
-            std::cerr << "[SFTP] READ: returning " << to_read << " bytes from cache\n";
+            if (DEBUG_SFTP) std::cerr << "[SFTP] READ: returning " << to_read << " bytes from cache\n";
             rc = sftp_reply_data(msg, file->cached_data.data() + offset, to_read);
             break;
         }
@@ -1186,7 +1194,7 @@ bool SSHSession::poll_sftp() {
             size_t data_len = ssh_string_len(data_str);
             const uint8_t* data_ptr = reinterpret_cast<const uint8_t*>(ssh_string_data(data_str));
 
-            std::cerr << "[SFTP] WRITE: offset=" << offset << " len=" << data_len << "\n";
+            if (DEBUG_SFTP) std::cerr << "[SFTP] WRITE: offset=" << offset << " len=" << data_len << "\n";
 
             // Expand cached_data if needed and write at offset
             if (offset + data_len > file->cached_data.size()) {
@@ -1203,7 +1211,7 @@ bool SSHSession::poll_sftp() {
             std::string path = filename ? filename : "";
             SftpPath parsed = parse_sftp_path(path);
 
-            std::cerr << "[SFTP] REMOVE: " << path << " drive=" << parsed.drive
+            if (DEBUG_SFTP) std::cerr << "[SFTP] REMOVE: " << path << " drive=" << parsed.drive
                       << " user=" << parsed.user << " file=" << parsed.filename << "\n";
 
             if (!parsed.is_file()) {
@@ -1222,12 +1230,12 @@ bool SSHSession::poll_sftp() {
             auto del_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
 
             if (!del_reply || del_reply->status != SftpReplyStatus::OK) {
-                std::cerr << "[SFTP] REMOVE: file not found\n";
+                if (DEBUG_SFTP) std::cerr << "[SFTP] REMOVE: file not found\n";
                 rc = sftp_reply_status(msg, SSH_FX_NO_SUCH_FILE, "File not found");
                 break;
             }
 
-            std::cerr << "[SFTP] REMOVE: success\n";
+            if (DEBUG_SFTP) std::cerr << "[SFTP] REMOVE: success\n";
             rc = sftp_reply_status(msg, SSH_FX_OK, "OK");
             break;
         }
@@ -1240,7 +1248,7 @@ bool SSHSession::poll_sftp() {
             SftpPath old_parsed = parse_sftp_path(old_path);
             SftpPath new_parsed = parse_sftp_path(new_path);
 
-            std::cerr << "[SFTP] RENAME: " << old_path << " -> " << new_path
+            if (DEBUG_SFTP) std::cerr << "[SFTP] RENAME: " << old_path << " -> " << new_path
                       << " (drive=" << old_parsed.drive << " user=" << old_parsed.user
                       << " old=" << old_parsed.filename << " new=" << new_parsed.filename << ")\n";
 
@@ -1267,12 +1275,12 @@ bool SSHSession::poll_sftp() {
             auto ren_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
 
             if (!ren_reply || ren_reply->status != SftpReplyStatus::OK) {
-                std::cerr << "[SFTP] RENAME: failed\n";
+                if (DEBUG_SFTP) std::cerr << "[SFTP] RENAME: failed\n";
                 rc = sftp_reply_status(msg, SSH_FX_NO_SUCH_FILE, "Rename failed");
                 break;
             }
 
-            std::cerr << "[SFTP] RENAME: success\n";
+            if (DEBUG_SFTP) std::cerr << "[SFTP] RENAME: success\n";
             rc = sftp_reply_status(msg, SSH_FX_OK, "OK");
             break;
         }
@@ -1281,7 +1289,7 @@ bool SSHSession::poll_sftp() {
             // Handle extended operations (e.g., posix-rename@openssh.com)
             const char* submessage = sftp_client_message_get_submessage(msg);
             std::string ext_name = submessage ? submessage : "";
-            std::cerr << "[SFTP] EXTENDED: " << ext_name << "\n";
+            if (DEBUG_SFTP) std::cerr << "[SFTP] EXTENDED: " << ext_name << "\n";
 
             if (ext_name == "posix-rename@openssh.com") {
                 // posix-rename: oldpath is filename, newpath is in data
@@ -1292,7 +1300,7 @@ bool SSHSession::poll_sftp() {
                 SftpPath old_parsed = parse_sftp_path(old_path);
                 SftpPath new_parsed = parse_sftp_path(new_path);
 
-                std::cerr << "[SFTP] POSIX-RENAME: " << old_path << " -> " << new_path
+                if (DEBUG_SFTP) std::cerr << "[SFTP] POSIX-RENAME: " << old_path << " -> " << new_path
                           << " (drive=" << old_parsed.drive << " user=" << old_parsed.user
                           << " old=" << old_parsed.filename << " new=" << new_parsed.filename << ")\n";
 
@@ -1319,28 +1327,28 @@ bool SSHSession::poll_sftp() {
                 auto ren_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
 
                 if (!ren_reply || ren_reply->status != SftpReplyStatus::OK) {
-                    std::cerr << "[SFTP] POSIX-RENAME: failed\n";
+                    if (DEBUG_SFTP) std::cerr << "[SFTP] POSIX-RENAME: failed\n";
                     rc = sftp_reply_status(msg, SSH_FX_NO_SUCH_FILE, "Rename failed");
                     break;
                 }
 
-                std::cerr << "[SFTP] POSIX-RENAME: success\n";
+                if (DEBUG_SFTP) std::cerr << "[SFTP] POSIX-RENAME: success\n";
                 rc = sftp_reply_status(msg, SSH_FX_OK, "OK");
             } else {
-                std::cerr << "[SFTP] Unknown extended operation: " << ext_name << "\n";
+                if (DEBUG_SFTP) std::cerr << "[SFTP] Unknown extended operation: " << ext_name << "\n";
                 rc = sftp_reply_status(msg, SSH_FX_OP_UNSUPPORTED, "Unknown extended operation");
             }
             break;
         }
 
         default:
-            std::cerr << "[SFTP] Unsupported operation: " << (int)type << "\n";
+            if (DEBUG_SFTP) std::cerr << "[SFTP] Unsupported operation: " << (int)type << "\n";
             rc = sftp_reply_status(msg, SSH_FX_OP_UNSUPPORTED, "Operation not supported");
             break;
     }
 
     if (rc != 0) {
-        std::cerr << "[SFTP] Reply failed with rc=" << rc << "\n";
+        if (DEBUG_SFTP) std::cerr << "[SFTP] Reply failed with rc=" << rc << "\n";
     }
 
     sftp_client_message_free(msg);
