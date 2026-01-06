@@ -571,9 +571,6 @@ void XIOS::do_systeminit() {
         std::cerr << "[XIOS] Copied page 0 vectors to " << (num_banks - 1) << " banks\n";
     }
 
-    // Initialize consoles
-    ConsoleManager::instance().init();
-
     // Enable timer interrupts
     tick_enabled_.store(true);
     systeminit_done_.store(true);
