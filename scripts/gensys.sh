@@ -2,13 +2,13 @@
 set -o errexit
 #set -o verbose
 #set -o xtrace
-# gensys.sh - Generate MP/M II system using GENSYS
+# gensys.sh - Generate MP/M II system using Python GENSYS
 # Part of MP/M II Emulator
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# This script automates the GENSYS process:
-# 1. Creates a BNKXIOS.SPR with the specified number of consoles
-# 2. Runs GENSYS under cpmemu with default settings
+# This script generates an MP/M II system:
+# 1. Copies SPR files to work directory
+# 2. Runs Python gensys.py with JSON configuration
 # 3. Patches MPMLDR.COM serial number to match (DRI tree only)
 # 4. Creates boot image and disk
 #
@@ -18,7 +18,7 @@ set -o errexit
 # Default configuration:
 # - 4 consoles
 # - Common base at C000 (48KB user memory per bank)
-# - 4 user memory banks (one per console)
+# - 7 user memory banks
 # - Top of memory at FF00
 
 set -e
@@ -29,7 +29,6 @@ BUILD_DIR="$PROJECT_DIR/build"
 ASM_DIR="$PROJECT_DIR/asm"
 DISKS_DIR="$PROJECT_DIR/disks"
 TOOLS_DIR="$PROJECT_DIR/tools"
-CPMEMU="${CPMEMU:-$HOME/src/cpmemu/src/cpmemu}"
 WORK_DIR="/tmp/gensys_work"
 CPM_DISK="${CPM_DISK:-$HOME/src/cpmemu/util/cpm_disk.py}"
 
@@ -68,19 +67,12 @@ fi
 # Set binary directory based on tree
 BIN_DIR="$PROJECT_DIR/bin/$TREE"
 
-echo "MP/M II System Generation"
-echo "========================="
+echo "MP/M II System Generation (Python GENSYS)"
+echo "=========================================="
 echo "Tree:     $TREE"
 echo "Consoles: $NMBCNS"
 echo "Binaries: $BIN_DIR"
 echo ""
-
-# Check prerequisites
-if [ ! -x "$CPMEMU" ]; then
-    echo "Error: cpmemu not found at $CPMEMU"
-    echo "Set CPMEMU environment variable to cpmemu path"
-    exit 1
-fi
 
 if [ ! -f "$CPM_DISK" ]; then
     echo "Error: cpm_disk.py not found at $CPM_DISK"
@@ -93,7 +85,7 @@ if [ ! -f "$DISKS_DIR/mpm2_hd1k.img" ]; then
     exit 1
 fi
 
-# Create clean work directory (remove old files that could interfere with GENSYS prompts)
+# Create clean work directory
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
@@ -111,11 +103,6 @@ for f in RESBDOS.SPR BNKBDOS.SPR XDOS.SPR BNKXDOS.SPR TMP.SPR; do
     fi
 done
 
-# GENSYS.COM must be from DRI (V2.1) - source is V2.0 with different prompts
-DRI_BIN_DIR="$PROJECT_DIR/bin/dri"
-cp "$DRI_BIN_DIR/GENSYS.COM" "./gensys.com"
-echo "  gensys.com ($(wc -c < gensys.com | tr -d ' ') bytes) [DRI V2.1 - required for expect script]"
-
 # Copy our custom BNKXIOS.SPR (port-based I/O for emulator)
 if [ -f "$ASM_DIR/bnkxios.spr" ]; then
     echo "Using custom BNKXIOS.SPR from $ASM_DIR"
@@ -127,114 +114,84 @@ else
 fi
 
 # Copy SFTP RSP modules if present
+HAVE_SFTP=false
 if [ -f "$ASM_DIR/SFTP.RSP" ] && [ -f "$ASM_DIR/SFTP.BRS" ]; then
     echo "Copying SFTP RSP modules from $ASM_DIR"
     cp "$ASM_DIR/SFTP.RSP" sftp.rsp
     cp "$ASM_DIR/SFTP.BRS" sftp.brs
     echo "  sftp.rsp ($(wc -c < sftp.rsp | tr -d ' ') bytes)"
     echo "  sftp.brs ($(wc -c < sftp.brs | tr -d ' ') bytes)"
+    HAVE_SFTP=true
 else
     echo "Note: SFTP RSP not found - run scripts/build_sftp_rsp.sh to build"
 fi
 
-# Copy GENSYS config (forces binary mode for SPR/SYS files)
-cp "$SCRIPT_DIR/gensys.cfg" gensys.cfg
+# Generate JSON configuration for Python GENSYS
+echo "Generating GENSYS configuration..."
+cat > gensys_config.json << EOF
+{
+  "mem_top": 255,
+  "common_base": 192,
+  "num_consoles": $NMBCNS,
+  "num_printers": 1,
+  "bank_switched": true,
+  "z80_cpu": true,
+  "sys_call_stks": true,
+  "banked_bdos": true,
+  "day_file": true,
+  "ticks_per_second": 60,
+  "system_drive": 1,
+  "temp_file_drive": 1,
+  "max_locked_records": 16,
+  "total_locked_records": 32,
+  "max_open_files": 16,
+  "total_open_files": 32,
+  "num_mem_segments": 7,
+  "breakpoint_rst": 6,
+  "spr_dir": ".",
+  "resbdos_spr": "resbdos.spr",
+  "xdos_spr": "xdos.spr",
+  "bnkxios_spr": "bnkxios.spr",
+  "bnkbdos_spr": "bnkbdos.spr",
+  "bnkxdos_spr": "bnkxdos.spr",
+  "tmp_spr": "tmp.spr",
+EOF
 
-# Remove any leftover SYSTEM.DAT that would cause GENSYS to skip first prompt
-rm -f system.dat SYSTEM.DAT
-
-# Run GENSYS under cpmemu using expect for readable prompt/response
-echo "Running GENSYS ($NMBCNS consoles, 7 user banks, C0 common base)..."
-
-# Check for expect
-if ! command -v expect &> /dev/null; then
-    echo "Error: 'expect' not found. Install with: brew install expect"
-    exit 1
-fi
-
-# Create expect script with clear prompt/response pairs
-# Uses short timeout (2s) and fails immediately on any timeout
-cat > gensys_expect.exp << EXPECT_SCRIPT
-set timeout 2
-log_user 0
-
-# Helper proc that fails on timeout
-proc prompt {pattern response} {
-    expect {
-        \$pattern { send "\$response\r" }
-        timeout { puts stderr "ERROR: Timeout waiting for: \$pattern"; exit 1 }
-        eof { puts stderr "ERROR: Unexpected EOF waiting for: \$pattern"; exit 1 }
+# Add RSPs if available
+if [ "$HAVE_SFTP" = true ]; then
+    cat >> gensys_config.json << EOF
+  "rsps": [
+    {
+      "name": "SFTP",
+      "rsp": "sftp.rsp",
+      "brs": "sftp.brs"
     }
-}
-
-spawn $CPMEMU gensys.cfg
-
-# System configuration prompts
-# Note: "Use SYSTEM.DAT" only appears if file exists - we delete it above
-prompt "Top page"                 ""
-prompt "Number of TMPs"           "$NMBCNS"
-prompt "Number of Printers"       ""
-prompt "Breakpoint RST"           ""
-prompt "Compatibility Attributes" ""
-prompt "system call user stacks"  "Y"
-prompt "Z80 CPU"                  ""
-prompt "ticks/second"             ""
-prompt "System Drive"             ""
-prompt "Temporary file drive"     ""
-prompt "locked records/process"   ""
-prompt "locked records/system"    ""
-prompt "open files/process"       ""
-prompt "open files/system"        ""
-
-# Memory configuration
-prompt "Bank switched"            ""
-prompt "memory segments"          "7"
-prompt "Common memory base"       "C0"
-prompt "Dayfile logging"          ""
-
-# Accept generated tables
-prompt "Accept new system data"   ""
-
-# RSP selection - say Yes to SFTP and MPMSTAT, No to others
-# GENSYS prompts (Y/N)? for each RSP found
-expect {
-    -re "SFTP.*\\(N\\)" { send "Y\r"; exp_continue }
-    -re "MPMSTAT.*\\(N\\)" { send "Y\r"; exp_continue }
-    -re "\\(N\\).*\\?" { send "\r"; exp_continue }
-    "Enter memory segment" { }
-}
-
-# Memory segment table: bank 0 (common) + 7 user banks = 8 entries
-prompt "Base,size,attrib,bank"    ""
-prompt "Base,size,attrib,bank"    ""
-prompt "Base,size,attrib,bank"    ""
-prompt "Base,size,attrib,bank"    ""
-prompt "Base,size,attrib,bank"    ""
-prompt "Base,size,attrib,bank"    ""
-prompt "Base,size,attrib,bank"    ""
-prompt "Base,size,attrib,bank"    ""
-prompt "Accept new memory segment" ""
-
-# Wait for explicit success message
-expect {
-    "GENSYS DONE" { exit 0 }
-    timeout { puts stderr "ERROR: GENSYS timed out waiting for completion"; exit 1 }
-    eof { puts stderr "ERROR: GENSYS exited unexpectedly"; exit 1 }
-}
-EXPECT_SCRIPT
-
-if ! expect gensys_expect.exp 2>&1; then
-    echo "Error: GENSYS failed - see output above"
-    exit 1
+  ],
+EOF
+else
+    cat >> gensys_config.json << EOF
+  "rsps": [],
+EOF
 fi
+
+cat >> gensys_config.json << EOF
+  "output": "mpm.sys",
+  "system_dat": "system.dat"
+}
+EOF
+
+# Run Python GENSYS
+echo ""
+echo "Running Python GENSYS ($NMBCNS consoles, 7 user banks, C0 common base)..."
+python3 "$TOOLS_DIR/gensys.py" gensys_config.json
 
 # Check if MPM.SYS was created
 if [ ! -f "mpm.sys" ]; then
     echo "Error: GENSYS failed to create mpm.sys"
-    cat gensys.log
     exit 1
 fi
 
+echo ""
 echo "MPM.SYS created ($(wc -c < mpm.sys | tr -d ' ') bytes)"
 
 # Get MPMLDR.COM based on tree selection
