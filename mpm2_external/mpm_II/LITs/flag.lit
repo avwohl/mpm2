@@ -1,9 +1,0 @@
-$nolist
-/*
-    Flag Literals
-*/
-
-  declare nmbflags literally '16';
-
-$list
-
