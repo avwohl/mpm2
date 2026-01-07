@@ -43,11 +43,6 @@ start_emulator() {
         exit 1
     fi
 
-    if [ ! -f "$DISKS_DIR/mpm.sys" ]; then
-        echo "ERROR: mpm.sys not found. Run ./scripts/build_all.sh first."
-        exit 1
-    fi
-
     if [ ! -f "$DISKS_DIR/mpm2_system.img" ]; then
         echo "ERROR: Disk image not found. Run ./scripts/build_all.sh first."
         exit 1
@@ -56,7 +51,6 @@ start_emulator() {
     # Start emulator in background (--no-auth for CI/testing)
     cd "$BUILD_DIR"
     ./mpm2_emu --no-auth -p $PORT \
-        -s "$DISKS_DIR/mpm.sys" \
         -d "A:$DISKS_DIR/mpm2_system.img" \
         > /tmp/mpm2_test.log 2>&1 &
     EMU_PID=$!
