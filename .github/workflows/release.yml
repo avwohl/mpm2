@@ -41,13 +41,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake libssh-dev python3-pip
 
-      - name: Install um80/ul80
-        working-directory: um80_and_friends
-        run: pip install -e .
-
-      - name: Install uplm80
-        working-directory: uplm80
-        run: pip install -e .
+      - name: Install Python tools (um80, ul80, uplm80)
+        run: |
+          pip install -e um80_and_friends
+          pip install -e uplm80
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Build qkz80 library
         working-directory: cpmemu/src
