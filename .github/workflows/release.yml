@@ -43,9 +43,8 @@ jobs:
 
       - name: Install Python tools (um80, ul80, uplm80)
         run: |
-          pip install -e um80_and_friends
-          pip install -e uplm80
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          pip install ./um80_and_friends
+          pip install ./uplm80
 
       - name: Build qkz80 library
         working-directory: cpmemu/src
