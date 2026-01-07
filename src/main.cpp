@@ -313,15 +313,16 @@ int main(int argc, char* argv[]) {
     // Initialize HTTP server
     HTTPServer http_server;
     bool http_enabled = false;
-    if (!http_addrs.empty() && http_addrs[0].port > 0) {
-        const auto& addr = http_addrs[0];  // Currently only support first address
+    for (const auto& addr : http_addrs) {
+        if (addr.port <= 0) continue;
         if (http_server.start(addr)) {
             http_enabled = true;
         } else {
             std::cerr << "Failed to start HTTP server on " << addr.to_string() << "\n";
             return 1;
         }
-
+    }
+    if (http_enabled) {
         // Set up Z80 tick callback for SFTP bridge (needed for HTTP file access)
         SftpBridge::instance().set_z80_tick_callback([&z80]() {
             z80.run_polled();
@@ -353,15 +354,20 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        const auto& addr = ssh_addrs[0];  // Currently only support first address
-        if (!ssh_server.listen(addr)) {
-            std::cerr << "Failed to listen on " << addr.to_string() << "\n";
-            return 1;
+        for (const auto& addr : ssh_addrs) {
+            if (!ssh_server.listen(addr)) {
+                std::cerr << "Failed to listen on " << addr.to_string() << "\n";
+                return 1;
+            }
         }
 
         ssh_enabled = true;
-        std::cout << "SSH server listening on " << addr.to_string() << "\n";
-        std::cout << "Connect with: ssh -p " << addr.port << " user@localhost\n";
+        for (const auto& addr : ssh_server.listen_addresses()) {
+            std::cout << "SSH server listening on " << addr.to_string() << "\n";
+        }
+        if (!ssh_server.listen_addresses().empty()) {
+            std::cout << "Connect with: ssh -p " << ssh_server.listen_addresses()[0].port << " user@localhost\n";
+        }
 
         // Set up Z80 tick callback for SFTP bridge
         // This allows wait_for_reply() to run Z80 cycles while waiting
@@ -375,8 +381,12 @@ int main(int argc, char* argv[]) {
 
     // Print HTTP status
     if (http_enabled) {
-        std::cout << "HTTP server listening on " << http_server.listen_address().to_string() << "\n";
-        std::cout << "Browse files at: http://localhost:" << http_server.port() << "/\n";
+        for (const auto& addr : http_server.listen_addresses()) {
+            std::cout << "HTTP server listening on " << addr.to_string() << "\n";
+        }
+        if (!http_server.listen_addresses().empty()) {
+            std::cout << "Browse files at: http://localhost:" << http_server.listen_addresses()[0].port << "/\n";
+        }
     }
 
     // Main loop

@@ -1507,8 +1507,7 @@ bool SSHSession::poll_sftp() {
 // ============================================================================
 
 SSHServer::SSHServer()
-    : sshbind_(nullptr)
-    , running_(false)
+    : running_(false)
 {
 }
 
@@ -1556,55 +1555,62 @@ bool SSHServer::is_key_authorized(const std::string& key_blob) const {
 }
 
 bool SSHServer::init(const std::string& host_key_path) {
-    sshbind_ = ssh_bind_new();
-    if (!sshbind_) {
-        std::cerr << "Failed to create SSH bind\n";
-        return false;
-    }
-
-    // Set host key
-    if (ssh_bind_options_set(sshbind_, SSH_BIND_OPTIONS_HOSTKEY, host_key_path.c_str()) < 0) {
-        std::cerr << "Failed to set host key: " << ssh_get_error(sshbind_) << "\n";
-        ssh_bind_free(sshbind_);
-        sshbind_ = nullptr;
-        return false;
-    }
-
+    // Just store the host key path - we'll use it when creating listeners
+    host_key_path_ = host_key_path;
     return true;
 }
 
 bool SSHServer::listen(const std::string& host, int port) {
-    if (!sshbind_) {
-        std::cerr << "SSH server not initialized\n";
+    if (host_key_path_.empty()) {
+        std::cerr << "SSH server not initialized (call init() first)\n";
         return false;
     }
 
-    listen_addr_ = ListenAddress(host, port);
+    ListenAddress addr(host, port);
+
+    // Create a new ssh_bind for this listener
+    ssh_bind sshbind = ssh_bind_new();
+    if (!sshbind) {
+        std::cerr << "Failed to create SSH bind for " << addr.to_string() << "\n";
+        return false;
+    }
+
+    // Set host key
+    if (ssh_bind_options_set(sshbind, SSH_BIND_OPTIONS_HOSTKEY, host_key_path_.c_str()) < 0) {
+        std::cerr << "Failed to set host key: " << ssh_get_error(sshbind) << "\n";
+        ssh_bind_free(sshbind);
+        return false;
+    }
 
     // Set bind address if specified
     if (!host.empty()) {
-        if (ssh_bind_options_set(sshbind_, SSH_BIND_OPTIONS_BINDADDR, host.c_str()) < 0) {
-            std::cerr << "Failed to set SSH bind address: " << ssh_get_error(sshbind_) << "\n";
+        if (ssh_bind_options_set(sshbind, SSH_BIND_OPTIONS_BINDADDR, host.c_str()) < 0) {
+            std::cerr << "Failed to set SSH bind address: " << ssh_get_error(sshbind) << "\n";
+            ssh_bind_free(sshbind);
             return false;
         }
     }
 
-    if (ssh_bind_options_set(sshbind_, SSH_BIND_OPTIONS_BINDPORT, &port) < 0) {
-        std::cerr << "Failed to set SSH port: " << ssh_get_error(sshbind_) << "\n";
+    if (ssh_bind_options_set(sshbind, SSH_BIND_OPTIONS_BINDPORT, &port) < 0) {
+        std::cerr << "Failed to set SSH port: " << ssh_get_error(sshbind) << "\n";
+        ssh_bind_free(sshbind);
         return false;
     }
 
-    if (ssh_bind_listen(sshbind_) < 0) {
-        std::cerr << "Failed to bind SSH server to " << listen_addr_.to_string() << ": " << ssh_get_error(sshbind_) << "\n";
+    if (ssh_bind_listen(sshbind) < 0) {
+        std::cerr << "Failed to bind SSH server to " << addr.to_string() << ": " << ssh_get_error(sshbind) << "\n";
+        ssh_bind_free(sshbind);
         return false;
     }
 
     // Set bind socket non-blocking at OS level
-    socket_t bind_fd = ssh_bind_get_fd(sshbind_);
+    socket_t bind_fd = ssh_bind_get_fd(sshbind);
     if (bind_fd != SSH_INVALID_SOCKET) {
         set_nonblocking(bind_fd);
     }
 
+    listeners_.push_back({sshbind, addr});
+    listen_addrs_.push_back(addr);
     running_ = true;
     return true;
 }
@@ -1613,10 +1619,13 @@ void SSHServer::stop() {
     running_ = false;
     sessions_.clear();
 
-    if (sshbind_) {
-        ssh_bind_free(sshbind_);
-        sshbind_ = nullptr;
+    for (auto& listener : listeners_) {
+        if (listener.bind) {
+            ssh_bind_free(listener.bind);
+        }
     }
+    listeners_.clear();
+    listen_addrs_.clear();
 }
 
 void SSHServer::poll() {
@@ -1627,42 +1636,45 @@ void SSHServer::poll() {
 }
 
 void SSHServer::poll_accept() {
-    // Check if a connection is pending before calling accept
-    // This avoids EAGAIN spam on macOS with non-blocking sockets
-    socket_t bind_fd = ssh_bind_get_fd(sshbind_);
-    if (bind_fd == SSH_INVALID_SOCKET) return;
+    // Check all listeners for pending connections
+    for (auto& listener : listeners_) {
+        // Check if a connection is pending before calling accept
+        // This avoids EAGAIN spam on macOS with non-blocking sockets
+        socket_t bind_fd = ssh_bind_get_fd(listener.bind);
+        if (bind_fd == SSH_INVALID_SOCKET) continue;
 
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(bind_fd, &readfds);
+        fd_set readfds;
+        FD_ZERO(&readfds);
+        FD_SET(bind_fd, &readfds);
 
-    struct timeval tv = {0, 0};  // No wait - just check
-    int ready = select(bind_fd + 1, &readfds, nullptr, nullptr, &tv);
-    if (ready <= 0) {
-        // No connection pending (ready == 0) or error (ready < 0)
-        return;
+        struct timeval tv = {0, 0};  // No wait - just check
+        int ready = select(bind_fd + 1, &readfds, nullptr, nullptr, &tv);
+        if (ready <= 0) {
+            // No connection pending (ready == 0) or error (ready < 0)
+            continue;
+        }
+
+        // Connection is pending - try to accept
+        ssh_session session = ssh_new();
+        if (!session) continue;
+
+        int rc = ssh_bind_accept(listener.bind, session);
+        if (rc != SSH_OK) {
+            // Unexpected error since select() said a connection was ready
+            std::cerr << "[SSH] accept failed: " << ssh_get_error(listener.bind) << "\n";
+            ssh_free(session);
+            continue;
+        }
+
+        if (DEBUG_SSH) std::cerr << "[SSH] New connection accepted on " << listener.addr.to_string() << "!\n" << std::flush;
+
+        // Create session object and start its thread
+        // Session constructor sets blocking mode; session runs in its own thread
+        auto ssh_session_ptr = std::make_unique<SSHSession>(session, this);
+        ssh_session_ptr->start();
+        sessions_.push_back(std::move(ssh_session_ptr));
+        if (DEBUG_SSH) std::cerr << "[SSH] Session thread started, total sessions: " << sessions_.size() << "\n";
     }
-
-    // Connection is pending - try to accept
-    ssh_session session = ssh_new();
-    if (!session) return;
-
-    int rc = ssh_bind_accept(sshbind_, session);
-    if (rc != SSH_OK) {
-        // Unexpected error since select() said a connection was ready
-        std::cerr << "[SSH] accept failed: " << ssh_get_error(sshbind_) << "\n";
-        ssh_free(session);
-        return;
-    }
-
-    if (DEBUG_SSH) std::cerr << "[SSH] New connection accepted!\n" << std::flush;
-
-    // Create session object and start its thread
-    // Session constructor sets blocking mode; session runs in its own thread
-    auto ssh_session_ptr = std::make_unique<SSHSession>(session, this);
-    ssh_session_ptr->start();
-    sessions_.push_back(std::move(ssh_session_ptr));
-    if (DEBUG_SSH) std::cerr << "[SSH] Session thread started, total sessions: " << sessions_.size() << "\n";
 }
 
 void SSHServer::poll_sessions() {

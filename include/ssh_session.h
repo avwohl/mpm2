@@ -170,11 +170,11 @@ public:
     // Poll for new connections and session I/O - call from main loop
     void poll();
 
-    bool is_running() const { return running_; }
+    bool is_running() const { return running_ && !listeners_.empty(); }
     size_t session_count() const;
 
-    // Get listen address
-    const ListenAddress& listen_address() const { return listen_addr_; }
+    // Get listen addresses
+    const std::vector<ListenAddress>& listen_addresses() const { return listen_addrs_; }
 
     // Authentication settings
     void set_no_auth(bool no_auth) { no_auth_ = no_auth; }
@@ -189,8 +189,13 @@ private:
     // Poll all active sessions
     void poll_sessions();
 
-    ssh_bind sshbind_;
-    ListenAddress listen_addr_;
+    struct Listener {
+        ssh_bind bind;
+        ListenAddress addr;
+    };
+    std::vector<Listener> listeners_;
+    std::vector<ListenAddress> listen_addrs_;  // Cached for API
+    std::string host_key_path_;
     bool running_;
     bool no_auth_ = false;
     std::vector<std::string> authorized_keys_;  // Base64 encoded public keys

@@ -52,91 +52,108 @@ bool HTTPServer::start(const std::string& host, int port) {
         return false;
     }
 
+    int listen_fd = -1;
+
     // Try each address until we successfully bind
     for (struct addrinfo* rp = result; rp != nullptr; rp = rp->ai_next) {
-        listen_fd_ = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-        if (listen_fd_ < 0) continue;
+        listen_fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (listen_fd < 0) continue;
 
         // Allow address reuse
         int opt = 1;
-        setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+        setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
         // For IPv6, allow IPv4 connections too (dual-stack) unless specific host
         if (rp->ai_family == AF_INET6 && host.empty()) {
             int no = 0;
-            setsockopt(listen_fd_, IPPROTO_IPV6, IPV6_V6ONLY, &no, sizeof(no));
+            setsockopt(listen_fd, IPPROTO_IPV6, IPV6_V6ONLY, &no, sizeof(no));
         }
 
         // Set non-blocking
-        if (!set_nonblocking(listen_fd_)) {
-            close(listen_fd_);
-            listen_fd_ = -1;
+        if (!set_nonblocking(listen_fd)) {
+            close(listen_fd);
+            listen_fd = -1;
             continue;
         }
 
-        if (bind(listen_fd_, rp->ai_addr, rp->ai_addrlen) == 0) {
+        if (bind(listen_fd, rp->ai_addr, rp->ai_addrlen) == 0) {
             // Success
             break;
         }
 
-        close(listen_fd_);
-        listen_fd_ = -1;
+        close(listen_fd);
+        listen_fd = -1;
     }
 
     freeaddrinfo(result);
 
-    if (listen_fd_ < 0) {
+    if (listen_fd < 0) {
         std::cerr << "[HTTP] bind() failed: " << strerror(errno) << "\n";
         return false;
     }
 
-    if (listen(listen_fd_, 10) < 0) {
+    if (listen(listen_fd, 10) < 0) {
         std::cerr << "[HTTP] listen() failed: " << strerror(errno) << "\n";
-        close(listen_fd_);
-        listen_fd_ = -1;
+        close(listen_fd);
         return false;
     }
 
-    listen_addr_ = ListenAddress(host, port);
+    ListenAddress addr(host, port);
+    listeners_.push_back({listen_fd, addr});
+    listen_addrs_.push_back(addr);
     return true;
 }
 
 void HTTPServer::stop() {
     connections_.clear();
-    if (listen_fd_ >= 0) {
-        close(listen_fd_);
-        listen_fd_ = -1;
+    for (auto& listener : listeners_) {
+        if (listener.fd >= 0) {
+            close(listener.fd);
+        }
     }
-    listen_addr_ = ListenAddress();
+    listeners_.clear();
+    listen_addrs_.clear();
 }
 
 void HTTPServer::poll() {
-    if (listen_fd_ < 0) return;
+    if (listeners_.empty()) return;
 
     poll_accept();
     poll_connections();
 }
 
 void HTTPServer::poll_accept() {
-    struct sockaddr_in client_addr;
-    socklen_t addr_len = sizeof(client_addr);
+    // Check all listeners for new connections
+    for (auto& listener : listeners_) {
+        struct sockaddr_storage client_addr;
+        socklen_t addr_len = sizeof(client_addr);
 
-    int client_fd = accept(listen_fd_, reinterpret_cast<sockaddr*>(&client_addr), &addr_len);
-    if (client_fd < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK) {
-            std::cerr << "[HTTP] accept() failed: " << strerror(errno) << "\n";
+        int client_fd = accept(listener.fd, reinterpret_cast<sockaddr*>(&client_addr), &addr_len);
+        if (client_fd < 0) {
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                std::cerr << "[HTTP] accept() failed: " << strerror(errno) << "\n";
+            }
+            continue;
         }
-        return;
-    }
 
-    if (!set_nonblocking(client_fd)) {
-        std::cerr << "[HTTP] Failed to set client non-blocking\n";
-        close(client_fd);
-        return;
-    }
+        if (!set_nonblocking(client_fd)) {
+            std::cerr << "[HTTP] Failed to set client non-blocking\n";
+            close(client_fd);
+            continue;
+        }
 
-    std::string client_ip = inet_ntoa(client_addr.sin_addr);
-    connections_.push_back(std::make_unique<HTTPConnection>(client_fd, client_ip));
+        // Get client IP string (handles both IPv4 and IPv6)
+        char client_ip[INET6_ADDRSTRLEN] = {};
+        if (client_addr.ss_family == AF_INET) {
+            struct sockaddr_in* addr4 = reinterpret_cast<sockaddr_in*>(&client_addr);
+            inet_ntop(AF_INET, &addr4->sin_addr, client_ip, sizeof(client_ip));
+        } else if (client_addr.ss_family == AF_INET6) {
+            struct sockaddr_in6* addr6 = reinterpret_cast<sockaddr_in6*>(&client_addr);
+            inet_ntop(AF_INET6, &addr6->sin6_addr, client_ip, sizeof(client_ip));
+        }
+
+        connections_.push_back(std::make_unique<HTTPConnection>(client_fd, client_ip));
+    }
 }
 
 void HTTPServer::poll_connections() {

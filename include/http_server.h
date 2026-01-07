@@ -21,8 +21,9 @@ public:
     HTTPServer() = default;
     ~HTTPServer();
 
-    // Start listening on address and port. Returns false on error.
+    // Add a listener on address and port. Returns false on error.
     // Empty host means INADDR_ANY (all interfaces)
+    // Can be called multiple times to add multiple listeners.
     bool start(const std::string& host, int port);
     bool start(int port) { return start("", port); }
     bool start(const ListenAddress& addr) { return start(addr.host, addr.port); }
@@ -34,16 +35,19 @@ public:
     // Call this from main loop.
     void poll();
 
-    // Check if server is running
-    bool is_running() const { return listen_fd_ >= 0; }
+    // Check if server is running (has at least one listener)
+    bool is_running() const { return !listeners_.empty(); }
 
-    // Get listen address
-    const ListenAddress& listen_address() const { return listen_addr_; }
-    int port() const { return listen_addr_.port; }
+    // Get listen addresses
+    const std::vector<ListenAddress>& listen_addresses() const { return listen_addrs_; }
 
 private:
-    int listen_fd_ = -1;
-    ListenAddress listen_addr_;
+    struct Listener {
+        int fd;
+        ListenAddress addr;
+    };
+    std::vector<Listener> listeners_;
+    std::vector<ListenAddress> listen_addrs_;  // Cached for API
     std::vector<std::unique_ptr<HTTPConnection>> connections_;
 
     void poll_accept();
