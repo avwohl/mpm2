@@ -284,7 +284,8 @@ int main(int argc, char* argv[]) {
         if (http_server.start(http_port)) {
             http_enabled = true;
         } else {
-            std::cerr << "Warning: Failed to start HTTP server on port " << http_port << "\n";
+            std::cerr << "Failed to start HTTP server on port " << http_port << "\n";
+            return 1;
         }
 
         // Set up Z80 tick callback for SFTP bridge (needed for HTTP file access)

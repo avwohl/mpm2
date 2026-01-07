@@ -1575,17 +1575,20 @@ bool SSHServer::init(const std::string& host_key_path) {
 }
 
 bool SSHServer::listen(int port) {
-    if (!sshbind_) return false;
+    if (!sshbind_) {
+        std::cerr << "SSH server not initialized\n";
+        return false;
+    }
 
     port_ = port;
 
     if (ssh_bind_options_set(sshbind_, SSH_BIND_OPTIONS_BINDPORT, &port_) < 0) {
-        std::cerr << "Failed to set port: " << ssh_get_error(sshbind_) << "\n";
+        std::cerr << "Failed to set SSH port: " << ssh_get_error(sshbind_) << "\n";
         return false;
     }
 
     if (ssh_bind_listen(sshbind_) < 0) {
-        std::cerr << "Failed to listen: " << ssh_get_error(sshbind_) << "\n";
+        std::cerr << "Failed to bind SSH server to port " << port << ": " << ssh_get_error(sshbind_) << "\n";
         return false;
     }
 
