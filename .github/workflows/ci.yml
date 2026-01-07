@@ -55,5 +55,10 @@ jobs:
         env:
           CPM_DISK: ${{ github.workspace }}/../cpmemu/util/cpm_disk.py
 
+      - name: Generate SSH host key
+        run: |
+          mkdir -p keys
+          ssh-keygen -t rsa -b 2048 -m PEM -f keys/ssh_host_rsa_key -N ''
+
       - name: Run tests
         run: ./scripts/run_tests.sh all
