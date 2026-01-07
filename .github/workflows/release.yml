@@ -189,6 +189,10 @@ jobs:
           name: rpm-package
           path: packages
 
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -200,9 +204,9 @@ jobs:
             ### Debian/Ubuntu
             ```bash
             # Download and install
-            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/mpm2-emu_0.3.0_amd64.deb
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/mpm2-emu-${{ steps.version.outputs.VERSION }}-Linux.deb
             wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/mpm2_system.img
-            sudo dpkg -i mpm2-emu_*.deb
+            sudo dpkg -i mpm2-emu-*.deb
             sudo apt-get install -f  # Install dependencies if needed
 
             # Run
@@ -212,7 +216,7 @@ jobs:
             ### Fedora/RHEL
             ```bash
             # Download and install
-            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/mpm2-emu-0.3.0-1.x86_64.rpm
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/mpm2-emu-${{ steps.version.outputs.VERSION }}-Linux.rpm
             wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/mpm2_system.img
             sudo dnf install ./mpm2-emu-*.rpm
 
