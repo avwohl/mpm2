@@ -28,8 +28,8 @@
 #include <sys/select.h>
 
 // Debug output control - set to true to enable verbose debug output
-static constexpr bool DEBUG_SSH = true;
-static constexpr bool DEBUG_SFTP = true;
+static constexpr bool DEBUG_SSH = false;
+static constexpr bool DEBUG_SFTP = false;
 
 
 // Set fd to non-blocking at OS level
@@ -49,13 +49,15 @@ class SSHSession;
 // Called when client attempts "none" authentication (no credentials)
 static int auth_none_callback(ssh_session session, const char* user, void* userdata) {
     (void)session;
-    (void)user;
+    if (DEBUG_SSH) std::cerr << "[SSH] auth_none_callback called, user=" << (user ? user : "(null)") << "\n";
     SSHSession* ssh_sess = static_cast<SSHSession*>(userdata);
     if (ssh_sess && ssh_sess->server() && ssh_sess->server()->no_auth()) {
         // No authentication required - accept
+        if (DEBUG_SSH) std::cerr << "[SSH] auth_none: accepting (no-auth mode)\n";
         ssh_sess->set_authenticated(true);
         return SSH_AUTH_SUCCESS;
     }
+    if (DEBUG_SSH) std::cerr << "[SSH] auth_none: denied\n";
     return SSH_AUTH_DENIED;
 }
 
@@ -108,21 +110,61 @@ static int auth_pubkey_callback(ssh_session session, const char* user,
     return SSH_AUTH_SUCCESS;
 }
 
-// Channel callbacks for PTY and shell requests
+// Channel callbacks for PTY and shell requests (modern callback-based API)
 static int channel_pty_request_callback(ssh_session session, ssh_channel channel,
                                         const char* term, int width, int height,
                                         int pxwidth, int pxheight, void* userdata) {
     (void)session; (void)channel; (void)term;
     (void)width; (void)height; (void)pxwidth; (void)pxheight;
     (void)userdata;
+    if (DEBUG_SSH) std::cerr << "[SSH] pty_request_callback invoked\n";
+    return 0;  // 0 = accept
+}
+
+static int channel_pty_window_change_callback(ssh_session session, ssh_channel channel,
+                                               int width, int height,
+                                               int pxwidth, int pxheight, void* userdata) {
+    (void)session; (void)channel;
+    (void)width; (void)height; (void)pxwidth; (void)pxheight;
+    (void)userdata;
+    // Accept window size changes (we ignore them - CP/M doesn't care)
+    if (DEBUG_SSH) std::cerr << "[SSH] window_change_callback: " << width << "x" << height << "\n";
+    return 0;  // 0 = accept
+}
+
+static int channel_env_request_callback(ssh_session session, ssh_channel channel,
+                                         const char* env_name, const char* env_value,
+                                         void* userdata) {
+    (void)session; (void)channel; (void)userdata;
+    // Accept environment variables (we ignore them - CP/M doesn't use them)
+    if (DEBUG_SSH) std::cerr << "[SSH] env_request_callback: " << (env_name ? env_name : "")
+                             << "=" << (env_value ? env_value : "") << "\n";
     return 0;  // 0 = accept
 }
 
 static int channel_shell_request_callback(ssh_session session, ssh_channel channel, void* userdata) {
-    (void)session; (void)channel;
+    (void)session;
+    if (DEBUG_SSH) std::cerr << "[SSH] shell_request_callback invoked\n";
     SSHSession* ssh_sess = static_cast<SSHSession*>(userdata);
     if (ssh_sess) {
         ssh_sess->setup_console();
+        // Send banner immediately before returning from callback
+        // This ensures data is sent before client times out
+        ssh_sess->send_banner(channel);
+    }
+    return 0;  // 0 = accept
+}
+
+static int channel_exec_request_callback(ssh_session session, ssh_channel channel,
+                                          const char* command, void* userdata) {
+    (void)session;
+    if (DEBUG_SSH) std::cerr << "[SSH] exec_request_callback invoked, command=" << (command ? command : "(null)") << "\n";
+    SSHSession* ssh_sess = static_cast<SSHSession*>(userdata);
+    if (ssh_sess) {
+        // For exec requests, we still set up the console and let MP/M II handle it
+        ssh_sess->setup_console();
+        // Send banner immediately
+        ssh_sess->send_banner(channel);
     }
     return 0;  // 0 = accept
 }
@@ -164,7 +206,7 @@ static ssh_channel channel_open_callback(ssh_session session, void* userdata) {
 }
 
 // ============================================================================
-// SSHSession - handles one connection with non-blocking I/O
+// SSHSession - handles one connection in its own thread
 // ============================================================================
 
 SSHSession::SSHSession(ssh_session session, SSHServer* server)
@@ -184,6 +226,9 @@ SSHSession::SSHSession(ssh_session session, SSHServer* server)
 {
     // Create event context (don't add session until after KEX)
     event_ = ssh_event_new();
+
+    // Use blocking mode - we're in our own thread
+    ssh_set_blocking(session_, 1);
 }
 
 SSHServer* SSHSession::server() const {
@@ -204,15 +249,34 @@ void SSHSession::set_channel(ssh_channel channel) {
 void SSHSession::setup_channel_callbacks(ssh_channel channel) {
     channel_ = channel;
 
-    // Initialize channel callbacks
+    // Initialize channel callbacks (modern callback-based API - no ssh_message_get needed)
     memset(&channel_callbacks_, 0, sizeof(channel_callbacks_));
     channel_callbacks_.size = sizeof(channel_callbacks_);
     channel_callbacks_.userdata = this;
     channel_callbacks_.channel_pty_request_function = channel_pty_request_callback;
+    channel_callbacks_.channel_pty_window_change_function = channel_pty_window_change_callback;
+    channel_callbacks_.channel_env_request_function = channel_env_request_callback;
     channel_callbacks_.channel_shell_request_function = channel_shell_request_callback;
+    channel_callbacks_.channel_exec_request_function = channel_exec_request_callback;
     channel_callbacks_.channel_subsystem_request_function = channel_subsystem_request_callback;
     ssh_callbacks_init(&channel_callbacks_);
     ssh_set_channel_callbacks(channel, &channel_callbacks_);
+}
+
+void SSHSession::send_banner(ssh_channel channel) {
+    if (sent_banner_) return;  // Already sent
+
+    char banner[64];
+    snprintf(banner, sizeof(banner), "\r\nMP/M II Console %d\r\n\r\n", console_id_);
+    if (DEBUG_SSH) std::cerr << "[SSH] Sending banner to console " << console_id_ << "\n";
+    int wr = ssh_channel_write(channel, banner, strlen(banner));
+    if (DEBUG_SSH) std::cerr << "[SSH] ssh_channel_write returned " << wr << "\n";
+    if (wr < 0) {
+        if (DEBUG_SSH) std::cerr << "[SSH] Banner write failed: " << ssh_get_error(session_) << "\n";
+        // Don't set state to CLOSED here - let poll_io handle it
+    } else {
+        sent_banner_ = true;
+    }
 }
 
 void SSHSession::setup_console() {
@@ -249,19 +313,16 @@ void SSHSession::setup_sftp() {
 
     if (DEBUG_SFTP) std::cerr << "[SFTP] SFTP session created, initializing protocol...\n";
 
-    // IMPORTANT: sftp_server_init() doesn't work in non-blocking mode.
-    // Temporarily switch to blocking mode for initialization, then switch back.
-    // See: https://gitlab.com/libssh/libssh-mirror/-/issues/58
-    // This briefly blocks the main loop (~100ms for version exchange).
-    ssh_set_blocking(session_, 1);
-
     // Initialize SFTP protocol (exchanges version info with client)
+    // We're already in blocking mode (set in constructor), so this works correctly
+    // Note: sftp_server_init is deprecated in libssh master, but the replacement
+    // (sftp_channel_default_subsystem_request) isn't available until a future version.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     int rc = sftp_server_init(sftp_);
+#pragma GCC diagnostic pop
 
     if (DEBUG_SFTP) std::cerr << "[SFTP] sftp_server_init returned: " << rc << "\n";
-
-    // Switch back to non-blocking mode
-    ssh_set_blocking(session_, 0);
 
     if (rc != SSH_OK) {
         if (DEBUG_SFTP) std::cerr << "[SFTP] Failed to initialize SFTP: " << ssh_get_error(session_) << "\n";
@@ -278,6 +339,12 @@ void SSHSession::setup_sftp() {
 
 
 SSHSession::~SSHSession() {
+    // Request stop and wait for thread to finish
+    stop_requested_ = true;
+    if (thread_.joinable()) {
+        thread_.join();
+    }
+
     // Release console
     if (console_id_ >= 0) {
         Console* con = ConsoleManager::instance().get(console_id_);
@@ -305,28 +372,64 @@ SSHSession::~SSHSession() {
     }
 }
 
-bool SSHSession::poll() {
-    if (state_ == SSHState::CLOSED) return false;
+void SSHSession::start() {
+    // Set running BEFORE spawning thread to prevent race with poll_sessions()
+    running_ = true;
+    thread_ = std::thread(&SSHSession::run, this);
+}
 
-    // Poll events if kex done
-    if (kex_done_ && event_) {
-        int rc = ssh_event_dopoll(event_, 0);  // 0 = don't block
-        if (rc == SSH_ERROR) {
-            state_ = SSHState::CLOSED;
-            return false;
+void SSHSession::join() {
+    if (thread_.joinable()) {
+        thread_.join();
+    }
+}
+
+void SSHSession::run() {
+    // Note: running_ is set in start() before thread spawn to prevent race condition
+    if (DEBUG_SSH) std::cerr << "[SSH] Session thread started\n";
+
+    while (!stop_requested_ && state_ != SSHState::CLOSED) {
+        // Use ssh_event for polling after key exchange, or add small delay during kex
+        if (kex_done_ && event_) {
+            // Use short timeout to allow quick response to I/O
+            int rc = ssh_event_dopoll(event_, 50);  // 50ms timeout
+            // Don't log SSH_AGAIN (-2) spam
+            if (DEBUG_SSH && rc != SSH_AGAIN) {
+                std::cerr << "[SSH] ssh_event_dopoll returned " << rc
+                          << " state=" << (int)state_ << "\n";
+            }
+            if (rc == SSH_ERROR) {
+                if (DEBUG_SSH) std::cerr << "[SSH] ssh_event_dopoll error: " << ssh_get_error(session_) << "\n";
+                state_ = SSHState::CLOSED;
+                break;
+            }
+        } else {
+            // During key exchange (before event is set up), add small delay
+            // to prevent tight-loop spinning that can cause timing issues
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+
+        // Handle SFTP pending state - initialize after subsystem response was sent
+        if (state_ == SSHState::SFTP_PENDING) {
+            setup_sftp();
+            if (state_ == SSHState::CLOSED) break;
+            continue;
+        }
+
+        if (state_ == SSHState::READY || state_ == SSHState::DRAINING) {
+            bool io_result = poll_io();
+            if (DEBUG_SSH) std::cerr << "[SSH] poll_io returned " << (io_result ? "true" : "false") << "\n";
+            if (!io_result) break;
+        } else {
+            if (!poll_handshake()) break;
         }
     }
 
-    // Handle SFTP pending state - initialize after subsystem response was sent
-    if (state_ == SSHState::SFTP_PENDING) {
-        setup_sftp();
-        return state_ != SSHState::CLOSED;
-    }
-
-    if (state_ == SSHState::READY || state_ == SSHState::DRAINING) {
-        return poll_io();
-    } else {
-        return poll_handshake();
+    running_ = false;
+    if (DEBUG_SSH) {
+        std::cerr << "[SSH] Session thread exiting, console " << console_id_
+                  << " stop_requested=" << (stop_requested_ ? 1 : 0)
+                  << " state=" << (int)state_ << "\n";
     }
 }
 
@@ -334,20 +437,22 @@ bool SSHSession::poll_handshake() {
     switch (state_) {
         case SSHState::KEY_EXCHANGE: {
             int rc = ssh_handle_key_exchange(session_);
-            // Only log on completion or error, not on SSH_AGAIN (-2) which is normal for non-blocking
+            if (DEBUG_SSH) std::cerr << "[SSH] ssh_handle_key_exchange returned: " << rc << "\n";
             if (rc == SSH_OK) {
                 if (DEBUG_SSH) std::cerr << "[SSH] KEY_EXCHANGE completed successfully\n";
                 kex_done_ = true;
 
                 // Set up server callbacks for authentication (modern API)
                 // Also handle channel open via callback for proper integration
+                if (DEBUG_SSH) std::cerr << "[SSH] Setting up server callbacks...\n";
                 server_callbacks_.size = sizeof(server_callbacks_);
                 server_callbacks_.userdata = this;
                 server_callbacks_.auth_none_function = auth_none_callback;
                 server_callbacks_.auth_pubkey_function = auth_pubkey_callback;
                 server_callbacks_.channel_open_request_session_function = channel_open_callback;
                 ssh_callbacks_init(&server_callbacks_);
-                ssh_set_server_callbacks(session_, &server_callbacks_);
+                int cb_rc = ssh_set_server_callbacks(session_, &server_callbacks_);
+                if (DEBUG_SSH) std::cerr << "[SSH] ssh_set_server_callbacks returned: " << cb_rc << "\n";
 
                 // Tell client which auth methods we support
                 if (server_ && server_->no_auth()) {
@@ -390,7 +495,9 @@ bool SSHSession::poll_handshake() {
 }
 
 bool SSHSession::poll_io() {
+    if (DEBUG_SSH) std::cerr << "[SSH] poll_io() called, channel_=" << (channel_ ? "valid" : "null") << "\n";
     if (!channel_) {
+        if (DEBUG_SSH) std::cerr << "[SSH] poll_io: no channel\n";
         state_ = SSHState::CLOSED;
         return false;
     }
@@ -416,41 +523,24 @@ bool SSHSession::poll_io() {
         return false;
     }
 
-    // Handle any pending SSH messages (env vars, window changes, etc.)
-    // These can arrive after shell is established
-    ssh_message msg;
-    while ((msg = ssh_message_get(session_)) != nullptr) {
-        int type = ssh_message_type(msg);
-        int subtype = ssh_message_subtype(msg);
-
-        if (type == SSH_REQUEST_CHANNEL) {
-            if (subtype == SSH_CHANNEL_REQUEST_ENV) {
-                // Accept environment variables (we ignore them)
-                ssh_message_channel_request_reply_success(msg);
-            } else if (subtype == SSH_CHANNEL_REQUEST_WINDOW_CHANGE) {
-                // Accept window size changes (we ignore them)
-                ssh_message_channel_request_reply_success(msg);
-            } else {
-                ssh_message_reply_default(msg);
-            }
-        } else {
-            ssh_message_reply_default(msg);
-        }
-        ssh_message_free(msg);
-    }
+    // All channel requests (env, window-change, etc.) are handled by callbacks
+    // registered in setup_channel_callbacks() - no ssh_message_get() needed
 
     Console* con = ConsoleManager::instance().get(console_id_);
     if (!con) {
+        if (DEBUG_SSH) std::cerr << "[SSH] poll_io: console " << console_id_ << " not found\n";
         state_ = SSHState::CLOSED;
         return false;
     }
 
-    // Send banner on first I/O poll
+    // Banner is sent in shell_request_callback, but send here as fallback
     if (!sent_banner_) {
-        char banner[64];
-        snprintf(banner, sizeof(banner), "\r\nMP/M II Console %d\r\n\r\n", console_id_);
-        ssh_channel_write(channel_, banner, strlen(banner));
-        sent_banner_ = true;
+        send_banner(channel_);
+        if (!sent_banner_) {
+            // Banner write failed
+            state_ = SSHState::CLOSED;
+            return false;
+        }
     }
 
     // Read from SSH -> console input queue (non-blocking)
@@ -462,6 +552,7 @@ bool SSHSession::poll_io() {
             con->input_queue().try_write(ch);
         }
     } else if (n == SSH_ERROR) {
+        if (DEBUG_SSH) std::cerr << "[SSH] poll_io: ssh_channel_read_nonblocking error: " << ssh_get_error(session_) << "\n";
         state_ = SSHState::CLOSED;
         return false;
     }
@@ -490,12 +581,6 @@ bool SSHSession::poll_sftp() {
         if (DEBUG_SFTP) std::cerr << "[SFTP] No SFTP session\n";
         state_ = SSHState::CLOSED;
         return false;
-    }
-
-    // Re-entrancy guard: if we're in a blocking operation, don't process new messages
-    // This happens when wait_for_reply() -> z80_tick_() -> ssh_server.poll() -> poll_sftp()
-    if (blocking_op_) {
-        return true;  // Still active, just can't process new messages right now
     }
 
     // Check if channel is still open
@@ -630,16 +715,6 @@ bool SSHSession::poll_sftp() {
         // No message available
         return true;
     }
-
-    // RAII guard for blocking operations - ensures blocking_op_ is reset on all exit paths
-    struct BlockingGuard {
-        bool& flag;
-        bool active = false;
-        void set() { flag = true; active = true; }
-        ~BlockingGuard() { if (active) flag = false; }
-        BlockingGuard(bool& f) : flag(f) {}
-    };
-    BlockingGuard guard(blocking_op_);
 
     // Get message type and filename
     uint8_t type = sftp_client_message_get_type(msg);
@@ -851,9 +926,6 @@ bool SSHSession::poll_sftp() {
         }
 
         case SSH_FXP_CLOSE: {
-            // May have blocking wait_for_reply() calls when flushing write data
-            guard.set();
-
             ssh_string handle_str = msg->handle;
             if (handle_str && ssh_string_len(handle_str) == sizeof(void*)) {
                 void* handle;
@@ -931,9 +1003,6 @@ bool SSHSession::poll_sftp() {
         }
 
         case SSH_FXP_OPEN: {
-            // This operation has blocking wait_for_reply() calls
-            guard.set();
-
             std::string path = filename ? filename : "";
             SftpPath parsed = parse_sftp_path(path);
 
@@ -1240,9 +1309,6 @@ bool SSHSession::poll_sftp() {
         }
 
         case SSH_FXP_REMOVE: {
-            // This operation has blocking wait_for_reply() call
-            guard.set();
-
             std::string path = filename ? filename : "";
             SftpPath parsed = parse_sftp_path(path);
 
@@ -1276,9 +1342,6 @@ bool SSHSession::poll_sftp() {
         }
 
         case SSH_FXP_RENAME: {
-            // This operation has blocking wait_for_reply() call
-            guard.set();
-
             std::string old_path = filename ? filename : "";
             const char* new_path_cstr = sftp_client_message_get_data(msg);
             std::string new_path = new_path_cstr ? new_path_cstr : "";
@@ -1324,9 +1387,6 @@ bool SSHSession::poll_sftp() {
         }
 
         case SSH_FXP_EXTENDED: {
-            // This operation may have blocking wait_for_reply() call (posix-rename)
-            guard.set();
-
             // Handle extended operations (e.g., posix-rename@openssh.com)
             const char* submessage = sftp_client_message_get_submessage(msg);
             std::string ext_name = submessage ? submessage : "";
@@ -1541,24 +1601,20 @@ void SSHServer::poll_accept() {
 
     if (DEBUG_SSH) std::cerr << "[SSH] New connection accepted!\n" << std::flush;
 
-    // Got a connection - set non-blocking at both OS and libssh level
-    socket_t fd = ssh_get_fd(session);
-    if (fd != SSH_INVALID_SOCKET) {
-        set_nonblocking(fd);
-    }
-    ssh_set_blocking(session, 0);  // Tell libssh we're non-blocking
-
-    // Create session object - handshake will proceed in poll()
-    sessions_.push_back(std::make_unique<SSHSession>(session, this));
-    if (DEBUG_SSH) std::cerr << "[SSH] Session created, total sessions: " << sessions_.size() << "\n";
+    // Create session object and start its thread
+    // Session constructor sets blocking mode; session runs in its own thread
+    auto ssh_session_ptr = std::make_unique<SSHSession>(session, this);
+    ssh_session_ptr->start();
+    sessions_.push_back(std::move(ssh_session_ptr));
+    if (DEBUG_SSH) std::cerr << "[SSH] Session thread started, total sessions: " << sessions_.size() << "\n";
 }
 
 void SSHServer::poll_sessions() {
-    // Poll all sessions and remove inactive ones
+    // Remove finished sessions (their threads have exited)
     sessions_.erase(
         std::remove_if(sessions_.begin(), sessions_.end(),
                        [](std::unique_ptr<SSHSession>& s) {
-                           return !s->poll();
+                           return !s->is_running();
                        }),
         sessions_.end());
 }

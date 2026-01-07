@@ -44,7 +44,7 @@ sleep 1
 echo "Starting emulator on port $PORT..."
 "$EMU" -d A:"$DISK" -p "$PORT" > "$LOG" 2>&1 &
 EMU_PID=$!
-sleep 3
+sleep 4
 
 # Check emulator is running
 if ! kill -0 $EMU_PID 2>/dev/null; then

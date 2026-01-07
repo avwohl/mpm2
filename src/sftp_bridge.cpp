@@ -126,32 +126,36 @@ std::optional<SftpReply> SftpBridge::wait_for_reply(uint32_t request_id,
     auto deadline = std::chrono::steady_clock::now() +
                     std::chrono::milliseconds(timeout_ms);
 
+    std::unique_lock<std::mutex> lock(mutex_);
+
     while (std::chrono::steady_clock::now() < deadline) {
-        // Check for matching reply (brief lock)
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            std::queue<SftpReply> temp;
-            std::optional<SftpReply> result;
+        // Check for matching reply
+        std::queue<SftpReply> temp;
+        std::optional<SftpReply> result;
 
-            while (!pending_replies_.empty()) {
-                SftpReply reply = std::move(pending_replies_.front());
-                pending_replies_.pop();
-                if (reply.request_id == request_id) {
-                    result = std::move(reply);
-                } else {
-                    temp.push(std::move(reply));
-                }
+        while (!pending_replies_.empty()) {
+            SftpReply reply = std::move(pending_replies_.front());
+            pending_replies_.pop();
+            if (reply.request_id == request_id) {
+                result = std::move(reply);
+            } else {
+                temp.push(std::move(reply));
             }
-            pending_replies_ = std::move(temp);
-
-            if (result) return result;
         }
+        pending_replies_ = std::move(temp);
 
-        // Run Z80 to allow RSP to process (without holding lock)
-        if (z80_tick_) {
-            z80_tick_();
-        }
-        // If no callback, we just spin - caller should set callback
+        if (result) return result;
+
+        // Wait for reply_cv_ notification (Z80 main thread calls set_reply)
+        // Use wait_for with a short timeout to handle spurious wakeups and
+        // allow checking the deadline periodically
+        auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        if (remaining <= std::chrono::milliseconds(0)) break;
+
+        // Wait up to 100ms at a time to allow checking deadline
+        auto wait_time = std::min(remaining, std::chrono::milliseconds(100));
+        reply_cv_.wait_for(lock, wait_time);
     }
 
     return std::nullopt;  // Timeout

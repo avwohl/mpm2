@@ -2,8 +2,9 @@
 // Part of MP/M II Emulator
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Non-blocking, single-threaded SSH implementation using polling.
-// Uses OS-level non-blocking I/O (fcntl O_NONBLOCK) and ssh_event API.
+// Threaded SSH implementation - one thread per connection.
+// Each session runs in its own thread using blocking libssh calls.
+// Communicates with Z80 via thread-safe queues (ConsoleQueue, SftpBridge).
 
 #ifndef SSH_SESSION_H
 #define SSH_SESSION_H
@@ -14,6 +15,8 @@
 #include <vector>
 #include <memory>
 #include <map>
+#include <thread>
+#include <atomic>
 #include <libssh/libssh.h>
 #include <libssh/server.h>
 #include <libssh/callbacks.h>
@@ -44,15 +47,23 @@ enum class SSHState {
 
 class SSHServer;  // Forward declaration
 
-// SSH session - handles one SSH connection (non-blocking)
+// SSH session - handles one SSH connection in its own thread
 class SSHSession {
 public:
     SSHSession(ssh_session session, SSHServer* server);
     ~SSHSession();
 
-    // Poll for handshake progress and I/O - call from main loop
-    // Returns false when session should be removed
-    bool poll();
+    // Start the session thread
+    void start();
+
+    // Signal the session to stop (non-blocking)
+    void request_stop() { stop_requested_ = true; }
+
+    // Check if session is still running
+    bool is_running() const { return running_; }
+
+    // Wait for thread to finish (call after request_stop or when is_running is false)
+    void join();
 
     bool is_active() const { return state_ != SSHState::CLOSED; }
     bool is_ready() const { return state_ == SSHState::READY; }
@@ -70,10 +81,22 @@ public:
     void setup_sftp();
     bool is_sftp() const { return is_sftp_; }
 
+    // Send banner to channel (called from shell_request callback)
+    void send_banner(ssh_channel channel);
+
 private:
+    // Thread entry point
+    void run();
+
+    // Internal polling methods (called from run() in session thread)
     bool poll_handshake();
     bool poll_io();
     bool poll_sftp();
+
+    // Thread management
+    std::thread thread_;
+    std::atomic<bool> stop_requested_{false};
+    std::atomic<bool> running_{false};
 
     ssh_session session_;
     ssh_channel channel_;
@@ -128,10 +151,6 @@ private:
     std::map<void*, std::unique_ptr<OpenFile>> open_files_;
 
     uint32_t next_handle_id_ = 1;
-
-    // Re-entrancy guard for blocking SFTP operations
-    // When true, poll_sftp() returns immediately without processing new messages
-    bool blocking_op_ = false;
 };
 
 // SSH server - accepts connections (non-blocking)

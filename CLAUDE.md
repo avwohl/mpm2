@@ -10,9 +10,13 @@ This emulator runs MP/M II, Digital Research's multi-user, multi-tasking operati
 
 ### Execution Model
 
-The emulator runs single-threaded with polling:
-- **Main Loop**: Runs Z80 CPU in batches, handles console I/O, 60Hz timer interrupts
-- **SSH Sessions**: Bridge SSH connections to console I/O queues
+The emulator uses a hybrid threading model:
+- **Main Thread**: Runs Z80 CPU in batches, handles 60Hz timer interrupts, polls SFTP bridge
+- **SSH Threads**: One thread per SSH connection handles libssh I/O
+
+SSH threads communicate with the Z80 via thread-safe queues (`console_queue.h`):
+- Console sessions: input/output character queues
+- SFTP sessions: request/reply queues via `SftpBridge`
 
 ### Memory Model
 
@@ -63,6 +67,66 @@ Files involved:
 - `src/xios.cpp` - XIOS dispatch for SFTP (0x60-0x69)
 
 The only direct disk access allowed is `get_mounted_drives()` to list available drives.
+
+### Threading Policy
+
+**Threading is ONLY allowed for libssh code.** The Z80 interpreter, HTTP server, and all other emulator components run single-threaded on the main thread.
+
+Why threading for SSH:
+- libssh's non-blocking API has limitations (e.g., `sftp_server_init()` requires blocking mode)
+- Trying to make libssh fully non-blocking leads to complex workarounds and re-entrancy bugs
+- Per-connection threads allow using libssh's simpler, more reliable blocking API
+
+Rules:
+1. **One thread per SSH connection** - each `SSHSession` runs in its own thread
+2. **Z80 stays on main thread** - never run Z80 code from SSH threads
+3. **Communicate via queues** - use `ConsoleQueue` for I/O, `SftpBridge` for file operations
+4. **No shared mutable state** - queues are the only synchronization mechanism
+
+Files affected:
+- `src/ssh_session_libssh.cpp` - runs in per-connection threads
+- `include/console_queue.h` - thread-safe queue (already implemented)
+- `src/sftp_bridge.cpp` - thread-safe request/reply bridge (already implemented)
+
+### SFTP/HTTP to Z80 Bridge
+
+Both SFTP and HTTP file operations go through `SftpBridge` to communicate with the Z80 RSP (Resident System Process). The bridge is thread-safe.
+
+**Architecture:**
+```
+SSH Thread (or HTTP on main)     Main Thread             Z80 RSP
+─────────────────────────────    ───────────────         ───────────
+enqueue_request() ──────────────→ pending_requests_
+                                        │
+                                 Z80 runs, RSP polls
+                                        │
+                                 XIOS trap SFTP_POLL ←── CALL SFTP_POLL
+                                        │
+                                 XIOS trap SFTP_GET ←─── CALL SFTP_GET (copies request to Z80)
+                                        │
+                                                         Process via BDOS
+                                        │
+                                 XIOS trap SFTP_PUT ←─── CALL SFTP_PUT (reply)
+                                        │
+                                 set_reply() + notify_all()
+                                        │
+wait on reply_cv_ ←─────────────────────┘
+(wakes up with reply)
+```
+
+**Key points:**
+- HTTP uses `try_get_reply()` - non-blocking, polls on main thread (works fine)
+- SSH threads must use condition variable waiting (`reply_cv_`), NOT `z80_tick_()` callback
+- Current `wait_for_reply()` spins on `z80_tick_()` - this needs refactoring for threaded SSH
+- Z80 SFTP RSP code is in `asm/sftp_brs.plm`, XIOS handlers in `src/xios.cpp` (lines 644-755)
+
+### HTTP Server
+
+The HTTP server runs on the main thread and is fully non-blocking:
+- Uses standard Unix sockets with `O_NONBLOCK`
+- `poll()` method returns immediately if no data ready
+- Uses `try_get_reply()` for Z80 communication (non-blocking)
+- No threading needed - works well with current architecture
 
 ### Loading Binary Data
 
