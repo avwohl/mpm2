@@ -56,9 +56,7 @@ jobs:
           mv um80_and_friends ../um80_and_friends
 
       - name: Build emulator and disk image
-        run: |
-          mkdir -p build
-          ./scripts/build_all.sh
+        run: ./scripts/build_all.sh
         env:
           CPM_DISK: ${{ github.workspace }}/../cpmemu/util/cpm_disk.py
 

@@ -105,6 +105,7 @@ filesize() {
 }
 ASM_DIR="$PROJECT_DIR/asm"
 BUILD_DIR="$PROJECT_DIR/build"
+mkdir -p "$BUILD_DIR"
 DISKS_DIR="$PROJECT_DIR/disks"
 CPMEMU="${CPMEMU:-$HOME/src/cpmemu/src/cpmemu}"
 
