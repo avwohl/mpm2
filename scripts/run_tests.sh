@@ -51,6 +51,7 @@ start_emulator() {
     # Start emulator in background (--no-auth for CI/testing)
     cd "$BUILD_DIR"
     ./mpm2_emu --no-auth -p $PORT \
+        -k "$PROJECT_DIR/keys/ssh_host_rsa_key" \
         -d "A:$DISKS_DIR/mpm2_system.img" \
         > /tmp/mpm2_test.log 2>&1 &
     EMU_PID=$!
