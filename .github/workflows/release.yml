@@ -1,0 +1,227 @@
+name: Build Release Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (without v prefix)'
+        required: false
+        default: ''
+
+jobs:
+  build-disk-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mpm2
+        uses: actions/checkout@v4
+
+      - name: Checkout cpmemu (for qkz80 and cpm_disk.py)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/cpmemu
+          path: cpmemu
+
+      - name: Checkout um80_and_friends (for assembler)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/um80_and_friends
+          path: um80_and_friends
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libssh-dev python3-pip
+
+      - name: Install um80/ul80
+        working-directory: um80_and_friends
+        run: pip install -e .
+
+      - name: Build qkz80 library
+        working-directory: cpmemu/src
+        run: make libqkz80.a
+
+      - name: Move repos to expected locations
+        run: |
+          mv cpmemu ../cpmemu
+          mv um80_and_friends ../um80_and_friends
+
+      - name: Build emulator and disk image
+        run: ./scripts/build_all.sh
+
+      - name: Upload disk image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: disk-image
+          path: disks/mpm2_system.img
+
+  build-deb:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mpm2
+        uses: actions/checkout@v4
+
+      - name: Checkout cpmemu (for qkz80)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/cpmemu
+          path: cpmemu
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libssh-dev
+
+      - name: Build qkz80 library
+        working-directory: cpmemu/src
+        run: make libqkz80.a
+
+      - name: Move cpmemu to expected location
+        run: |
+          mv cpmemu ../cpmemu
+
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Create DEB package
+        run: |
+          cd build
+          cpack -G DEB
+
+      - name: Upload DEB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deb-package
+          path: build/*.deb
+
+  build-rpm:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Install base tools
+        run: dnf install -y git
+
+      - name: Checkout mpm2
+        uses: actions/checkout@v4
+
+      - name: Checkout cpmemu (for qkz80)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/cpmemu
+          path: cpmemu
+
+      - name: Install dependencies
+        run: |
+          dnf install -y \
+            gcc-c++ \
+            cmake \
+            make \
+            libssh-devel \
+            rpm-build
+
+      - name: Build qkz80 library
+        working-directory: cpmemu/src
+        run: make libqkz80.a
+
+      - name: Move cpmemu to expected location
+        run: |
+          mv cpmemu ../cpmemu
+
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Create RPM package
+        run: |
+          cd build
+          cpack -G RPM
+
+      - name: Upload RPM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpm-package
+          path: build/*.rpm
+
+  release:
+    needs: [build-disk-image, build-deb, build-rpm]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - name: Download disk image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: disk-image
+          path: packages
+
+      - name: Download DEB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: deb-package
+          path: packages
+
+      - name: Download RPM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: rpm-package
+          path: packages
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: packages/*
+          generate_release_notes: true
+          body: |
+            ## Installation
+
+            ### Debian/Ubuntu
+            ```bash
+            # Download and install
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/mpm2-emu_0.3.0_amd64.deb
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/mpm2_system.img
+            sudo dpkg -i mpm2-emu_*.deb
+            sudo apt-get install -f  # Install dependencies if needed
+
+            # Run
+            mpm2_emu -l -d A:mpm2_system.img
+            ```
+
+            ### Fedora/RHEL
+            ```bash
+            # Download and install
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/mpm2-emu-0.3.0-1.x86_64.rpm
+            wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/mpm2_system.img
+            sudo dnf install ./mpm2-emu-*.rpm
+
+            # Run
+            mpm2_emu -l -d A:mpm2_system.img
+            ```
+
+            ### SSH Access
+            ```bash
+            # Generate host key
+            mkdir -p keys
+            ssh-keygen -t rsa -b 2048 -m PEM -f keys/ssh_host_rsa_key -N ''
+
+            # Run with SSH (no auth for testing)
+            mpm2_emu --no-auth -d A:mpm2_system.img
+
+            # Connect from another terminal
+            ssh -p 2222 user@localhost
+            ```
+
+            See the [README](https://github.com/${{ github.repository }}#binary-installation) for full documentation.

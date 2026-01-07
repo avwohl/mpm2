@@ -21,6 +21,48 @@ A Z80-based MP/M II emulator with SSH terminal access. Multiple users can connec
 ssh -p 2222 user@localhost
 ```
 
+## Binary Installation
+
+Pre-built packages are available for Linux systems. Download the appropriate package and disk image from the [Releases](https://github.com/avwohl/mpm2/releases) page.
+
+### Debian/Ubuntu (.deb)
+
+```bash
+# Download and install
+wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2-emu_0.3.0_amd64.deb
+sudo dpkg -i mpm2-emu_0.3.0_amd64.deb
+sudo apt-get install -f  # Install dependencies if needed
+
+# Download disk image
+wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2_system.img
+
+# Run
+mpm2_emu -l -d A:mpm2_system.img
+```
+
+### Fedora/RHEL (.rpm)
+
+```bash
+# Download and install
+wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2-emu-0.3.0-1.x86_64.rpm
+sudo dnf install ./mpm2-emu-0.3.0-1.x86_64.rpm
+
+# Download disk image
+wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2_system.img
+
+# Run
+mpm2_emu -l -d A:mpm2_system.img
+```
+
+### What's in the Packages
+
+| Package | Contents |
+|---------|----------|
+| `.deb` / `.rpm` | `mpm2_emu` emulator binary, `mkboot` utility |
+| `mpm2_system.img` | Pre-built 8MB disk image with MP/M II and utilities |
+
+The disk image is required - it contains the MP/M II operating system, boot loader, and standard utilities.
+
 ## Prerequisites
 
 ### Required Dependencies

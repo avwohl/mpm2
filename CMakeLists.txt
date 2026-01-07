@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(mpm2_emu VERSION 0.2.0 LANGUAGES CXX)
+project(mpm2_emu VERSION 0.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -120,3 +120,30 @@ target_compile_options(mkboot PRIVATE
 
 # Install targets
 install(TARGETS mpm2_emu mkboot RUNTIME DESTINATION bin)
+
+# CPack configuration for .deb and .rpm packages
+set(CPACK_PACKAGE_NAME "mpm2-emu")
+set(CPACK_PACKAGE_VENDOR "mpm2")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "MP/M II emulator with SSH terminal access")
+set(CPACK_PACKAGE_DESCRIPTION "MP/M II (Multi-Programming Monitor for CP/M) emulator for Z80-based \
+multi-user, multi-tasking operating system. Features SSH terminal access for \
+remote connections and HTTP file browser.")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/wohl/mpm2")
+set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+if(EXISTS "${CMAKE_SOURCE_DIR}/LICENSE")
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
+endif()
+
+# DEB specific
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "mpm2 maintainers")
+set(CPACK_DEBIAN_PACKAGE_SECTION "emulators")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libssh-4 (>= 0.9)")
+
+# RPM specific
+set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
+set(CPACK_RPM_PACKAGE_GROUP "Applications/Emulators")
+set(CPACK_RPM_PACKAGE_REQUIRES "libssh >= 0.9")
+
+include(CPack)
