@@ -233,8 +233,11 @@ Options:
   -d, --disk A:FILE           Mount disk image on drive A-P (required)
   -l, --local                 Enable local console (output to stdout)
   -t, --timeout SECS          Timeout in seconds for debugging
-  -w, --http PORT             HTTP server port (default: 8000, 0 to disable)
-  -p, --port PORT             SSH listen port (default: 2222)
+  -w, --http [IP:]PORT        HTTP server address (default: 8000, 0 to disable)
+                              Can be repeated for multiple listeners
+  -p, --port [IP:]PORT        SSH listen address (default: 2222)
+                              Can be repeated for multiple listeners
+                              Use [IPv6]:PORT for IPv6 addresses
   -k, --key FILE              Host key file (default: keys/ssh_host_rsa_key)
   -a, --authorized-keys FILE  Authorized keys file (default: keys/authorized_keys)
   -n, --no-auth               Disable SSH authentication (accept any connection)
@@ -249,6 +252,9 @@ Examples:
 
   # SSH mode without authentication (development only)
   ./mpm2_emu --no-auth -d A:disks/mpm2_system.img
+
+  # Bind to specific IP and multiple listeners
+  ./mpm2_emu -p 127.0.0.1:2222 -p '[::1]:2222' -w 8000 -d A:disks/mpm2_system.img
 ```
 
 The emulator boots from disk sector 0 of drive A using the cold start loader.

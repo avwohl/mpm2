@@ -229,9 +229,12 @@ For development/testing without authentication:
 Options:
   -d, --disk A:FILE           Mount disk image (required)
   -l, --local                 Local console mode (output to stdout)
-  -w, --http PORT             HTTP server port (default: 8000, 0 to disable)
+  -w, --http [IP:]PORT        HTTP server address (default: 8000, 0 to disable)
+                              Can be repeated for multiple listeners
   --log FILE                  Access log file (default: mpm2.log)
-  -p, --port PORT             SSH listen port (default: 2222)
+  -p, --port [IP:]PORT        SSH listen address (default: 2222)
+                              Can be repeated for multiple listeners
+                              Use [IPv6]:PORT for IPv6 addresses
   -k, --key FILE              Host key file (default: keys/ssh_host_rsa_key)
   -a, --authorized-keys FILE  Authorized keys file (default: keys/authorized_keys)
   -n, --no-auth               Disable SSH authentication (accept any connection)
@@ -254,8 +257,11 @@ ssh -p 2222 user@localhost
 # SSH mode without authentication (development only)
 ./build/mpm2_emu --no-auth -d A:disks/mpm2_system.img
 
-# Custom SSH port
-./build/mpm2_emu -p 2223 -d A:disks/mpm2_system.img
+# Bind to specific IP address
+./build/mpm2_emu -p 127.0.0.1:2222 -w 127.0.0.1:8000 -d A:disks/mpm2_system.img
+
+# Multiple listeners (IPv4 and IPv6)
+./build/mpm2_emu -p 127.0.0.1:2222 -p '[::1]:2222' -w 8000 -d A:disks/mpm2_system.img
 ```
 
 ## SFTP File Transfer
