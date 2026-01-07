@@ -7,6 +7,7 @@
 #include "disk.h"
 #include "http_server.h"
 #include "sftp_bridge.h"
+#include "logger.h"
 
 #if defined(HAVE_LIBSSH) || defined(HAVE_WOLFSSH)
 #include "ssh_session.h"
@@ -79,6 +80,7 @@ void print_usage(const char* prog) {
               << "  -l, --local           Enable local console (output to stdout)\n"
               << "  -t, --timeout SECS    Timeout in seconds for debugging (0 = no timeout)\n"
               << "  -w, --http PORT       HTTP server port (default: 8000, 0 to disable)\n"
+              << "  --log FILE            Log file for HTTP/SSH/SFTP access (default: mpm2.log)\n"
 #ifdef HAVE_SSH
               << "  -p, --port PORT       SSH listen port (default: 2222)\n"
               << "  -k, --key FILE        Host key file (default: keys/ssh_host_rsa_key)\n"
@@ -103,6 +105,7 @@ int main(int argc, char* argv[]) {
     bool local_console = false;
     int timeout_seconds = 0;
     int http_port = 8000;  // Default HTTP port (0 to disable)
+    std::string log_file = "mpm2.log";
     std::vector<std::pair<int, std::string>> disk_mounts;
 #ifdef HAVE_SSH
     int ssh_port = 2222;
@@ -118,6 +121,7 @@ int main(int argc, char* argv[]) {
         {"local",         no_argument,       nullptr, 'l'},
         {"timeout",       required_argument, nullptr, 't'},
         {"http",          required_argument, nullptr, 'w'},
+        {"log",           required_argument, nullptr, 'L'},
 #ifdef HAVE_SSH
         {"port",          required_argument, nullptr, 'p'},
         {"key",           required_argument, nullptr, 'k'},
@@ -131,9 +135,9 @@ int main(int argc, char* argv[]) {
 
     int opt;
 #ifdef HAVE_SSH
-    const char* optstring = "d:lt:w:p:k:a:nTh";
+    const char* optstring = "d:lt:w:L:p:k:a:nTh";
 #else
-    const char* optstring = "d:lt:w:h";
+    const char* optstring = "d:lt:w:L:h";
 #endif
     while ((opt = getopt_long(argc, argv, optstring, long_options, nullptr)) != -1) {
         switch (opt) {
@@ -167,6 +171,9 @@ int main(int argc, char* argv[]) {
                 break;
             case 'w':
                 http_port = std::atoi(optarg);
+                break;
+            case 'L':
+                log_file = optarg;
                 break;
 #ifdef HAVE_SSH
             case 'p':
@@ -205,6 +212,13 @@ int main(int argc, char* argv[]) {
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
     std::signal(SIGPIPE, SIG_IGN);  // Ignore SIGPIPE from closed SSH connections
+
+    // Initialize logger
+    if (!log_file.empty()) {
+        if (!Logger::instance().open(log_file)) {
+            std::cerr << "Warning: Could not open log file: " << log_file << "\n";
+        }
+    }
 
     // Force unbuffered output for non-TTY environments
     std::ios::sync_with_stdio(true);

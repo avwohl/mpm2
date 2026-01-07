@@ -4,6 +4,7 @@
 // Uses polling (non-blocking sockets), no threading.
 
 #include "http_server.h"
+#include "logger.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -109,8 +110,8 @@ void HTTPServer::poll_accept() {
         return;
     }
 
-    std::cerr << "[HTTP] New connection from " << inet_ntoa(client_addr.sin_addr) << "\n";
-    connections_.push_back(std::make_unique<HTTPConnection>(client_fd));
+    std::string client_ip = inet_ntoa(client_addr.sin_addr);
+    connections_.push_back(std::make_unique<HTTPConnection>(client_fd, client_ip));
 }
 
 void HTTPServer::poll_connections() {
@@ -127,7 +128,8 @@ void HTTPServer::poll_connections() {
 // HTTPConnection implementation
 // ============================================================================
 
-HTTPConnection::HTTPConnection(int fd) : fd_(fd) {}
+HTTPConnection::HTTPConnection(int fd, const std::string& client_ip)
+    : fd_(fd), client_ip_(client_ip) {}
 
 HTTPConnection::~HTTPConnection() {
     if (fd_ >= 0) {
@@ -211,7 +213,7 @@ bool HTTPConnection::parse_request() {
     std::string http_version;
     iss >> method_ >> path_ >> http_version;
 
-    std::cerr << "[HTTP] " << method_ << " " << path_ << "\n";
+    LOG_HTTP(client_ip_, method_ + " " + path_);
 
     // Validate method
     if (method_ != "GET" && method_ != "HEAD") {

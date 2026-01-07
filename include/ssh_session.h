@@ -109,6 +109,7 @@ private:
     SSHServer* server_;
     ssh_server_callbacks_struct server_callbacks_;
     ssh_channel_callbacks_struct channel_callbacks_;
+    std::string client_ip_;
 
     // SFTP support
     sftp_session sftp_;

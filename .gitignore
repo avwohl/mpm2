@@ -104,3 +104,4 @@ disks/*.bak
 
 # Linux
 *.core
+mpm2.log

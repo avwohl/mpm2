@@ -56,7 +56,7 @@ public:
         DONE                // Connection complete
     };
 
-    explicit HTTPConnection(int fd);
+    HTTPConnection(int fd, const std::string& client_ip);
     ~HTTPConnection();
 
     // Poll this connection. Returns false when done/error.
@@ -67,6 +67,7 @@ public:
 
 private:
     int fd_;
+    std::string client_ip_;
     State state_ = State::READING_REQUEST;
 
     // Request parsing

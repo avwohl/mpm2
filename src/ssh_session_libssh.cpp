@@ -14,6 +14,7 @@
 #include "sftp_bridge.h"
 #include "sftp_path.h"
 #include "console.h"
+#include "logger.h"
 #include <libssh/libssh.h>
 #include <libssh/server.h>
 #include <libssh/callbacks.h>
@@ -26,10 +27,26 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/select.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 // Debug output control - set to true to enable verbose debug output
 static constexpr bool DEBUG_SSH = false;
 static constexpr bool DEBUG_SFTP = false;
+
+// Get client IP address from ssh_session
+static std::string get_client_ip(ssh_session session) {
+    socket_t fd = ssh_get_fd(session);
+    if (fd == SSH_INVALID_SOCKET) return "unknown";
+
+    struct sockaddr_in addr;
+    socklen_t len = sizeof(addr);
+    if (getpeername(fd, reinterpret_cast<struct sockaddr*>(&addr), &len) < 0) {
+        return "unknown";
+    }
+    return inet_ntoa(addr.sin_addr);
+}
 
 
 // Set fd to non-blocking at OS level
@@ -48,12 +65,13 @@ class SSHSession;
 
 // Called when client attempts "none" authentication (no credentials)
 static int auth_none_callback(ssh_session session, const char* user, void* userdata) {
-    (void)session;
     if (DEBUG_SSH) std::cerr << "[SSH] auth_none_callback called, user=" << (user ? user : "(null)") << "\n";
     SSHSession* ssh_sess = static_cast<SSHSession*>(userdata);
     if (ssh_sess && ssh_sess->server() && ssh_sess->server()->no_auth()) {
         // No authentication required - accept
         if (DEBUG_SSH) std::cerr << "[SSH] auth_none: accepting (no-auth mode)\n";
+        std::string ip = get_client_ip(session);
+        LOG_SSH(ip, std::string("auth user=") + (user ? user : "") + " method=none");
         ssh_sess->set_authenticated(true);
         return SSH_AUTH_SUCCESS;
     }
@@ -102,6 +120,8 @@ static int auth_pubkey_callback(ssh_session session, const char* user,
     // Key is authorized
     if (signature_state == SSH_PUBLICKEY_STATE_VALID) {
         // Signature verified - grant access
+        std::string ip = get_client_ip(session);
+        LOG_SSH(ip, std::string("auth user=") + (user ? user : "") + " method=publickey");
         ssh_sess->set_authenticated(true);
         return SSH_AUTH_SUCCESS;
     }
@@ -143,10 +163,11 @@ static int channel_env_request_callback(ssh_session session, ssh_channel channel
 }
 
 static int channel_shell_request_callback(ssh_session session, ssh_channel channel, void* userdata) {
-    (void)session;
     if (DEBUG_SSH) std::cerr << "[SSH] shell_request_callback invoked\n";
     SSHSession* ssh_sess = static_cast<SSHSession*>(userdata);
     if (ssh_sess) {
+        std::string ip = get_client_ip(session);
+        LOG_SSH(ip, "shell");
         ssh_sess->setup_console();
         // Send banner immediately before returning from callback
         // This ensures data is sent before client times out
@@ -157,10 +178,11 @@ static int channel_shell_request_callback(ssh_session session, ssh_channel chann
 
 static int channel_exec_request_callback(ssh_session session, ssh_channel channel,
                                           const char* command, void* userdata) {
-    (void)session;
     if (DEBUG_SSH) std::cerr << "[SSH] exec_request_callback invoked, command=" << (command ? command : "(null)") << "\n";
     SSHSession* ssh_sess = static_cast<SSHSession*>(userdata);
     if (ssh_sess) {
+        std::string ip = get_client_ip(session);
+        LOG_SSH(ip, std::string("exec command=") + (command ? command : ""));
         // For exec requests, we still set up the console and let MP/M II handle it
         ssh_sess->setup_console();
         // Send banner immediately
@@ -172,12 +194,14 @@ static int channel_exec_request_callback(ssh_session session, ssh_channel channe
 // Called when client requests a subsystem (e.g., "sftp")
 static int channel_subsystem_request_callback(ssh_session session, ssh_channel channel,
                                                const char* subsystem, void* userdata) {
-    (void)session; (void)channel;
+    (void)channel;
     SSHSession* ssh_sess = static_cast<SSHSession*>(userdata);
 
     if (subsystem && strcmp(subsystem, "sftp") == 0) {
         if (DEBUG_SSH) std::cerr << "[SSH] SFTP subsystem requested\n";
         if (ssh_sess) {
+            std::string ip = get_client_ip(session);
+            LOG_SFTP(ip, "session started");
             // Don't initialize here - the response hasn't been sent yet.
             // Mark as pending and initialize in poll loop after response is sent.
             ssh_sess->mark_sftp_pending();
@@ -221,6 +245,7 @@ SSHSession::SSHSession(ssh_session session, SSHServer* server)
     , server_(server)
     , server_callbacks_{}
     , channel_callbacks_{}
+    , client_ip_(get_client_ip(session))
     , sftp_(nullptr)
     , is_sftp_(false)
 {
@@ -229,6 +254,9 @@ SSHSession::SSHSession(ssh_session session, SSHServer* server)
 
     // Use blocking mode - we're in our own thread
     ssh_set_blocking(session_, 1);
+
+    // Log connection
+    LOG_SSH(client_ip_, "connected");
 }
 
 SSHServer* SSHSession::server() const {
@@ -430,6 +458,13 @@ void SSHSession::run() {
         std::cerr << "[SSH] Session thread exiting, console " << console_id_
                   << " stop_requested=" << (stop_requested_ ? 1 : 0)
                   << " state=" << (int)state_ << "\n";
+    }
+
+    // Log disconnection
+    if (is_sftp_) {
+        LOG_SFTP(client_ip_, "session ended");
+    } else {
+        LOG_SSH(client_ip_, "disconnected");
     }
 }
 
