@@ -30,8 +30,12 @@ puts "Connecting to port $port..."
 # Spawn SSH connection with PTY
 spawn ssh -tt -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null user@localhost
 
-# Wait for MP/M II banner or prompt
+# Wait for MP/M II prompt (with optional banner on first connect)
+# On reconnection, we might just get the prompt without the full banner
 expect {
+    -re {\d+[A-P]>} {
+        puts "\n>>> Got prompt!"
+    }
     -re {MP/M II Console \d+} {
         puts "\n>>> Saw console banner"
         exp_continue
@@ -40,8 +44,9 @@ expect {
         puts "\n>>> Saw MP/M version"
         exp_continue
     }
-    -re {\d+[A-P]>} {
-        puts "\n>>> Got prompt!"
+    -re {Copyright} {
+        puts "\n>>> Saw copyright"
+        exp_continue
     }
     timeout {
         puts "\n>>> TIMEOUT waiting for prompt"
