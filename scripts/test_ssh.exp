@@ -83,18 +83,9 @@ foreach cmd $commands {
 
 puts "\n>>> All commands completed successfully"
 
-# Send exit if the last command wasn't exit
-if {[lindex $commands end] ne "exit"} {
-    puts "\n>>> Sending EXIT to close session"
-    send "exit\r"
-    expect {
-        eof {
-            puts ">>> Session closed cleanly"
-        }
-        timeout {
-            puts ">>> Timeout waiting for session to close"
-        }
-    }
-}
+# Just close the connection - MP/M II doesn't have an exit command
+puts "\n>>> Closing connection"
+close
+wait
 
 exit 0
