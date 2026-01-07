@@ -218,6 +218,7 @@ do;
       /* Serial check disabled for source build */
       return;
 
+      /* Dead code below - commented out to avoid uplm80 "do forever" error
       do forever;
         i,j = -1;
         do while cpyrt(i:=i+1) = mem(j:=j+1);
@@ -231,6 +232,7 @@ do;
         end;
         memadr = memadr + 1;
       end;
+      */
     end match$serial;
 
   declare (base,cur$top,prev$top) address;
@@ -380,7 +382,7 @@ $include (sysdat.lit)
         end;
         rspsadr(cntr) = double (xdos$base)*256;
         do while (cntr:=cntr-1) <> -1;
-          call move (8,rspsadr(cntr)+6+2,.rspname);
+          call move (8, rspsadr(cntr)+6+2, .rspname);
           call printitems (.rspname,
                            rspsadr(cntr),
                            rspsadr(cntr+1)-rspsadr(cntr));
@@ -409,7 +411,7 @@ $include (sysdat.lit)
         end;
         rspsadr(cntr) = double (tmp$base)*256;
         do while (cntr:=cntr-1) <> -1;
-          call move (8,rspsadr(cntr)+4,.brspname);
+          call move (8, rspsadr(cntr)+4, .brspname);
           call printitems (.brspname,
                            rspsadr(cntr),
                            rspsadr(cntr+1)-rspsadr(cntr));

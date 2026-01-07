@@ -173,7 +173,10 @@ MPMLDR_TARGETS = [
     BuildTarget("GENSYS", "com", ["GENSYS.PLM", "LDRLWR.ASM", "X0100.ASM"], "MPMLDR"),
 ]
 
-# Path to LDRBDOS binary (extracted from DRI MPMLDR.COM)
+# LDRBDOS binary path (extracted from DRI MPMLDR.COM)
+# Note: LDRBDOS.ASM uses RMAC register aliasing syntax (e.g., "arech equ b!")
+# that um80 doesn't support. The binary is extracted from DRI instead.
+# The extracted LDRBDOS is identical between V2.0 and V2.1 MPMLDR.COM.
 LDRBDOS_BIN = BUILD_DIR / "MPMLDR" / "ldrbdos.bin"
 DRI_MPMLDR = SRC_ROOT / "MPMLDR" / "MPMLDR.COM"
 
@@ -464,7 +467,10 @@ class Builder:
         MPMLDR memory map:
         - 0x100: Main loader code (from PLM/ASM)
         - 0xD00: LDRBDOS (extracted from DRI MPMLDR.COM)
-        - 0x1700: LDRBIOS (loaded at runtime)
+        - 0x1700: LDRBIOS (loaded at runtime by boot loader)
+
+        Note: LDRBDOS.ASM uses RMAC register aliasing that um80 doesn't support,
+        so we extract the binary from DRI's MPMLDR.COM instead of building from source.
         """
         # Create MPMLDR build directory if needed
         mpmldr_build_dir = self.build_dir / "MPMLDR"

@@ -20,14 +20,13 @@ $title	('MP/M II V2.0  Loader BDOS Interface')
 LDRBDOS	equ	0d06h		; Loader BDOS entry point
 
 ; LDMON1 - BDOS call wrapper (no return value)
-; uplm80 pushes: func first, then info, then calls
-; Stack on entry: [top] ret_addr, info, func [bottom]
-; After push hl: [top] saved_hl, ret_addr, info, func [bottom]
+; uplm80 pushes left-to-right: func first, then info
+; Stack after push hl: [saved_hl, ret_addr, info, func]
 ; SP+0=saved_hl, SP+2=ret_addr, SP+4=info, SP+6=func
-; Caller will pop 2 words after call, so we must NOT pop them
+; Caller will pop 2 words after call
 ldmon1:
 	push	hl		; save HL
-	lxi	h,4		; offset to info on stack
+	lxi	h,4		; offset to info on stack (after push hl)
 	dad	sp		; HL = SP + 4 -> points to info
 	mov	e,m		; info low
 	inx	h
@@ -42,7 +41,7 @@ ldmon1:
 ; Stack same as LDMON1
 ldmon2:
 	push	hl		; save HL
-	lxi	h,4		; offset to info on stack
+	lxi	h,4		; offset to info on stack (after push hl)
 	dad	sp		; HL = SP + 4
 	mov	e,m		; info low
 	inx	h
