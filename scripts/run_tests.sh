@@ -86,8 +86,8 @@ run_expect_test() {
     echo "Commands: $commands"
     echo ""
 
-    # Small delay to let console reset between tests
-    sleep 2
+    # Delay to let console reset between tests
+    sleep 5
 
     if "$SCRIPT_DIR/test_ssh.exp" $PORT $commands; then
         echo ""

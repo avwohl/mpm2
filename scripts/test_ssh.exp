@@ -88,8 +88,12 @@ foreach cmd $commands {
 
 puts "\n>>> All commands completed successfully"
 
-# Just close the connection - MP/M II doesn't have an exit command
+# Send a couple of CRs to ensure clean state, then close
 puts "\n>>> Closing connection"
+send "\r"
+sleep 0.5
+send "\r"
+sleep 0.5
 close
 wait
 
