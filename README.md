@@ -128,11 +128,21 @@ To build just the source binaries without creating a disk:
 
 ### Modern GENSYS
 
-The original DRI GENSYS.COM has a bug that corrupts SPR/BRS files larger than 1024
-bytes during relocation. This project uses a Python replacement (`tools/gensys.py`)
-that correctly handles files of any size. The Python GENSYS:
+The original DRI GENSYS.COM has a bug in its relocation code (LDRLWR.ASM) that
+corrupts SPR/BRS files when code size doesn't align well with 128-byte sectors.
+The bug is most severe at exactly 1024 bytes where 100% of relocation uses garbage.
 
-- Fixes the 1024-byte relocation bug
+**The Bug:** LDRLWR.ASM loads `ceil(prgsiz/128)` sectors, which includes code plus
+extra bytes from rounding. It uses these extra bytes as the relocation bitmap. When
+more bitmap is needed, it should read from disk - but the detection check compares
+the bitmap pointer against an unrelated buffer address (`bitmap+128`) instead of
+checking if it exceeded the loaded data. Result: garbage is used instead of the
+actual bitmap.
+
+This project uses a Python replacement (`tools/gensys.py`) that reads the complete
+bitmap directly from the SPR file and applies it correctly:
+
+- Fixes the bitmap relocation bug for all file sizes
 - Reads configuration from JSON instead of interactive prompts
 - Generates identical MPM.SYS output for valid inputs
 - Supports RSP modules with banked code (BRS files)
