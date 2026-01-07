@@ -63,8 +63,10 @@ start_emulator() {
     for i in {1..30}; do
         if nc -z localhost $PORT 2>/dev/null; then
             echo "SSH server is ready!"
-            # Give it a moment to fully initialize
-            sleep 1
+            # Wait for MP/M II to fully boot (TMP to print prompt)
+            # SSH starts before boot completes, so need extra time
+            echo "Waiting for MP/M II to boot..."
+            sleep 8
             return 0
         fi
         sleep 0.5
@@ -106,8 +108,6 @@ test_basic() {
     echo "Running basic tests"
     echo "========================================"
 
-    # Note: Only run one test per emulator session due to console reconnect issue
-    # Multiple SSH connections to same console don't work reliably yet
     run_expect_test "DIR command" "dir"
 }
 
@@ -122,8 +122,8 @@ test_stat() {
 }
 
 test_all() {
-    # Only run basic for now - console reconnect issue prevents multiple tests
     test_basic
+    test_stat
 }
 
 # Main

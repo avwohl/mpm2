@@ -319,6 +319,12 @@ void SSHSession::setup_console() {
     con->set_connected(true);
     state_ = SSHState::READY;
 
+    // Clear any stale input from previous session, then inject CR to wake up TMP
+    // The CR causes TMP to process an empty command and print a fresh prompt
+    // Essential for reconnection after disconnect while TMP was waiting
+    con->input_queue().clear();
+    con->input_queue().try_write('\r');
+
     if (DEBUG_SSH) std::cerr << "[SSH] New connection on console " << console_id_ << "\n";
 }
 
@@ -373,13 +379,8 @@ SSHSession::~SSHSession() {
         thread_.join();
     }
 
-    // Release console
-    if (console_id_ >= 0) {
-        Console* con = ConsoleManager::instance().get(console_id_);
-        if (con) {
-            con->set_connected(false);
-        }
-    }
+    // Note: Console is already marked as disconnected in run() before thread exits
+    // This happens before running_ is set to false to prevent race conditions
 
     // Don't call sftp_free() - it sends EOF which can cause "closed by remote host"
     // Let ssh_free() handle cleanup
@@ -450,6 +451,16 @@ void SSHSession::run() {
             if (!io_result) break;
         } else {
             if (!poll_handshake()) break;
+        }
+    }
+
+    // Mark console as disconnected BEFORE setting running_ = false
+    // This prevents race where new connection tries to use the console
+    // before the destructor runs
+    if (console_id_ >= 0) {
+        Console* con = ConsoleManager::instance().get(console_id_);
+        if (con) {
+            con->set_connected(false);
         }
     }
 

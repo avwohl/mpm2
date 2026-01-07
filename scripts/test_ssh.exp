@@ -10,7 +10,7 @@
 #   ./test_ssh.exp 2222 dir stat      # Run DIR then STAT
 #
 
-set timeout 30
+set timeout 45
 set port [lindex $argv 0]
 if {$port eq ""} {
     set port 2222
