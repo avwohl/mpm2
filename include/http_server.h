@@ -7,6 +7,7 @@
 
 #include "sftp_bridge.h"
 #include "sftp_path.h"
+#include "listen_address.h"
 #include <string>
 #include <vector>
 #include <memory>
@@ -20,8 +21,11 @@ public:
     HTTPServer() = default;
     ~HTTPServer();
 
-    // Start listening on port. Returns false on error.
-    bool start(int port);
+    // Start listening on address and port. Returns false on error.
+    // Empty host means INADDR_ANY (all interfaces)
+    bool start(const std::string& host, int port);
+    bool start(int port) { return start("", port); }
+    bool start(const ListenAddress& addr) { return start(addr.host, addr.port); }
 
     // Stop server and close all connections
     void stop();
@@ -33,12 +37,13 @@ public:
     // Check if server is running
     bool is_running() const { return listen_fd_ >= 0; }
 
-    // Get port number
-    int port() const { return port_; }
+    // Get listen address
+    const ListenAddress& listen_address() const { return listen_addr_; }
+    int port() const { return listen_addr_.port; }
 
 private:
     int listen_fd_ = -1;
-    int port_ = 0;
+    ListenAddress listen_addr_;
     std::vector<std::unique_ptr<HTTPConnection>> connections_;
 
     void poll_accept();

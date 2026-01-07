@@ -8,6 +8,7 @@
 #include "http_server.h"
 #include "sftp_bridge.h"
 #include "logger.h"
+#include "listen_address.h"
 
 #if defined(HAVE_LIBSSH) || defined(HAVE_WOLFSSH)
 #include "ssh_session.h"
@@ -79,10 +80,13 @@ void print_usage(const char* prog) {
               << "  -d, --disk A:FILE     Mount disk image on drive A-P (required)\n"
               << "  -l, --local           Enable local console (output to stdout)\n"
               << "  -t, --timeout SECS    Timeout in seconds for debugging (0 = no timeout)\n"
-              << "  -w, --http PORT       HTTP server port (default: 8000, 0 to disable)\n"
+              << "  -w, --http [IP:]PORT  HTTP server address (default: 8000, 0 to disable)\n"
+              << "                        Can be repeated for multiple listeners\n"
               << "  --log FILE            Log file for HTTP/SSH/SFTP access (default: mpm2.log)\n"
 #ifdef HAVE_SSH
-              << "  -p, --port PORT       SSH listen port (default: 2222)\n"
+              << "  -p, --port [IP:]PORT  SSH listen address (default: 2222)\n"
+              << "                        Can be repeated for multiple listeners\n"
+              << "                        Use [IPv6]:PORT for IPv6 addresses\n"
               << "  -k, --key FILE        Host key file (default: keys/ssh_host_rsa_key)\n"
               << "  -a, --authorized-keys FILE  Authorized keys file (default: keys/authorized_keys)\n"
               << "  -n, --no-auth         Disable SSH authentication (accept any connection)\n"
@@ -93,9 +97,10 @@ void print_usage(const char* prog) {
               << "The emulator boots from disk sector 0 of drive A.\n"
               << "\n"
               << "Examples:\n"
-              << "  " << prog << " -l -d A:system.img           # Local console mode\n"
+              << "  " << prog << " -l -d A:system.img                    # Local console mode\n"
 #ifdef HAVE_SSH
-              << "  " << prog << " -d A:system.img              # SSH + HTTP mode\n"
+              << "  " << prog << " -d A:system.img                       # SSH + HTTP mode\n"
+              << "  " << prog << " -p 127.0.0.1:2222 -p [::1]:2222 -d A:system.img  # Localhost only\n"
 #endif
               << "\n";
 }
@@ -104,11 +109,11 @@ int main(int argc, char* argv[]) {
     // Default options
     bool local_console = false;
     int timeout_seconds = 0;
-    int http_port = 8000;  // Default HTTP port (0 to disable)
+    std::vector<ListenAddress> http_addrs;  // HTTP listen addresses
     std::string log_file = "mpm2.log";
     std::vector<std::pair<int, std::string>> disk_mounts;
 #ifdef HAVE_SSH
-    int ssh_port = 2222;
+    std::vector<ListenAddress> ssh_addrs;   // SSH listen addresses
     std::string host_key = "keys/ssh_host_rsa_key";
     std::string authorized_keys = "keys/authorized_keys";
     bool no_auth = false;
@@ -169,16 +174,34 @@ int main(int argc, char* argv[]) {
             case 't':
                 timeout_seconds = std::atoi(optarg);
                 break;
-            case 'w':
-                http_port = std::atoi(optarg);
+            case 'w': {
+                auto addr = parse_listen_address(optarg, 8000);
+                if (!addr) {
+                    std::cerr << "Invalid HTTP listen address: " << optarg << "\n";
+                    return 1;
+                }
+                if (addr->port == 0) {
+                    // Explicitly disabled
+                    http_addrs.clear();
+                    http_addrs.push_back(ListenAddress("", 0));
+                } else {
+                    http_addrs.push_back(*addr);
+                }
                 break;
+            }
             case 'L':
                 log_file = optarg;
                 break;
 #ifdef HAVE_SSH
-            case 'p':
-                ssh_port = std::atoi(optarg);
+            case 'p': {
+                auto addr = parse_listen_address(optarg, 2222);
+                if (!addr) {
+                    std::cerr << "Invalid SSH listen address: " << optarg << "\n";
+                    return 1;
+                }
+                ssh_addrs.push_back(*addr);
                 break;
+            }
             case 'k':
                 host_key = optarg;
                 break;
@@ -277,14 +300,25 @@ int main(int argc, char* argv[]) {
         z80.set_timeout(timeout_seconds);
     }
 
+    // Apply defaults if no addresses specified
+    if (http_addrs.empty()) {
+        http_addrs.push_back(ListenAddress("", 8000));  // Default: all interfaces, port 8000
+    }
+#ifdef HAVE_SSH
+    if (ssh_addrs.empty() && !local_console) {
+        ssh_addrs.push_back(ListenAddress("", 2222));   // Default: all interfaces, port 2222
+    }
+#endif
+
     // Initialize HTTP server
     HTTPServer http_server;
     bool http_enabled = false;
-    if (http_port > 0) {
-        if (http_server.start(http_port)) {
+    if (!http_addrs.empty() && http_addrs[0].port > 0) {
+        const auto& addr = http_addrs[0];  // Currently only support first address
+        if (http_server.start(addr)) {
             http_enabled = true;
         } else {
-            std::cerr << "Failed to start HTTP server on port " << http_port << "\n";
+            std::cerr << "Failed to start HTTP server on " << addr.to_string() << "\n";
             return 1;
         }
 
@@ -298,7 +332,7 @@ int main(int argc, char* argv[]) {
     // Initialize SSH server (skip if using local console)
     SSHServer ssh_server;
     bool ssh_enabled = false;
-    if (!local_console) {
+    if (!local_console && !ssh_addrs.empty()) {
         if (!ssh_server.init(host_key)) {
             std::cerr << "Failed to initialize SSH server\n";
             std::cerr << "Make sure host key exists: " << host_key << "\n";
@@ -319,14 +353,15 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        if (!ssh_server.listen(ssh_port)) {
-            std::cerr << "Failed to listen on port " << ssh_port << "\n";
+        const auto& addr = ssh_addrs[0];  // Currently only support first address
+        if (!ssh_server.listen(addr)) {
+            std::cerr << "Failed to listen on " << addr.to_string() << "\n";
             return 1;
         }
 
         ssh_enabled = true;
-        std::cout << "SSH server listening on port " << ssh_port << "\n";
-        std::cout << "Connect with: ssh -p " << ssh_port << " user@localhost\n";
+        std::cout << "SSH server listening on " << addr.to_string() << "\n";
+        std::cout << "Connect with: ssh -p " << addr.port << " user@localhost\n";
 
         // Set up Z80 tick callback for SFTP bridge
         // This allows wait_for_reply() to run Z80 cycles while waiting
@@ -340,8 +375,8 @@ int main(int argc, char* argv[]) {
 
     // Print HTTP status
     if (http_enabled) {
-        std::cout << "HTTP server listening on port " << http_port << "\n";
-        std::cout << "Browse files at: http://localhost:" << http_port << "/\n";
+        std::cout << "HTTP server listening on " << http_server.listen_address().to_string() << "\n";
+        std::cout << "Browse files at: http://localhost:" << http_server.port() << "/\n";
     }
 
     // Main loop

@@ -11,6 +11,7 @@
 
 #ifdef HAVE_LIBSSH
 
+#include "listen_address.h"
 #include <string>
 #include <vector>
 #include <memory>
@@ -161,7 +162,9 @@ public:
     ~SSHServer();
 
     bool init(const std::string& host_key_path);
-    bool listen(int port);
+    bool listen(const std::string& host, int port);
+    bool listen(int port) { return listen("", port); }
+    bool listen(const ListenAddress& addr) { return listen(addr.host, addr.port); }
     void stop();
 
     // Poll for new connections and session I/O - call from main loop
@@ -169,6 +172,9 @@ public:
 
     bool is_running() const { return running_; }
     size_t session_count() const;
+
+    // Get listen address
+    const ListenAddress& listen_address() const { return listen_addr_; }
 
     // Authentication settings
     void set_no_auth(bool no_auth) { no_auth_ = no_auth; }
@@ -184,7 +190,7 @@ private:
     void poll_sessions();
 
     ssh_bind sshbind_;
-    int port_;
+    ListenAddress listen_addr_;
     bool running_;
     bool no_auth_ = false;
     std::vector<std::string> authorized_keys_;  // Base64 encoded public keys

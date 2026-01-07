@@ -1508,7 +1508,6 @@ bool SSHSession::poll_sftp() {
 
 SSHServer::SSHServer()
     : sshbind_(nullptr)
-    , port_(0)
     , running_(false)
 {
 }
@@ -1574,21 +1573,29 @@ bool SSHServer::init(const std::string& host_key_path) {
     return true;
 }
 
-bool SSHServer::listen(int port) {
+bool SSHServer::listen(const std::string& host, int port) {
     if (!sshbind_) {
         std::cerr << "SSH server not initialized\n";
         return false;
     }
 
-    port_ = port;
+    listen_addr_ = ListenAddress(host, port);
 
-    if (ssh_bind_options_set(sshbind_, SSH_BIND_OPTIONS_BINDPORT, &port_) < 0) {
+    // Set bind address if specified
+    if (!host.empty()) {
+        if (ssh_bind_options_set(sshbind_, SSH_BIND_OPTIONS_BINDADDR, host.c_str()) < 0) {
+            std::cerr << "Failed to set SSH bind address: " << ssh_get_error(sshbind_) << "\n";
+            return false;
+        }
+    }
+
+    if (ssh_bind_options_set(sshbind_, SSH_BIND_OPTIONS_BINDPORT, &port) < 0) {
         std::cerr << "Failed to set SSH port: " << ssh_get_error(sshbind_) << "\n";
         return false;
     }
 
     if (ssh_bind_listen(sshbind_) < 0) {
-        std::cerr << "Failed to bind SSH server to port " << port << ": " << ssh_get_error(sshbind_) << "\n";
+        std::cerr << "Failed to bind SSH server to " << listen_addr_.to_string() << ": " << ssh_get_error(sshbind_) << "\n";
         return false;
     }
 

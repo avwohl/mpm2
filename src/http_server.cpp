@@ -8,6 +8,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <cerrno>
@@ -32,36 +33,60 @@ HTTPServer::~HTTPServer() {
     stop();
 }
 
-bool HTTPServer::start(int port) {
+bool HTTPServer::start(const std::string& host, int port) {
     if (port <= 0) return false;
 
-    listen_fd_ = socket(AF_INET, SOCK_STREAM, 0);
+    // Use getaddrinfo for IPv4/IPv6 support
+    struct addrinfo hints = {};
+    hints.ai_family = AF_UNSPEC;      // Allow IPv4 or IPv6
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;      // For wildcard IP address
+
+    const char* node = host.empty() ? nullptr : host.c_str();
+    std::string port_str = std::to_string(port);
+
+    struct addrinfo* result;
+    int rc = getaddrinfo(node, port_str.c_str(), &hints, &result);
+    if (rc != 0) {
+        std::cerr << "[HTTP] getaddrinfo() failed: " << gai_strerror(rc) << "\n";
+        return false;
+    }
+
+    // Try each address until we successfully bind
+    for (struct addrinfo* rp = result; rp != nullptr; rp = rp->ai_next) {
+        listen_fd_ = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (listen_fd_ < 0) continue;
+
+        // Allow address reuse
+        int opt = 1;
+        setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+        // For IPv6, allow IPv4 connections too (dual-stack) unless specific host
+        if (rp->ai_family == AF_INET6 && host.empty()) {
+            int no = 0;
+            setsockopt(listen_fd_, IPPROTO_IPV6, IPV6_V6ONLY, &no, sizeof(no));
+        }
+
+        // Set non-blocking
+        if (!set_nonblocking(listen_fd_)) {
+            close(listen_fd_);
+            listen_fd_ = -1;
+            continue;
+        }
+
+        if (bind(listen_fd_, rp->ai_addr, rp->ai_addrlen) == 0) {
+            // Success
+            break;
+        }
+
+        close(listen_fd_);
+        listen_fd_ = -1;
+    }
+
+    freeaddrinfo(result);
+
     if (listen_fd_ < 0) {
-        std::cerr << "[HTTP] socket() failed: " << strerror(errno) << "\n";
-        return false;
-    }
-
-    // Allow address reuse
-    int opt = 1;
-    setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-    // Set non-blocking
-    if (!set_nonblocking(listen_fd_)) {
-        std::cerr << "[HTTP] Failed to set non-blocking\n";
-        close(listen_fd_);
-        listen_fd_ = -1;
-        return false;
-    }
-
-    struct sockaddr_in addr = {};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = htons(port);
-
-    if (bind(listen_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
         std::cerr << "[HTTP] bind() failed: " << strerror(errno) << "\n";
-        close(listen_fd_);
-        listen_fd_ = -1;
         return false;
     }
 
@@ -72,7 +97,7 @@ bool HTTPServer::start(int port) {
         return false;
     }
 
-    port_ = port;
+    listen_addr_ = ListenAddress(host, port);
     return true;
 }
 
@@ -82,7 +107,7 @@ void HTTPServer::stop() {
         close(listen_fd_);
         listen_fd_ = -1;
     }
-    port_ = 0;
+    listen_addr_ = ListenAddress();
 }
 
 void HTTPServer::poll() {
