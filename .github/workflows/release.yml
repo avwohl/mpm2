@@ -30,6 +30,12 @@ jobs:
           repository: ${{ github.repository_owner }}/um80_and_friends
           path: um80_and_friends
 
+      - name: Checkout uplm80 (for PL/M compiler)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/uplm80
+          path: uplm80
+
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -37,6 +43,10 @@ jobs:
 
       - name: Install um80/ul80
         working-directory: um80_and_friends
+        run: pip install -e .
+
+      - name: Install uplm80
+        working-directory: uplm80
         run: pip install -e .
 
       - name: Build qkz80 library
