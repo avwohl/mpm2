@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mpm2
+        uses: actions/checkout@v4
+
+      - name: Checkout cpmemu (for qkz80 and cpm_disk.py)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/cpmemu
+          path: cpmemu
+
+      - name: Checkout um80_and_friends (for assembler)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/um80_and_friends
+          path: um80_and_friends
+
+      - name: Checkout uplm80 (for PL/M compiler)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/uplm80
+          path: uplm80
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libssh-dev python3-pip expect
+
+      - name: Install Python tools (um80, ul80, uplm80)
+        run: |
+          pip install ./um80_and_friends
+          pip install ./uplm80
+
+      - name: Build qkz80 library
+        working-directory: cpmemu/src
+        run: make libqkz80.a
+
+      - name: Move repos to expected locations
+        run: |
+          mv cpmemu ../cpmemu
+          mv um80_and_friends ../um80_and_friends
+
+      - name: Build emulator and disk image
+        run: ./scripts/build_all.sh
+        env:
+          CPM_DISK: ${{ github.workspace }}/../cpmemu/util/cpm_disk.py
+
+      - name: Run tests
+        run: ./scripts/run_tests.sh all

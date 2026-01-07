@@ -53,9 +53,9 @@ start_emulator() {
         exit 1
     fi
 
-    # Start emulator in background
+    # Start emulator in background (--no-auth for CI/testing)
     cd "$BUILD_DIR"
-    ./mpm2_emu -p $PORT \
+    ./mpm2_emu --no-auth -p $PORT \
         -s "$DISKS_DIR/mpm.sys" \
         -d "A:$DISKS_DIR/mpm2_system.img" \
         > /tmp/mpm2_test.log 2>&1 &
