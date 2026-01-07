@@ -109,10 +109,33 @@ The source build system supports local modifications in `src/overrides/` that ta
 precedence over the original source. For example, the MPMLDR has its serial number
 check disabled in `src/overrides/MPMLDR/MPMLDR.PLM`.
 
+With `--tree=src`, the entire MP/M II operating system is built from source. Only 4
+development tools are binary-only (no source available):
+
+| Binary | Purpose | Note |
+|--------|---------|------|
+| RMAC.COM | Relocatable Macro Assembler | Replaced by um80 |
+| LINK.COM | Linker | Replaced by ul80 |
+| LIB.COM | Library Manager | Not needed for build |
+| XREF.COM | Cross Reference | Not needed for build |
+
+These are included on the disk for completeness but are not used in the build process.
+
 To build just the source binaries without creating a disk:
 ```bash
 ./scripts/build_src.sh
 ```
+
+### Modern GENSYS
+
+The original DRI GENSYS.COM has a bug that corrupts SPR/BRS files larger than 1024
+bytes during relocation. This project uses a Python replacement (`tools/gensys.py`)
+that correctly handles files of any size. The Python GENSYS:
+
+- Fixes the 1024-byte relocation bug
+- Reads configuration from JSON instead of interactive prompts
+- Generates identical MPM.SYS output for valid inputs
+- Supports RSP modules with banked code (BRS files)
 
 ### SSH Setup
 
@@ -121,14 +144,29 @@ Generate host key and configure user authentication:
 ```bash
 mkdir -p keys
 
-# Generate host key (required)
+# Generate host key (required for SSH)
 ssh-keygen -t rsa -b 2048 -m PEM -f keys/ssh_host_rsa_key -N ''
+```
 
-# Copy your public key for authentication
-cp ~/.ssh/id_rsa.pub keys/authorized_keys
+**Authentication options:**
 
-# Or to skip authentication (development only):
-# ./build/mpm2_emu --no-auth -d A:disks/mpm2_system.img
+| Mode | Configuration | Use Case |
+|------|--------------|----------|
+| Public key | `keys/authorized_keys` | Production - add user public keys |
+| Open access | `--no-auth` flag | Development - accept any connection |
+
+For public key authentication, add authorized public keys:
+```bash
+# Add your key
+cat ~/.ssh/id_rsa.pub >> keys/authorized_keys
+
+# Or multiple users
+cat user1.pub user2.pub >> keys/authorized_keys
+```
+
+For development/testing without authentication:
+```bash
+./build/mpm2_emu --no-auth -d A:disks/mpm2_system.img
 ```
 
 ## Running
@@ -140,6 +178,7 @@ Options:
   -d, --disk A:FILE           Mount disk image (required)
   -l, --local                 Local console mode (output to stdout)
   -w, --http PORT             HTTP server port (default: 8000, 0 to disable)
+  --log FILE                  Access log file (default: mpm2.log)
   -p, --port PORT             SSH listen port (default: 2222)
   -k, --key FILE              Host key file (default: keys/ssh_host_rsa_key)
   -a, --authorized-keys FILE  Authorized keys file (default: keys/authorized_keys)
@@ -263,6 +302,29 @@ http://localhost:8000/
 
 HTTP file operations share the same RSP bridge as SFTP. When an HTTP request arrives, it queues a file request to the Z80 RSP, which performs the actual disk read via BDOS calls. Requests from HTTP and SFTP clients are serialized to ensure consistent access.
 
+## Access Logging
+
+The emulator logs HTTP, SSH, and SFTP access to a file (default: `mpm2.log`):
+
+```
+2026-01-06 23:21:19 [HTTP] 127.0.0.1 GET /
+2026-01-06 23:21:26 [SSH] 127.0.0.1 connected
+2026-01-06 23:21:26 [SSH] 127.0.0.1 auth user=test method=none
+2026-01-06 23:21:26 [SSH] 127.0.0.1 exec command=exit
+2026-01-06 23:21:29 [SSH] 127.0.0.1 disconnected
+```
+
+Each log entry includes:
+- ISO timestamp (YYYY-MM-DD HH:MM:SS)
+- Service type (HTTP, SSH, SFTP)
+- Client IP address
+- Event details (request path, auth method, command, etc.)
+
+To use a different log file:
+```bash
+./build/mpm2_emu --log /var/log/mpm2.log -d A:disks/mpm2_system.img
+```
+
 ## Project Structure
 
 ```
@@ -283,6 +345,7 @@ mpm2/
 │   └── cpm_runtime.mac   # Runtime support for PL/M programs
 ├── tools/
 │   ├── build.py          # Source build script (Python)
+│   ├── gensys.py         # MP/M II system generator (replaces DRI GENSYS)
 │   └── dri_patch.py      # Binary patching tool
 ├── asm/
 │   ├── coldboot.asm      # Boot sector (loads MPMLDR + LDRBIOS)
@@ -297,6 +360,7 @@ mpm2/
 │   ├── sftp_bridge.cpp   # SFTP/HTTP to Z80 bridge
 │   └── ssh_session_libssh.cpp # SSH/SFTP server
 ├── include/              # C++ headers
+│   ├── logger.h          # Access logging
 ├── build/                # CMake build directory (generated)
 ├── disks/                # Disk images (generated)
 └── mpm2_external/        # MP/M II source and distribution (not in git)
