@@ -62,3 +62,6 @@ jobs:
 
       - name: Run tests
         run: ./scripts/run_tests.sh all
+
+      - name: Run source build test
+        run: ./scripts/run_tests.sh src
