@@ -1,0 +1,25 @@
+MP/M 2 
+ - runs on linux
+ - ssh into emulator to get a console to talk to
+ - supports authorized keys or anyone can login
+ - supports sftp / scp
+ - built in web server serving MP/M disks with directory listing
+ - open source new stuff GPLv3 https://github.com/avwohl/mpm2
+ - build available with DRI binaries
+ - build available with all of OS built from source (5 tools like RMAC binary but not used)
+ - uses uplm80 compiler to build all .plm source
+ - uses um80 assembler on linux to replace RMAC, LINK
+ - replaces bugged gensys (see README)
+ - available .deb or .rpm install or source build
+ - uses RomWBW disk formats
+ - github workflow CI (continous integration) tests
+   for build with DRI and source built binaries
+
+I have been working on an ada compiler for z80
+https://github.com/avwohl/uada80 which has thousands of ACATS
+test library programs.  About 300 of them want an OS with tasking
+and preemptive scheduling to test ada task code.  I was messing
+around with mpm2 anyway, so I fleshed it out.  The scp / sftp
+is handy for uada80 to get test info out.  For loading 300
+test programs its probably simpler to load them into
+a disk image.
