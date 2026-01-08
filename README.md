@@ -95,8 +95,7 @@ cd uplm80
 pip install -e .  # Installs uplm80 command
 cd ..
 
-# MP/M II distribution files (required) - contact maintainer for access
-# Should be placed in mpm2/mpm2_external/
+# MP/M II distribution files are included in the mpm2_external/ directory
 ```
 
 ### Optional: SSH Support
@@ -421,7 +420,7 @@ mpm2/
 │   ├── logger.h          # Access logging
 ├── build/                # CMake build directory (generated)
 ├── disks/                # Disk images (generated)
-└── mpm2_external/        # MP/M II source and distribution (not in git)
+└── mpm2_external/        # MP/M II source and distribution
     ├── mpm2src/          # Original source code
     └── mpm2dist/         # Original binaries
 ```

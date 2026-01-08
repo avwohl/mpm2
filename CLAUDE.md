@@ -535,7 +535,7 @@ mpm2/
 │   └── scripts/          # fix_extents.sh, etc.
 ├── disks/                # Generated disk/boot images (in .gitignore)
 ├── build/                # CMake build directory
-├── mpm2_external/        # MP/M II distribution (not in git)
+├── mpm2_external/        # MP/M II distribution
 └── keys/
     └── ssh_host_rsa_key (generated)
 ```
