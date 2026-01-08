@@ -216,15 +216,6 @@ else
     echo "  mpmldr.com ($(wc -c < mpmldr.com | tr -d ' ') bytes) [DRI - serial patched]"
 fi
 
-# Create boot image (16KB for system tracks)
-echo "Creating boot image..."
-"$BUILD_DIR/mkboot" \
-    -l "$ASM_DIR/ldrbios.bin" \
-    -b bnkxios.spr \
-    -m mpmldr.com \
-    -s 16384 \
-    -o boot.bin
-
 # Copy files to project
 echo "Saving files to project..."
 cp mpm.sys "$DISKS_DIR/mpm.sys"
@@ -234,9 +225,15 @@ cp mpmldr.com "$DISKS_DIR/mpmldr.com"
 echo "Creating system disk..."
 mv "$DISKS_DIR/mpm2_hd1k.img" "$DISKS_DIR/mpm2_system.img"
 
-# Write boot image to system tracks
-echo "Writing boot image to system tracks..."
-python3 "$CPM_DISK" write-boot "$DISKS_DIR/mpm2_system.img" boot.bin
+# Write boot components to system tracks using cpm_disk.py
+# Boot area layout (512-byte physical sectors):
+#   Sector 0:     coldboot.bin (cold start loader)
+#   Sectors 1-12: mpmldr.com
+#   Sectors 13-16: ldrbios_boot.bin
+echo "Writing boot area to system tracks..."
+python3 "$CPM_DISK" write-boot "$DISKS_DIR/mpm2_system.img" "$ASM_DIR/coldboot.bin" 0 1
+python3 "$CPM_DISK" write-boot "$DISKS_DIR/mpm2_system.img" mpmldr.com 1 12
+python3 "$CPM_DISK" write-boot "$DISKS_DIR/mpm2_system.img" "$ASM_DIR/ldrbios_boot.bin" 13 4
 
 python3 "$CPM_DISK" delete "$DISKS_DIR/mpm2_system.img" mpm.sys mpmldr.com 2>/dev/null || true
 python3 "$CPM_DISK" add "$DISKS_DIR/mpm2_system.img" mpm.sys mpmldr.com
@@ -245,12 +242,11 @@ echo ""
 echo "Generation complete!"
 echo ""
 echo "Files created:"
-echo "  Boot image:  $DISKS_DIR/mpm2boot.bin"
 echo "  MPM.SYS:     $DISKS_DIR/mpm.sys"
-echo "  System disk: $DISKS_DIR/mpm2_system.img"
+echo "  System disk: $DISKS_DIR/mpm2_system.img (with boot area)"
 echo ""
 echo "To run:"
-echo "  $BUILD_DIR/mpm2_emu -b $DISKS_DIR/mpm2boot.bin -d A:$DISKS_DIR/mpm2_system.img"
+echo "  $BUILD_DIR/mpm2_emu -d A:$DISKS_DIR/mpm2_system.img"
 echo ""
 echo "Configuration:"
 echo "  - $NMBCNS consoles"

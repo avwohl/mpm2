@@ -58,7 +58,7 @@ mpm2_emu -l -d A:mpm2_system.img
 
 | Package | Contents |
 |---------|----------|
-| `.deb` / `.rpm` | `mpm2_emu` emulator binary, `mkboot` utility |
+| `.deb` / `.rpm` | `mpm2_emu` emulator binary |
 | `mpm2_system.img` | Pre-built 8MB disk image with MP/M II and utilities |
 
 The disk image is required - it contains the MP/M II operating system, boot loader, and standard utilities.

@@ -63,9 +63,6 @@ set -o errexit
 #   - um80: Native MACRO-80 compatible assembler (.asm -> .rel)
 #   - ul80: Native LINK-80 compatible linker (.rel -> .com, .hex, or .prl)
 #
-# C++ tools (built by cmake):
-#   - mkboot: Creates boot image from LDRBIOS + MPMLDR
-#
 # CP/M tools:
 #   - GENSYS.COM: Generates MPM.SYS from component SPR files
 #   - cpmtools: Native tools for manipulating CP/M disk images
@@ -126,7 +123,7 @@ cd "$BUILD_DIR"
 cmake .. > /dev/null
 #make -j4 2>&1 | grep -v "^make\[" || true
 make -j4
-echo "  Built: mpm2_emu, mkboot"
+echo "  Built: mpm2_emu"
 echo ""
 
 # ------------------------------------------------------------------------------

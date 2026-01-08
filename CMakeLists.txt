@@ -113,14 +113,8 @@ target_compile_options(mpm2_emu PRIVATE
     $<$<CONFIG:Release>:-O2>
 )
 
-# Boot image creation tool
-add_executable(mkboot tools/mkboot.cpp)
-target_compile_options(mkboot PRIVATE
-    -Wall -Wextra -Wpedantic
-)
-
 # Install targets
-install(TARGETS mpm2_emu mkboot RUNTIME DESTINATION bin)
+install(TARGETS mpm2_emu RUNTIME DESTINATION bin)
 
 # CPack configuration for .deb and .rpm packages
 set(CPACK_PACKAGE_NAME "mpm2-emu")

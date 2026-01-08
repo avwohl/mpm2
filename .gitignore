@@ -8,7 +8,6 @@ build/
 **__pycache__/
 # Executables
 mpm2_emu
-mkboot
 mkdisk
 
 # Disk images (regenerated from source files)

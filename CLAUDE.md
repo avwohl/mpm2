@@ -133,7 +133,7 @@ The HTTP server runs on the main thread and is fully non-blocking:
 **Always load binary data from assembled files rather than manually constructing byte sequences in code.** This applies to:
 - Disk parameter blocks (DPB) - use DISKDEF.LIB macros in assembly
 - BIOS/XIOS jump tables - assemble from source
-- Boot images - use mkboot tool with assembled binaries
+- Boot images - use cpm_disk.py write-boot with assembled binaries
 
 Manual byte poking leads to subtle errors. Use the tested DISKDEF.LIB macros from the MP/M II distribution for disk parameters.
 
@@ -523,8 +523,6 @@ mpm2/
 │   ├── ssh_session_libssh.cpp
 │   ├── xios.cpp
 │   └── z80_runner.cpp
-├── tools/
-│   └── mkboot.cpp        # Creates boot image from LDRBIOS + MPMLDR
 ├── scripts/
 │   ├── build_all.sh      # Master build (runs all steps)
 │   ├── build_asm.sh      # Assemble Z80, build C++
