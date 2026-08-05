@@ -2,7 +2,7 @@
 
 A Z80-based MP/M II emulator with SSH terminal access. Multiple users can connect simultaneously to run CP/M-compatible software.
 
-**[MP/M II Command Reference](docs/mpm2_summary.pdf)** - Complete guide to all commands and utilities
+**[MP/M II Command Reference](https://github.com/avwohl/retro_docs/blob/main/mpm2/mpm2_summary.pdf)** - Complete guide to all commands and utilities
 
 ## Quick Start
 
@@ -29,8 +29,8 @@ Pre-built packages are available for Linux systems. Download the appropriate pac
 
 ```bash
 # Download and install
-wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2-emu_0.3.0_amd64.deb
-sudo dpkg -i mpm2-emu_0.3.0_amd64.deb
+wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2-emu-0.3.4-Linux.deb
+sudo dpkg -i mpm2-emu-0.3.4-Linux.deb
 sudo apt-get install -f  # Install dependencies if needed
 
 # Download disk image
@@ -44,8 +44,8 @@ mpm2_emu -l -d A:mpm2_system.img
 
 ```bash
 # Download and install
-wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2-emu-0.3.0-1.x86_64.rpm
-sudo dnf install ./mpm2-emu-0.3.0-1.x86_64.rpm
+wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2-emu-0.3.4-Linux.rpm
+sudo dnf install ./mpm2-emu-0.3.4-Linux.rpm
 
 # Download disk image
 wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2_system.img
@@ -458,7 +458,7 @@ GPL-3.0-or-later
 
 ## References
 
-- [MP/M II Command Reference](docs/mpm2_summary.pdf) - Quick reference for all commands
+- [MP/M II Command Reference](https://github.com/avwohl/retro_docs/blob/main/mpm2/mpm2_summary.pdf) - Quick reference for all commands
 - [MP/M II System Guide](mpm2_external/docs/) - Original Digital Research documentation
 - [RomWBW](https://github.com/wwarthen/RomWBW) - hd1k disk format
 - [cpmemu](https://github.com/avwohl/cpmemu) - Z80 emulator with cpm_disk.py utility
