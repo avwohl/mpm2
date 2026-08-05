@@ -123,7 +123,7 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "MP/M II emulator with SSH terminal access
 set(CPACK_PACKAGE_DESCRIPTION "MP/M II (Multi-Programming Monitor for CP/M) emulator for Z80-based \
 multi-user, multi-tasking operating system. Features SSH terminal access for \
 remote connections and HTTP file browser.")
-set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/wohl/mpm2")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/avwohl/mpm2")
 set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
