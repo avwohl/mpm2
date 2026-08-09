@@ -30,7 +30,16 @@ BankedMemory::BankedMemory(int num_banks)
     std::memset(common_.get(), 0, COMMON_SIZE);
 }
 
-// is_instruction is unnamed: opcode fetches and data reads see the same bank.
+// is_instruction is intentionally left unnamed: there is nothing for this
+// implementation to resolve it against. MP/M II's SELMEMORY latch switches the
+// whole banked region (0x0000-0xBFFF) for the running process and is blind to
+// the kind of bus cycle -- the Z80 has no split I/D address space. A .PRL image
+// carries code and data in one bank, so an opcode fetch and a data read at the
+// same address must return the same byte, or a program could not read its own
+// literals or its page-0 fields (FCB at 0x5C, DMA at 0x80).
+// The flag is also not a /M1 signal: qkz80 passes true for every byte pulled
+// from the PC stream, including immediate operands and DD/FD displacements, so
+// it could not drive M1-based banking even on hardware that had it.
 qkz80_uint8 BankedMemory::fetch_mem(qkz80_uint16 addr, bool /*is_instruction*/) {
     if (addr >= COMMON_BASE) {
         // High common area (0xC000-0xFFFF)
