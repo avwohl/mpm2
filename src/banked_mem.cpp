@@ -30,7 +30,8 @@ BankedMemory::BankedMemory(int num_banks)
     std::memset(common_.get(), 0, COMMON_SIZE);
 }
 
-qkz80_uint8 BankedMemory::fetch_mem(qkz80_uint16 addr, bool is_instruction) {
+// is_instruction is unnamed: opcode fetches and data reads see the same bank.
+qkz80_uint8 BankedMemory::fetch_mem(qkz80_uint16 addr, bool /*is_instruction*/) {
     if (addr >= COMMON_BASE) {
         // High common area (0xC000-0xFFFF)
         return common_[addr - COMMON_BASE];

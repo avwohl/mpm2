@@ -36,11 +36,8 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
 bool g_boot_display_complete = false;
 
 void XIOS::handle_port_dispatch(uint8_t func) {
-    static int call_count = 0;
     static int const_count = 0;
     static int post_boot_xios_calls = 0;
-    call_count++;
-
 
     // Trace XIOS calls after SYSTEMINIT (disabled by setting to 0)
     if (DEBUG_XIOS && systeminit_done_.load() && post_boot_xios_calls < 100) {
