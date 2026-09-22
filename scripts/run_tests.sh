@@ -89,17 +89,19 @@ start_emulator() {
 run_expect_test() {
     local test_name="$1"
     shift
-    local commands="$@"
 
     echo ""
     echo "=== Running test: $test_name ==="
-    echo "Commands: $commands"
+    echo "Commands: $*"
     echo ""
 
     # Delay to let console reset between tests
     sleep 5
 
-    if "$SCRIPT_DIR/test_ssh.exp" $PORT $commands; then
+    # "$@", not $commands: unquoted word splitting turned a single command
+    # like "stat a:" into two - "stat" then "a:" - so the drive-argument
+    # tests were never sending the argument at all.
+    if "$SCRIPT_DIR/test_ssh.exp" $PORT "$@"; then
         echo ""
         echo ">>> TEST PASSED: $test_name"
         return 0
@@ -116,7 +118,10 @@ test_basic() {
     echo "Running basic tests"
     echo "========================================"
 
-    run_expect_test "DIR command" "dir"
+    # "dir" with no argument prints nothing in MP/M II - DIR wants a drive
+    # or a pattern - so the bare form passed this test without ever listing
+    # anything. "dir a:" produces a real directory listing.
+    run_expect_test "DIR command" "dir a:"
 }
 
 test_stat() {

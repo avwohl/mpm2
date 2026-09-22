@@ -68,7 +68,12 @@ if {[llength $commands] == 0} {
 # Run each command
 foreach cmd $commands {
     puts "\n>>> Sending command: $cmd"
-    send "$cmd\r"
+    # The prompt regex can match part-way through the echo of the previous
+    # line, so give MP/M a moment to finish draining its console before
+    # typing at it; otherwise the first characters of the command are lost
+    # and it comes back "Bad entry".
+    after 300
+    send -- "$cmd\r"
 
     # Wait for command to echo and then next prompt
     expect {
