@@ -24,7 +24,12 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/build"
 DISKS_DIR="$PROJECT_DIR/disks"
 
-PORT=2222
+PORT=${PORT:-2222}
+# The emulator also opens an HTTP server, on 8000 by default.  Give it a port
+# tied to the SSH port and let it be overridden, so a test run does not fail at
+# startup just because something else on the machine already holds 8000 -
+# "Failed to start HTTP server" aborts the emulator and every test with it.
+HTTP_PORT=${HTTP_PORT:-$((PORT + 6000))}
 EMU_PID=""
 
 cleanup() {
@@ -53,7 +58,7 @@ start_emulator() {
 
     # Start emulator in background (--no-auth for CI/testing)
     cd "$BUILD_DIR"
-    ./mpm2_emu --no-auth -p $PORT \
+    ./mpm2_emu --no-auth -p $PORT -w $HTTP_PORT \
         -k "$PROJECT_DIR/keys/ssh_host_rsa_key" \
         -d "A:$DISKS_DIR/mpm2_system.img" \
         > /tmp/mpm2_test.log 2>&1 &
