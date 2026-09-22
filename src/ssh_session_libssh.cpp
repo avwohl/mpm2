@@ -255,6 +255,33 @@ SSHSession::SSHSession(ssh_session session, SSHServer* server)
     // Use blocking mode - we're in our own thread
     ssh_set_blocking(session_, 1);
 
+    // Register the server callbacks and auth methods BEFORE the key
+    // exchange, not after it.
+    //
+    // ssh_handle_key_exchange() reads from the socket, and on a fast link
+    // it frequently pulls the client's next packet - SSH_MSG_SERVICE_REQUEST
+    // - off the wire and into libssh's own in_buffer along with the last KEX
+    // packet. If the callbacks are not registered until KEX returns, nothing
+    // is ever dispatched for those already-buffered bytes: libssh re-parses
+    // in_buffer only on a fresh POLLIN, ssh_event_dopoll() is level-triggered
+    // on a socket that is now empty, and the client is blocked waiting for
+    // SERVICE_ACCEPT and sends nothing more. The session then spins in
+    // AUTHENTICATING for ever and the client sees no banner and no prompt.
+    // Registering first means the handlers exist when those bytes are parsed.
+    server_callbacks_.size = sizeof(server_callbacks_);
+    server_callbacks_.userdata = this;
+    server_callbacks_.auth_none_function = auth_none_callback;
+    server_callbacks_.auth_pubkey_function = auth_pubkey_callback;
+    server_callbacks_.channel_open_request_session_function = channel_open_callback;
+    ssh_callbacks_init(&server_callbacks_);
+    ssh_set_server_callbacks(session_, &server_callbacks_);
+
+    if (server_ && server_->no_auth()) {
+        ssh_set_auth_methods(session_, SSH_AUTH_METHOD_NONE | SSH_AUTH_METHOD_PUBLICKEY);
+    } else {
+        ssh_set_auth_methods(session_, SSH_AUTH_METHOD_PUBLICKEY);
+    }
+
     // Log connection
     LOG_SSH(client_ip_, "connected");
 }
@@ -488,24 +515,8 @@ bool SSHSession::poll_handshake() {
                 if (DEBUG_SSH) std::cerr << "[SSH] KEY_EXCHANGE completed successfully\n";
                 kex_done_ = true;
 
-                // Set up server callbacks for authentication (modern API)
-                // Also handle channel open via callback for proper integration
-                if (DEBUG_SSH) std::cerr << "[SSH] Setting up server callbacks...\n";
-                server_callbacks_.size = sizeof(server_callbacks_);
-                server_callbacks_.userdata = this;
-                server_callbacks_.auth_none_function = auth_none_callback;
-                server_callbacks_.auth_pubkey_function = auth_pubkey_callback;
-                server_callbacks_.channel_open_request_session_function = channel_open_callback;
-                ssh_callbacks_init(&server_callbacks_);
-                int cb_rc = ssh_set_server_callbacks(session_, &server_callbacks_);
-                if (DEBUG_SSH) std::cerr << "[SSH] ssh_set_server_callbacks returned: " << cb_rc << "\n";
-
-                // Tell client which auth methods we support
-                if (server_ && server_->no_auth()) {
-                    ssh_set_auth_methods(session_, SSH_AUTH_METHOD_NONE | SSH_AUTH_METHOD_PUBLICKEY);
-                } else {
-                    ssh_set_auth_methods(session_, SSH_AUTH_METHOD_PUBLICKEY);
-                }
+                // Callbacks and auth methods were registered in the
+                // constructor, before KEX: see the note there.
 
                 // Now safe to add to event
                 if (event_) {
