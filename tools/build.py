@@ -211,11 +211,17 @@ XDOS_MODULES = [
 ]
 
 NUCLEUS_TARGETS = [
-    BuildTarget("XDOS", "spr", XDOS_MODULES, "NUCLEUS"),
-    BuildTarget("BNKXDOS", "spr", ["BNKXDOS.ASM"], "NUCLEUS"),
+    # The nucleus is pure assembly and must not pull in cpm_runtime: those
+    # PL/M helpers add 18 bytes, which is enough to push each module over a
+    # 256-byte page boundary and cost it a whole page. With them out, every
+    # SPR here is the same length as the DRI original, and GENSYS lays the
+    # system out the way it was designed to.
+    BuildTarget("XDOS", "spr", XDOS_MODULES, "NUCLEUS", skip_runtime=True),
+    BuildTarget("BNKXDOS", "spr", ["BNKXDOS.ASM"], "NUCLEUS", skip_runtime=True),
     # RESBDOS is built from RESBDOS1.ASM + CONBDOS.ASM concatenated
     # (RESBDOS1 defines symbols that CONBDOS references)
-    BuildTarget("RESBDOS", "spr", ["RESBDOS1.ASM", "CONBDOS.ASM"], "NUCLEUS", concat=True),
+    BuildTarget("RESBDOS", "spr", ["RESBDOS1.ASM", "CONBDOS.ASM"], "NUCLEUS",
+                concat=True, skip_runtime=True),
     BuildTarget("TMP", "spr", ["TMPSUB.ASM"], "NUCLEUS", skip_runtime=True),
 ]
 
@@ -223,7 +229,7 @@ NUCLEUS_TARGETS = [
 # BNKBDOS - Banked BDOS
 # ============================================================================
 BNKBDOS_TARGETS = [
-    BuildTarget("BNKBDOS", "spr", ["BNKBDOS.ASM"], "BNKBDOS"),
+    BuildTarget("BNKBDOS", "spr", ["BNKBDOS.ASM"], "BNKBDOS", skip_runtime=True),
 ]
 
 # ============================================================================
