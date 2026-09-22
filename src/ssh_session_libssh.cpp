@@ -258,16 +258,23 @@ SSHSession::SSHSession(ssh_session session, SSHServer* server)
     // Register the server callbacks and auth methods BEFORE the key
     // exchange, not after it.
     //
-    // ssh_handle_key_exchange() reads from the socket, and on a fast link
-    // it frequently pulls the client's next packet - SSH_MSG_SERVICE_REQUEST
-    // - off the wire and into libssh's own in_buffer along with the last KEX
-    // packet. If the callbacks are not registered until KEX returns, nothing
-    // is ever dispatched for those already-buffered bytes: libssh re-parses
-    // in_buffer only on a fresh POLLIN, ssh_event_dopoll() is level-triggered
-    // on a socket that is now empty, and the client is blocked waiting for
-    // SERVICE_ACCEPT and sends nothing more. The session then spins in
-    // AUTHENTICATING for ever and the client sees no banner and no prompt.
-    // Registering first means the handlers exist when those bytes are parsed.
+    // ssh_handle_key_exchange() reads from the socket, and on a fast link a
+    // single read frequently carries both NEWKEYS and the client's next
+    // packet, SSH_MSG_SERVICE_REQUEST. libssh does parse and dispatch that
+    // second packet from inside ssh_handle_key_exchange() - the problem is
+    // not the parse, it is the REPLY. ssh_message_queue() sends the default
+    // SERVICE_ACCEPT only when session->server_callbacks is non-NULL;
+    // otherwise it parks the message on session->ssh_message_list, which this
+    // emulator never drains because it uses the callback API and never calls
+    // ssh_message_get(). Register the callbacks after KEX and that message is
+    // answered by nobody: the client blocks for ever waiting for
+    // SERVICE_ACCEPT, the session sits in AUTHENTICATING, and the user sees
+    // no banner and no prompt.
+    //
+    // Draining with ssh_event_dopoll() at that point does not help: it is
+    // pure poll(2), there is nothing left to read, and it cannot re-dispatch
+    // a message already parked on the list. Registering first is what fixes
+    // it - the reply path exists by the time the message is queued.
     server_callbacks_.size = sizeof(server_callbacks_);
     server_callbacks_.userdata = this;
     server_callbacks_.auth_none_function = auth_none_callback;
