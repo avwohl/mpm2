@@ -26,7 +26,7 @@
 
         .z80
 
-        extrn   BDOS
+        extrn   ??BDOS
 
         cseg
 
@@ -49,6 +49,6 @@ MON3:
         ld      d,(hl)          ; info, high
         inc     hl
         ld      c,(hl)          ; func (a BYTE widened to 16 bits)
-        jp      BDOS            ; tail call: the BDOS returns to our caller
+        jp      ??BDOS          ; tail call: the BDOS returns to our caller
 
         end

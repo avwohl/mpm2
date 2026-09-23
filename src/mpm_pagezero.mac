@@ -33,6 +33,15 @@ LEN0    equ     0080H           ; Length of param 0
 PASS1   equ     0082H           ; Parsed param 1 pointer
 LEN1    equ     0082H           ; Length of param 1
 
+; The compiler's own page-zero references.  uplm80 emits these names, with its
+; reserved `??' prefix, for the BDOS entry, the stack top and the warm-boot
+; jump, so that a program declaring its own `bdos' or `boot' cannot capture
+; them - UTIL7/DM.PLM declares a variable called `bdos'.
+??BDOS  equ     0005H
+??BOOT  equ     0000H
+??MAXB  equ     0006H
+        public  ??BDOS, ??BOOT, ??MAXB
+
         public  BOOT, WBOOT, BDOS
         public  IOBYTE, CDISK, BDISK, CMDRV
         public  MAXB, BUFF

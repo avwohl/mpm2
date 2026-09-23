@@ -11,6 +11,26 @@ rather than empty.
 
 ### Fixed
 
+`stat` printed its drive line 1837 times and never printed a figure, because
+um80 assembled a label named after a mnemonic as the opcode byte. UTIL4/STAT.PLM
+declares `add: procedure(ap,bp)` for its BCD arithmetic, and `call add(...)`
+came out as `CALL 0080H` — 80H is `ADD A,B`, and 0080H is the DMA buffer. STAT
+executed its own command tail as instructions, fell into its entry jump at 0100H
+and restarted. Fixed in um80; a symbol now wins over a mnemonic of the same
+name, and `DB MOV` still gives the opcode byte where nothing defines MOV.
+
+Five defects in what uplm80 emits for a declaration, all of which produced
+programs that linked cleanly and then wrote through a null or short pointer:
+the MP/M stack setup was four bytes where DRI's `.start-3` entry convention
+needs three; a STRUCTURE initialiser was emitted at one width rather than each
+member's, which left UTIL7/DM.PLM's ten-byte parser control block five bytes
+long and its two pointers at zero; values the emitter could not place were
+dropped silently rather than reported; `AT(.MEMORY)` was an EQU, which reads as
+zero above its own declaration, so UTIL7/DSE.PLM's hash table cleared 128
+entries over page zero; and the compiler's page-zero symbols shared a namespace
+with PL/M identifiers, so UTIL7/DM.PLM's variable `bdos` captured the BDOS
+entry. Fixed in uplm80 0.3.7.
+
 A source-built nucleus could not run a transient program at all. `LXI
 H,PDTBL-34H` in `NUCLEUS/CLI.ASM` assembled to `PDTBL+34H`, because um80 had the
 two branches of an external-symbol expression swapped and added a constant it
@@ -73,19 +93,18 @@ now the base layer, as the comment there always claimed.
 ### Changed
 
 `--tree=src` produces a running system. A fully source-built MP/M II V2.0 boots,
-loads and runs transient programs, and `dir`, `user` and `console` give the same
-output as DRI's own binaries — `dir` lists `A: $3$      SUP`, `user 0` prints
-`User Number = 0`, `console` prints `Console = 3`. Before this release a
-source-built system printed a program's load line and then dropped the session,
-whatever the program was.
+loads and runs transient programs, and `dir`, `stat`, `tod`, `user`, `console`
+and `show` all give the same output as DRI's own binaries — `stat` prints
+`A: RW, Space:     7,512k`, `dir` lists `A: $3$      SUP`, `tod` prints
+`Mon 09/14/81 00:00:19`, `user 0` prints `User Number = 0`, `console` prints
+`Console = 3`. Before this release a source-built system printed a program's
+load line and then dropped the session, whatever the program was.
 
 ### Known issues
 
-`stat` on a source-built system prints its drive line but no free-space figure,
-and repeats the line instead of stopping. DRI's own `STAT.PRL` on the same
-source-built nucleus prints `A: RW, Space:     7,524k` and stops, so this is one
-more defect in what the compiler emits for `STAT.PLM`, not in the system it runs
-on. `tod` likewise prints nothing.
+`sdir` produces a directory listing now but its columns are mangled — the sizes
+and record counts print as stray digits. DRI's own `SDIR.PRL` is correct on the
+same source-built system, so this is one more defect in what the compiler emits.
 
 The V2.0 nucleus sources here are not the V2.1 binaries in `bin/dri`, and V2.1
 looks like V2.0 plus in-place patches rather than a recompile: every nucleus
