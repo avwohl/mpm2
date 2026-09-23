@@ -16,57 +16,100 @@ These tools are shipped in `bin/dri/` only. They have no corresponding source co
 
 **Note:** LINK.COM and RMAC.COM are not needed for the source build - the build system uses native `ul80` and `um80` tools instead.
 
-## The source tree is V2.0 and does not interoperate with V2.1
+## Why `--tree=src` did not produce a working system
 
-This is the single reason `--tree=src` does not give a working system, and it
-is worth stating precisely because it looks like a bug in the build and is not.
+There were two separate faults here, and an earlier version of this document
+attributed both to the same cause. That was wrong, and the record is corrected
+below.
 
-`mpm2_external/mpm2src/NUCLEUS` is MP/M II **V2.0** (`VER.ASM` says so, and a
-source-built system banners as "MP/M II V2.0", 1981). Everything in `bin/dri`
-is **V2.1** (1982). A system built from source is therefore a genuine V2.0
-MP/M II, and the V2.1 utilities on the disk do not work on it.
+### Fixed: transient `.PRL` files were linked one page low
 
-Measured, same disk and same emulator, only MPM.SYS regenerated:
+Every source-built utility produced no output, whichever nucleus it ran on,
+because `ul80 --prl` linked a transient at ORG 0.
 
-| system | `stat` |
+MP/M's relocator adds the memory segment's base *page* to each byte the
+relocation bitmap marks (`NUCLEUS/CLI.ASM`, `relocate`), but the CLI loads a
+transient at `segment$bottom + 0100H`. The extra page has to come from the
+link, so a `.PRL` image must be linked at 0100H — the same origin a `.COM`
+uses. Linked at 0, every relocated address landed one page below the code.
+DRI's own binaries show the convention: the highest relocatable word in
+`STAT.PRL` is `program_length + 0100H`.
+
+Page zero was the other half. Under MP/M it belongs to the process's memory
+segment, so the BDOS entry (0005H), the default FCB (005CH) and the DMA buffer
+(0080H) have to be relocated as well — DRI's `DIR.PRL` marks twelve `CALL 5`
+sites in its bitmap. Only a resolved *symbol* reference reaches the bitmap, so
+the compiler must not emit those addresses as literals. DRI solved this by
+linking each utility twice against `PLM_WORK/X0100.ASM` and `X0200.ASM`, which
+differ only in an `offset` equate, and diffing the two images with GENMOD.
+
+The equivalent here is `uplm80 --mode mpm` plus `src/mpm_pagezero.mac`: the
+page-zero addresses are published from a module of their own so that a
+reference from the runtime or from compiled code crosses a module boundary and
+is recorded. `.SPR` and `.RSP` images are still linked at 0 (`ul80 --spr`),
+because those *are* loaded at the segment base.
+
+With that fixed, source-built utilities work. On an otherwise all-DRI system,
+source-built `USER.PRL` prints `User Number = 0` and `CONSOLE.PRL` prints
+`Console = 3`, matching DRI's originals; before the fix both printed nothing.
+
+### Open: the source-built V2.0 nucleus
+
+A source-built nucleus still fails, and this part is a real V2.0/V2.1
+difference. `mpm2_external/mpm2src/NUCLEUS` is MP/M II **V2.0** (`VER.ASM` says
+so, and a source-built system banners as "MP/M II V2.0", 1981); everything in
+`bin/dri` is **V2.1** (1982).
+
+Substituting whole modules into an otherwise source-built system, and probing
+with a hand-written `.PRL` that prints the word at page-zero offset 6:
+
+| nucleus modules taken from `bin/dri` | probe |
 |---|---|
-| all `bin/dri` (V2.1) | works, 6 of 6 sequential sessions |
-| all `bin/src` (V2.0) | no output, 6 of 6 sessions |
+| `XDOS` + `BNKXDOS` + `RESBDOS` + `BNKBDOS` | prints `BFFD` |
+| `XDOS` + `BNKXDOS` | prints `BFFD` |
+| `RESBDOS` + `BNKBDOS` | no output |
+| `XDOS` alone | no output |
+| `BNKXDOS` alone | no output |
 
-The difference is not in one module. Substituting single modules into an
-otherwise all-DRI system, counting sessions that complete a `dir`:
+So the fault is in the source-built `XDOS`/`BNKXDOS` pair, and the two have to
+match. `BNKBDOS.SPR` and `TMP.SPR` build **byte-identical** to DRI's, so the
+assembler and linker are reproducing DRI's own output exactly for those.
 
-| system | sessions passing |
+What a transient can and cannot do on a source-built nucleus, each tested with
+a minimal assembly `.PRL`:
+
+| program | result |
 |---|---|
-| all dri (control) | 30/30 |
-| dri + src `BNKBDOS.SPR` | 8/8 |
-| dri + src `TMP.SPR` | 12/12 (byte-identical in both trees) |
-| dri + src `XDOS.SPR` | 2/10 |
-| dri + src `RESBDOS.SPR` | 0/8 |
-| dri + src `BNKXDOS.SPR` | 1/8 |
+| set SP, spin, `jp` page-zero 0 (no XDOS call) | returns to the prompt |
+| XDOS function 12 (return version), then exit | returns to the prompt |
+| XDOS function 2 (console output) | kills the session |
+| XDOS function 0 (system reset) | kills the session |
 
-So installing DRI's V2.1 `XDOS.SPR` alone does not fix it, and `RESBDOS` or
-`BNKXDOS` alone each reproduce it. One concrete instance of the delta: V2.1
-hides a six-byte routine (`dcx b / ldax b / ani 0Fh / mov c,a / ret`) in
-`BNKXDOS` ProcAddressTable slots 2-4 at program offset 0x08, which the V2.0
-sources do not have.
+So the `CALL 5` chain the CLI sets up — `segment$bottom+5` jumps to `top-3`,
+which jumps to `xbdos` — is intact and reaches XDOS, and process termination
+through page-zero 0 works. Only certain XDOS functions are fatal.
 
-Fixing this needs V2.1 nucleus sources, which are not in this repository.
-Until then `--tree=src` is useful for checking that the toolchain builds
-everything, not for producing a runnable system; use `--tree=dri` for that.
+V2.1 appears to be V2.0 plus in-place patches rather than a recompile: every
+nucleus module has exactly the same program length in both trees, `PATCH.ASM`'s
+128 reserved zero bytes are filled with code in DRI's `XDOS.SPR`, and V2.0 call
+sites are rewritten to call into that area (at 0x01F8 the V2.0 `lxi h,0016 /
+dad d / mov m,b` becomes `call 1814H`, and at 0x0527 `lhld 2081H` becomes
+`call 183FH`). Reconstructing those patches from the V2.0 sources is what is
+left to do. `BNKXDOS` is one visible instance: V2.1 holds a six-byte routine
+(`dcx b / ldax b / ani 0Fh / mov c,a / ret`) at program offset 0x08, where the
+V2.0 source has `dw 0,0,0` in `ProcAddressTable` slots 2-4.
 
-## GENSYS.COM Version Mismatch
+Until that is done, use `--tree=dri` for a runnable system. `--tree=src`
+builds every module and produces working utilities, but its nucleus does not
+run transients.
 
-The source code in `mpm2_external/mpm2src/` is **MP/M II V2.0**, but the DRI binaries are **V2.1**.
+## GENSYS is a Python tool, not `GENSYS.COM`
 
-GENSYS.COM must use the DRI V2.1 binary because:
-- V2.0 and V2.1 have different interactive prompts
-- V2.1 adds "Enable Compatibility Attributes (N)?" prompt
-- The `gensys.sh` expect script is written for V2.1 prompts
-- Using V2.0 GENSYS.COM causes prompt timeout failures
-
-The source-built GENSYS.COM (8,832 bytes, V2.0) exists in `bin/src/` but is not used.
-The DRI GENSYS.COM (9,472 bytes, V2.1) is always used by `gensys.sh`.
+`scripts/gensys.sh` runs `tools/gensys.py` against a JSON configuration; it
+does not drive an interactive `GENSYS.COM` under the emulator at all, so the
+V2.0/V2.1 prompt differences that used to matter here no longer apply. Both
+`bin/dri/GENSYS.COM` and the source-built one are carried on the disk for use
+inside MP/M, and neither is part of the host build.
 
 ## LDRBDOS (Loader BDOS)
 
@@ -110,7 +153,7 @@ These reference files are always copied from `bin/dri/` regardless of build tree
    - Uses MPMLDR (source-built with serial check disabled)
 
 4. **System generation** (`gensys.sh`):
-   - Uses GENSYS.COM from DRI (V2.1 required, see above)
+   - Uses `tools/gensys.py` on the host (see above)
    - Extracts LDRBDOS from DRI's MPMLDR.COM
    - Generates MPM.SYS
 
@@ -122,7 +165,7 @@ With `--tree=src`, these are compiled from `mpm2_external/mpm2src/`:
 - All SPR system components (BNKBDOS, BNKXDOS, RESBDOS, XDOS, etc.)
 - All RSP resident processes (SPOOL, MPMSTAT, ABORT, etc.)
 - MPMLDR (with serial check disabled via src/overrides/)
-- Development tools: DDT, GENHEX, GENMOD (GENSYS built but not used - V2.0/V2.1 mismatch)
+- Development tools: DDT, GENHEX, GENMOD, GENSYS (GENSYS is built for use inside MP/M; the host build uses `tools/gensys.py`)
 
 Source overrides in `src/overrides/` customize:
 - MPMLDR - Serial number check disabled

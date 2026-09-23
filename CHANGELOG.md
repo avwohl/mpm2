@@ -7,6 +7,79 @@ release notes; they are summarised below from their commits, in less detail
 than they would have carried at the time, so the record before 0.3.5 is short
 rather than empty.
 
+## [0.3.6] - 2026-09-23
+
+### Fixed
+
+Source-built `.PRL` utilities produced no output on any nucleus, because the
+image was linked one page below where MP/M loads it. `NUCLEUS/CLI.ASM` loads a
+transient at `segment$bottom + 0100H`, but its `relocate` adds only the memory
+segment's base *page* to the bytes the relocation bitmap marks, so the missing
+page has to come from the link: a transient `.PRL` is linked at 0100H, exactly
+like a `.COM`. `ul80 --prl` linked it at 0. DRI's own binaries state the
+convention plainly — the highest relocatable word in `bin/dri/STAT.PRL` is its
+program length plus 0100H, and `bin/src/STAT.PRL` used to stop at its program
+length.
+
+Page zero was the other half of it. Under MP/M page zero belongs to the
+process's memory segment, so the BDOS entry at 0005H, the default FCB at 005CH
+and the DMA buffer at 0080H have to be relocated with everything else; DRI's
+`DIR.PRL` marks twelve `CALL 5` sites in its bitmap. Only a resolved symbol
+reference can reach the bitmap, so the addresses must not be assembled as
+literals. New `src/mpm_pagezero.mac` publishes them from a module of their own,
+and `src/mpm_runtime.mac` reaches them across that module boundary; `.PRL`
+targets are now compiled with `uplm80 --mode mpm`, which emits the BDOS call,
+the stack fetch from 0006H and the warm-boot jump as those symbols instead of
+literals. This is the same split DRI used: `PLM_WORK/X0100.ASM` and
+`X0200.ASM` differ only in an `offset` equate, and GENMOD found the page-zero
+references by diffing the two images. `.SPR` and `.RSP` output keeps its origin
+of 0 through the new `ul80 --spr`, because those are loaded at the segment base
+rather than a page above it.
+
+`build_hd1k.sh` laid the distribution floppies down *after* the selected binary
+tree, so the V2.1 originals overwrote every source-built file and `--tree=src`
+silently produced a disk of V2.1 utilities on a V2.0 nucleus. The floppies are
+now the base layer, as the comment there always claimed.
+
+### Changed
+
+Source-built utilities work. On an otherwise all-DRI system, `bin/src/USER.PRL`
+prints `User Number = 0` and `bin/src/CONSOLE.PRL` prints `Console = 3`,
+matching DRI's originals byte for byte in behaviour; both printed nothing
+before. `SHOW.PRL` prints its V2.0 banner and option list. A five-line PL/M
+program compiled, assembled, linked and run through this toolchain now runs as
+an MP/M transient.
+
+### Known issues
+
+A source-built *nucleus* still does not run transients, and the explanation
+given for this in 0.3.5 was wrong. It claimed the V2.1 utilities on the disk
+would not run on a V2.0 nucleus. The measurement behind that claim could not
+distinguish the two faults, because at the time every source-built utility was
+mislinked and would not run on *any* nucleus, V2.0 or V2.1. With the link
+fixed, the two faults separate: the utilities were one bug, the nucleus is
+another, and both were real.
+
+The remaining fault is in the source-built `XDOS`/`BNKXDOS` pair, which have to
+match each other. Substituting whole modules into an otherwise source-built
+system and probing with a hand-written `.PRL`: DRI's `XDOS` + `BNKXDOS` is
+enough to make it work, DRI's `RESBDOS` + `BNKBDOS` is not, and neither `XDOS`
+nor `BNKXDOS` alone is. `BNKBDOS.SPR` and `TMP.SPR` build byte-identical to
+DRI's, so the assembler and linker reproduce DRI's output exactly for those.
+
+The failure is narrow. A transient that sets its own stack, spins and exits
+through page-zero 0 returns to the prompt, and XDOS function 12 returns
+normally — so the `CALL 5` chain the CLI builds (`segment$bottom+5` jumps to
+`top-3`, which jumps to `xbdos`) is intact. XDOS function 2 and function 0 kill
+the session.
+
+V2.1 looks like V2.0 plus in-place patches rather than a recompile: every
+nucleus module has the same program length in both trees, `PATCH.ASM`'s 128
+reserved zero bytes are filled with code in DRI's `XDOS.SPR`, and V2.0 call
+sites are rewritten to call into that area — at program offset 0x01F8 V2.0's
+`lxi h,0016 / dad d / mov m,b` becomes `call 1814H`, and at 0x0527 `lhld 2081H`
+becomes `call 183FH`. Reconstructing those patches is what is left.
+
 ## [0.3.5] - 2026-09-23
 
 ### Fixed
@@ -137,26 +210,20 @@ project across the repositories.
 
 ### Known issues
 
+**Superseded by 0.3.6 — this explanation was wrong.** It is kept here as
+written because it was released under this version.
+
 `--tree=src` still does not produce a usable system, and it cannot be fixed
 from this repository. `mpm2_external/mpm2src/NUCLEUS` is MP/M II **V2.0** —
 `VER.ASM` says so, and a source-built system banners as "MP/M II V2.0", 1981 —
 while everything in `bin/dri` is **V2.1**, 1982. A system built from source is
 therefore a genuine V2.0 MP/M II, and the V2.1 utilities on the disk do not run
-on it. Measured on the same disk and the same emulator with only MPM.SYS
-regenerated, an all-DRI system runs `stat` in 6 of 6 sequential sessions and an
-all-src system produces no output in 6 of 6. The difference is not in one
-module: substituted singly into an otherwise all-DRI system and counting
-sessions that complete a `dir`, src `BNKBDOS.SPR` passes 8 of 8 and src
-`TMP.SPR` 12 of 12 (it is byte-identical in both trees), but src `XDOS.SPR`
-passes 2 of 10, src `RESBDOS.SPR` 0 of 8 and src `BNKXDOS.SPR` 1 of 8 — so
-installing DRI's V2.1 `XDOS.SPR` alone does not fix it, and `RESBDOS` or
-`BNKXDOS` alone each reproduce it. One concrete instance of the delta: V2.1
-hides a six-byte routine (`dcx b / ldax b / ani 0Fh / mov c,a / ret`) in
-`BNKXDOS` ProcAddressTable slots 2-4 at program offset 0x08, which the V2.0
-sources do not have. Repairing this needs V2.1 nucleus sources, which are not
-in this repository. Until then `--tree=src` is useful for checking that the
-toolchain builds everything, not for producing a runnable system; use
-`--tree=dri` for that.
+on it.
+
+The part of that which survives measurement is only that the nucleus sources
+are V2.0. The utilities were not the problem: they were linked one page below
+where MP/M loads a `.PRL` and would not run on a V2.1 nucleus either. See
+0.3.6.
 
 The SSH tests still assert only that a prompt came back, not that the command
 produced the right output. The prompt regex matches the prompt echoed with the

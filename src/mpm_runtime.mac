@@ -1,0 +1,45 @@
+; PL/M-80 runtime library for MP/M relocatable programs
+;
+; Same routines as cpm_runtime.mac, but the BDOS entry is reached through an
+; external symbol (see mpm_pagezero.mac) so the linker records the reference in
+; the .PRL relocation bitmap.  Assembling `call 5' here instead would call into
+; absolute address 0005H, which under MP/M is the system's page zero rather
+; than the process's.
+
+        .z80
+
+        extrn   BDOS
+
+        cseg
+
+; MON1 - BDOS call, no return value (void procedure)
+; Input: C=function, DE=parameter
+MON1:
+        call    BDOS
+        ret
+        public  MON1
+
+; MON2 - BDOS call, returns BYTE in L
+; Input: C=function, DE=parameter
+; Output: L=result (A register from BDOS)
+MON2:
+        call    BDOS
+        ld      l,a
+        ld      h,0
+        ret
+        public  MON2
+
+; MON2A - BDOS call, returns ADDRESS in HL
+; Input: C=function, DE=parameter
+; Output: HL=result
+MON2A:
+        call    BDOS
+        ret
+        public  MON2A
+
+; MON3 - alias for MON2A
+MON3:
+        jp      MON2A
+        public  MON3
+
+        end

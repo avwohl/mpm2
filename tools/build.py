@@ -41,9 +41,18 @@ LOCAL_SRC_ROOT = PROJECT_ROOT / "src" / "overrides"  # Local source overrides
 BUILD_DIR = PROJECT_ROOT / "build" / "src"  # Separate from C++ build
 OUTPUT_DIR = PROJECT_ROOT / "bin" / "src"   # Source-built binaries
 
-# Runtime library for PL/M programs
+# Runtime library for PL/M programs.
+#
+# .COM programs use the CP/M runtime, which reaches page zero through absolute
+# equates.  MP/M .PRL transients cannot: page zero belongs to the process's
+# memory segment, so the addresses have to be relocated at load time, and only
+# a resolved *symbol* reference reaches the relocation bitmap.  The MP/M runtime
+# therefore splits the page-zero equates into their own module and refers to
+# them across the module boundary.
 CPM_RUNTIME_SRC = PROJECT_ROOT / "src" / "cpm_runtime.mac"
 CPM_RUNTIME_REL = BUILD_DIR / "cpm_runtime.rel"
+MPM_RUNTIME_SRCS = [PROJECT_ROOT / "src" / "mpm_runtime.mac",
+                    PROJECT_ROOT / "src" / "mpm_pagezero.mac"]
 
 # Include paths for assembler
 INCLUDE_PATHS = [
@@ -335,8 +344,8 @@ class Builder:
         # Step 1: Compile PLM to MAC
         # Add include path for .LIT files
         cmd = [UPLM80, "-I", str(SRC_ROOT / "UTIL8")]
-        if mode == "bare":
-            cmd.extend(["--mode", "bare"])
+        if mode != "cpm":
+            cmd.extend(["--mode", mode])
         cmd.extend(["-o", str(mac_file), str(plm_file)])
         if not self.run(cmd):
             return False
@@ -344,12 +353,38 @@ class Builder:
         # Step 2: Assemble MAC to REL
         return self.assemble(mac_file, rel_file)
 
+    @staticmethod
+    def runtime_sources(target: "BuildTarget") -> list:
+        """Runtime modules to link into this target."""
+        if target.output_type == "prl":
+            return MPM_RUNTIME_SRCS
+        return [CPM_RUNTIME_SRC]
+
+    @staticmethod
+    def plm_mode(target: "BuildTarget") -> str:
+        """PL/M runtime mode for this target.
+
+        A .PRL transient defaults to MP/M mode so the compiler emits page-zero
+        references (the BDOS entry, the stack pointer taken from 0006H, the
+        warm-boot jump) as relocatable symbols rather than literals.  A target
+        that asks for a mode explicitly keeps it.
+        """
+        if target.output_type == "prl" and target.plm_mode == "cpm":
+            return "mpm"
+        return target.plm_mode
+
     def link(self, rel_files: list, output_file: Path, output_type: str, origin: str = None) -> bool:
         """Link .REL files to output using ul80"""
         cmd = [UL80]
 
-        if output_type == "prl" or output_type == "rsp" or output_type == "spr":
+        if output_type == "prl":
+            # A transient is loaded at segment_bottom+0100H while MP/M's
+            # relocator only adds the segment's base page, so the image is
+            # linked at 0100H and the extra page comes from the link.
             cmd.append("--prl")
+        elif output_type in ("rsp", "spr"):
+            # System pages are loaded at the segment base itself: linked at 0.
+            cmd.append("--spr")
 
         if origin:
             cmd.extend(["-p", origin])
@@ -430,7 +465,7 @@ class Builder:
                     else:
                         all_success = False
                 elif src.upper().endswith(".PLM"):
-                    if self.compile_plm(src_path, rel_path, target.plm_mode):
+                    if self.compile_plm(src_path, rel_path, self.plm_mode(target)):
                         rel_files.append(rel_path)
                     else:
                         all_success = False
@@ -442,16 +477,17 @@ class Builder:
             self.log(f"  ERROR: No object files produced for {target.name}")
             return False
 
-        # Include the CP/M runtime library (provides standard CP/M symbols)
-        # unless skip_runtime is set (e.g., for MPMLDR which has its own BDOS)
+        # Include the runtime library (provides standard CP/M symbols) unless
+        # skip_runtime is set (e.g., for MPMLDR which has its own BDOS).
         if not target.skip_runtime:
-            # Build runtime if needed
-            if not CPM_RUNTIME_REL.exists():
-                self.debug("Building CP/M runtime library...")
-                if not self.assemble(CPM_RUNTIME_SRC, CPM_RUNTIME_REL):
-                    self.log("  ERROR: Failed to build CP/M runtime")
-                    return False
-            rel_files.append(CPM_RUNTIME_REL)
+            for src in self.runtime_sources(target):
+                rel = BUILD_DIR / (src.stem + ".rel")
+                if not rel.exists():
+                    self.debug(f"Building runtime library {src.name}...")
+                    if not self.assemble(src, rel):
+                        self.log(f"  ERROR: Failed to build {src.name}")
+                        return False
+                rel_files.append(rel)
 
         # Link
         output_file = self.output_dir / f"{target.name}.{target.output_type.upper()}"

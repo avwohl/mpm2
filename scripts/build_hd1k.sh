@@ -334,11 +334,26 @@ fi
 # Extract and copy files
 setup_temp
 
-# Copy files from selected binary tree
+# The original distribution floppies are the BASE layer: they supply every
+# file the build does not produce.  They are laid down FIRST so that the
+# binary tree selected above overwrites them, not the other way round.
+#
+# They used to be extracted last, which silently overrode the whole point of
+# --tree=src: the source-built DIR.PRL, STAT.PRL and the rest were copied in
+# and then replaced by the V2.1 originals off the floppies, so a "source"
+# disk ran a V2.0 nucleus underneath V2.1 utilities.
+if [ $INCLUDE_DISK1 -eq 1 ] && [ -f "$MPM2_DISKS/MPMII_1.img" ]; then
+    extract_files "$MPM2_DISKS/MPMII_1.img" "$TEMP_DIR"
+fi
+
+if [ $INCLUDE_DISK2 -eq 1 ] && [ -f "$MPM2_DISKS/MPMII_2.img" ]; then
+    extract_files "$MPM2_DISKS/MPMII_2.img" "$TEMP_DIR"
+fi
+
+# Copy files from selected binary tree; these win over the floppies above.
 echo "Copying files from $TREE tree..."
 cp "$BIN_DIR"/* "$TEMP_DIR/" 2>/dev/null || true
-BIN_COUNT=$(ls "$TEMP_DIR" 2>/dev/null | wc -l | tr -d ' ')
-echo "  Copied $BIN_COUNT files from bin/$TREE/"
+echo "  Copied $(ls "$BIN_DIR" | wc -l | tr -d ' ') files from bin/$TREE/"
 
 # For source tree, also add static files from DRI that aren't built
 # (like .LIB macro libraries, .DOC documentation, sample .ASM files)
@@ -367,15 +382,6 @@ if [ "$TREE" = "src" ]; then
         fi
     done
     echo "  Added $STATIC_COUNT static files"
-fi
-
-# Optionally add files from original floppy images (for completeness)
-if [ $INCLUDE_DISK1 -eq 1 ] && [ -f "$MPM2_DISKS/MPMII_1.img" ]; then
-    extract_files "$MPM2_DISKS/MPMII_1.img" "$TEMP_DIR"
-fi
-
-if [ $INCLUDE_DISK2 -eq 1 ] && [ -f "$MPM2_DISKS/MPMII_2.img" ]; then
-    extract_files "$MPM2_DISKS/MPMII_2.img" "$TEMP_DIR"
 fi
 
 # Copy all files to hd1k

@@ -1,0 +1,42 @@
+; MP/M page-zero definitions for uplm80
+;
+; Under CP/M these addresses are absolute and the compiler may emit them as
+; literals.  Under MP/M a process gets its own memory segment: the CLI loads a
+; .PRL at segment_bottom+0100H and page zero lives at segment_bottom, so every
+; one of these has to be relocated by the segment's base page when the program
+; is loaded.
+;
+; Only a *resolved symbol reference* reaches the .PRL relocation bitmap, so
+; they are published from their own module: a reference from inside the module
+; that defines them would be assembled as a literal and never relocated.  This
+; is the same split DRI used - see PLM_WORK/X0100.ASM and X0200.ASM, which
+; differ only in an `offset' equate so GENMOD's two-link diff would find them.
+
+        .z80
+
+BOOT    equ     0000H           ; Warm boot entry
+IOBYTE  equ     0003H           ; I/O byte
+CDISK   equ     0004H           ; Current disk
+BDISK   equ     0004H           ; Current disk (alternate name)
+BDOS    equ     0005H           ; BDOS/XDOS entry point
+MAXB    equ     0006H           ; Top of memory address (in BDOS jump)
+WBOOT   equ     0038H           ; Warm boot vector
+CMDRV   equ     005CH           ; Command drive (byte before FCB)
+FCB     equ     005CH           ; Default FCB (36 bytes)
+FCB16   equ     006CH           ; Second FCB
+BUFF    equ     0080H           ; DMA buffer (alternate name)
+TBUFF   equ     0080H           ; Default DMA buffer (128 bytes)
+
+; Command tail info (used by uplm80)
+PASS0   equ     0080H           ; Parsed param 0 pointer
+LEN0    equ     0080H           ; Length of param 0
+PASS1   equ     0082H           ; Parsed param 1 pointer
+LEN1    equ     0082H           ; Length of param 1
+
+        public  BOOT, WBOOT, BDOS
+        public  IOBYTE, CDISK, BDISK, CMDRV
+        public  MAXB, BUFF
+        public  FCB, FCB16, TBUFF
+        public  PASS0, LEN0, PASS1, LEN1
+
+        end
