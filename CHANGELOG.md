@@ -37,6 +37,19 @@ command — 24 comparisons, all identical:
 - `x BASED s.m` read its pointer from the start of `s` rather than from the
   member, so SDIR matched its command line against address 0 and answered
   "File Not Found." to every argument.
+- `DECLARE x (*) BYTE DATA (...)` never took its extent from the data, so
+  `LAST(x)` was -2. PIP's delimiter table is declared that way, so PIP
+  recognised no delimiter — not even the `=` between destination and source —
+  and answered "INVALID FORMAT" to every command.
+- A nested procedure's return type was not known where it is used, so a `BYTE`
+  result was read out of `L` instead of `A`.
+- MP/M II's assembler, DDT, GENHEX and GENMOD are MAC sources: absolute code,
+  each module carrying its own `ORG`, which DRI assembled separately and
+  concatenated as HEX. Assembled as relocatable they were stacked one after
+  another, so `ASM.PRL` came out at 36971 bytes against DRI's 8171 and began
+  with zeros where its entry should be. um80's new `--aseg` assembles them the
+  way MAC does, and they no longer link against the PL/M runtime they never
+  used.
 
 `stat` printed its drive line 1837 times and never printed a figure, because
 um80 assembled a label named after a mnemonic as the opcode byte. UTIL4/STAT.PLM

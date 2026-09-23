@@ -74,6 +74,8 @@ class BuildTarget:
     origin: Optional[str] = None # Link origin (hex), None for default 0x100
     concat: bool = False         # If True, concatenate sources before assembly
     plm_mode: str = "cpm"        # PLM mode: "cpm" (default) or "bare"
+    asm_absolute: bool = False   # Sources are MAC-style absolute (ORG is an
+                                 # absolute address, no relocatable segments).
     prl_extra: str = "0"         # Extra memory (hex) a .PRL asks MP/M for, for
                                  # storage the program places at .MEMORY.  DRI
                                  # passed this to GENMOD: `genmod ed.hex
@@ -141,8 +143,8 @@ UTIL6_TARGETS = [
 # ============================================================================
 UTIL3_TARGETS = [
     BuildTarget("LOAD", "prl", ["LOAD.PLM"], "UTIL3"),
-    BuildTarget("GENHEX", "com", ["GENHEX.ASM"], "UTIL3"),
-    BuildTarget("GENMOD", "com", ["GENMOD.ASM"], "UTIL3"),
+    BuildTarget("GENHEX", "com", ["GENHEX.ASM"], "UTIL3", asm_absolute=True, skip_runtime=True),
+    BuildTarget("GENMOD", "com", ["GENMOD.ASM"], "UTIL3", asm_absolute=True, skip_runtime=True),
 ]
 
 # ============================================================================
@@ -152,13 +154,13 @@ UTIL1_TARGETS = [
     BuildTarget("ASM", "prl", [
         "AS0COM.ASM", "AS1IO.ASM", "AS2SCAN.ASM",
         "AS3SYM.ASM", "AS4SEAR.ASM", "AS5OPER.ASM", "AS6MAIN.ASM"
-    ], "UTIL1", prl_extra="1000"),
+    ], "UTIL1", prl_extra="1000", asm_absolute=True, skip_runtime=True),
     BuildTarget("RDT", "prl", [
         "DDT0MOV.ASM", "DDT1ASM.ASM", "DDT2MON.ASM"
-    ], "UTIL1", prl_extra="1500"),
+    ], "UTIL1", prl_extra="1500", asm_absolute=True, skip_runtime=True),
     BuildTarget("DDT", "com", [
         "DDT0MOV.ASM", "DDT1ASM.ASM", "DDT2MON.ASM"
-    ], "UTIL1"),
+    ], "UTIL1", asm_absolute=True, skip_runtime=True),
 ]
 
 # ============================================================================
@@ -321,9 +323,19 @@ class Builder:
             shutil.rmtree(self.output_dir)
         self.log("Cleaned build directories")
 
-    def assemble(self, asm_file: Path, rel_file: Path) -> bool:
-        """Assemble a .ASM file to .REL using um80"""
+    def assemble(self, asm_file: Path, rel_file: Path, absolute: bool = False) -> bool:
+        """Assemble a .ASM file to .REL using um80.
+
+        ``absolute`` assembles the way DRI's MAC does, with no relocatable
+        segments, so an ORG is an absolute address.  MP/M II's own assembler,
+        DDT, GENHEX and GENMOD are MAC sources: each of ASM's seven modules
+        carries its own ORG (100H, 200H, 1100H, ...) and DRI simply
+        concatenated the resulting HEX files.  Assembling them as relocatable
+        put each one after the last instead of at its own address.
+        """
         cmd = [UM80]
+        if absolute:
+            cmd.append("--aseg")
 
         # Add include paths
         for inc in INCLUDE_PATHS:
@@ -444,7 +456,7 @@ class Builder:
 
             # Assemble concatenated file
             rel_path = self.build_dir / f"{target.name}.REL"
-            if self.assemble(concat_file, rel_path):
+            if self.assemble(concat_file, rel_path, target.asm_absolute):
                 rel_files.append(rel_path)
             else:
                 return False
@@ -468,7 +480,7 @@ class Builder:
                 rel_path = self.build_dir / rel_name
 
                 if src.upper().endswith(".ASM") or src.upper().endswith(".MAC"):
-                    if self.assemble(src_path, rel_path):
+                    if self.assemble(src_path, rel_path, target.asm_absolute):
                         rel_files.append(rel_path)
                     else:
                         all_success = False
