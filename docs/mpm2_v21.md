@@ -85,8 +85,8 @@ from:
 | `SHOW.PRL`    | 2     | `UTIL4/SHOW.PLM`          | yes |
 | `PRINTER.PRL` | 23    | `UTIL5/PRINT.PLM`         | yes |
 | `SCHED.RSP`   | 1     | `UTIL2/SCRSP.PLM`         | yes |
+| `SPOOL.PRL`   | 88    | `UTIL5/MSPL.PLM`          | yes |
 | `SDIR.PRL`    | 2     | `UTIL7`                   | no, see below |
-| `SPOOL.PRL`   | 88    | `UTIL5/MSPL.PLM`          | no, see below |
 | `SPOOL.BRS`   | 37    | `UTIL2/SPBRS.PLM`         | no, see below |
 | `PIP.PRL`     | 64    | `UTIL6`                   | no, see below |
 | `GENSYS.COM`  | 47 + 768 longer | `MPMLDR/GENSYS.PLM` | no, see below |
@@ -183,7 +183,7 @@ with six spare bytes.
 
 ## The transients
 
-### SHOW, PRINTER, SCHED, MPMLDR - reconstructed
+### SHOW, PRINTER, SCHED, SPOOL, MPMLDR - reconstructed
 
 * `SHOW.PLM`: `declare user(15) byte` becomes `user(16)`.  User numbers
   run 0 to 15, and `last(user)` was one short, so `SHOW [USERS]` never
@@ -195,11 +195,30 @@ with six spare bytes.
   its high bit set, marking it a system process the way Spool, MPMSTAT
   and Abort already were.
 * `MPMLDR.PLM`: banner only.
+* `MSPL.PLM`, four changes.  The spooler drops its priority to 201
+  before it starts listing, so that it runs in the background.  The pass
+  that checks the files exist opens them with `f5'` set, the way the
+  pass that lists them already did.  That same pass now recognises the
+  `[D]` option instead of trying to open it as a file and stopping with
+  `Can't Open File = D`, which is what command tails like
+  `SPOOL A.TXT[D]` used to do.  And the message it prints on detaching
+  loses its last two lines - DRI took the bytes for the patch code.
+
+The first two are one statement each and read straight off the patch.
+The third is a source-level reconstruction of a hand-written patch: DRI
+jumped back to the top of the loop, which PL/M cannot express, so the
+loop body is restructured as an `if`/`else` around the open.  It does
+what the patch does; it does not assemble to the same bytes, and neither
+does anything else here that is compiled rather than assembled.
 
 ### SDIR, SPOOL, PIP, GENSYS - identified, not reconstructed
 
 The evidence, for whoever picks this up.  Offsets are into the `.PRL`
 file, which for these is also the load address.
+
+`SPOOL.BRS`, 37 bytes, is the banked resident half of the spooler,
+built from `UTIL2/SPBRS.PLM`.  This repository does not build `.BRS`
+files at all (see the loose ends below), so it was left alone.
 
 `SDIR.PRL`, two bytes:
 
@@ -210,19 +229,30 @@ file, which for these is also the load address.
   `3BAD`, `3BB1` and `3BB3`; the bounds check was reading the first
   where it wanted the third's neighbour.
 
-`SPOOL.PRL`, 88 bytes: DRI reused the message text
-`"- Enter ATTACH SPOOL to re-attach console to spooler"` at `012A`, and
-the start of `"*** Spooler detac..."`, as a patch area, and turned three
-inline sequences at `025F`, `026D` and `031A` into calls into it.
-`SPOOL.BRS` changes 37 bytes to match.
+`PIP.PRL`, 64 bytes in seven places.  Two are legible:
 
-`PIP.PRL`, 64 bytes in seven places, the largest at `1FE1-1FF8` and
-`202E-203D`.
+* `06E7`: `LDA 243AH` / `LXI H,2262H` becomes `LDA 2262H` /
+  `LXI H,243AH`, so `a = a or b` became `b = b or a`.
+* `0B12`: four calls are jumped over, and the twelve bytes they
+  occupied become a routine that zeroes `2270H` and `22CCH`.  Whatever
+  calls it is in the other two regions, `1FE1-1FF8` and `202E-203D`.
 
 `GENSYS.COM` is the odd one out: 8704 bytes in V2.0 and 9472 in V2.1, so
-it is a recompile rather than a patch.  It is the natural place for
-whatever writes `system$data(96)`, the byte the CLI's new attribute
-handling is gated on.
+it is a recompile, not a patch, and cannot be reconstructed from a diff.
+Its strings say what was added:
+
+```
+> *** Error Maximum Exceeded - 7 Assumed ***
+> Enable Compatibility Attributes $
+> MP/M II V2.1 System Generation
+```
+
+`Enable Compatibility Attributes` is the missing half of the CLI change
+above: it is the GENSYS question whose answer goes in
+`system$data(96)`, which is what `cliattr` tests before it copies the
+command FCB's f1'..f4' bits into `pd(1dh)`.  Until `GENSYS.PLM` is
+brought up to V2.1, a system generated here leaves that byte zero and
+the attributes stay off.
 
 ### BNKBDOS - the shipped source is already V2.1
 
