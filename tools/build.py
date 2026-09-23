@@ -74,6 +74,10 @@ class BuildTarget:
     origin: Optional[str] = None # Link origin (hex), None for default 0x100
     concat: bool = False         # If True, concatenate sources before assembly
     plm_mode: str = "cpm"        # PLM mode: "cpm" (default) or "bare"
+    prl_extra: str = "0"         # Extra memory (hex) a .PRL asks MP/M for, for
+                                 # storage the program places at .MEMORY.  DRI
+                                 # passed this to GENMOD: `genmod ed.hex
+                                 # xed.prl $1000'.
     skip_runtime: bool = False   # If True, don't link with cpm_runtime
     post_build: Optional[str] = None  # Special post-build action (e.g., "mpmldr")
 
@@ -128,8 +132,8 @@ UTIL5_TARGETS = [
 # UTIL6 - Text Processing (PL/M)
 # ============================================================================
 UTIL6_TARGETS = [
-    BuildTarget("PIP", "prl", ["PIP.PLM"], "UTIL6"),
-    BuildTarget("ED", "prl", ["ED.PLM"], "UTIL6"),
+    BuildTarget("PIP", "prl", ["PIP.PLM"], "UTIL6", prl_extra="1000"),
+    BuildTarget("ED", "prl", ["ED.PLM"], "UTIL6", prl_extra="1000"),
 ]
 
 # ============================================================================
@@ -148,10 +152,10 @@ UTIL1_TARGETS = [
     BuildTarget("ASM", "prl", [
         "AS0COM.ASM", "AS1IO.ASM", "AS2SCAN.ASM",
         "AS3SYM.ASM", "AS4SEAR.ASM", "AS5OPER.ASM", "AS6MAIN.ASM"
-    ], "UTIL1"),
+    ], "UTIL1", prl_extra="1000"),
     BuildTarget("RDT", "prl", [
         "DDT0MOV.ASM", "DDT1ASM.ASM", "DDT2MON.ASM"
-    ], "UTIL1"),
+    ], "UTIL1", prl_extra="1500"),
     BuildTarget("DDT", "com", [
         "DDT0MOV.ASM", "DDT1ASM.ASM", "DDT2MON.ASM"
     ], "UTIL1"),
@@ -164,7 +168,7 @@ UTIL7_TARGETS = [
     BuildTarget("SDIR", "prl", [
         "DM.PLM", "SN.PLM", "DSE.PLM", "DSH.PLM",
         "DSO.PLM", "DA.PLM", "DP.PLM", "DTS.PLM"
-    ], "UTIL7"),
+    ], "UTIL7", prl_extra="1000"),
 ]
 
 # ============================================================================
@@ -373,7 +377,8 @@ class Builder:
             return "mpm"
         return target.plm_mode
 
-    def link(self, rel_files: list, output_file: Path, output_type: str, origin: str = None) -> bool:
+    def link(self, rel_files: list, output_file: Path, output_type: str,
+             origin: str = None, extra: str = "0") -> bool:
         """Link .REL files to output using ul80"""
         cmd = [UL80]
 
@@ -388,6 +393,9 @@ class Builder:
 
         if origin:
             cmd.extend(["-p", origin])
+
+        if extra and extra != "0":
+            cmd.extend(["--extra", extra])
 
         cmd.extend(["-o", str(output_file)])
         cmd.extend([str(f) for f in rel_files])
@@ -491,7 +499,8 @@ class Builder:
 
         # Link
         output_file = self.output_dir / f"{target.name}.{target.output_type.upper()}"
-        if not self.link(rel_files, output_file, target.output_type, target.origin):
+        if not self.link(rel_files, output_file, target.output_type, target.origin,
+                         target.prl_extra):
             return False
 
         # Handle post-build actions

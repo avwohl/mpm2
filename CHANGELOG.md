@@ -11,6 +11,33 @@ rather than empty.
 
 ### Fixed
 
+Every PL/M utility now prints what DRI's own binary prints. The remaining
+defects were all in the compiler, and were found by putting DRI's binaries on
+the same disk under `X`-prefixed names and comparing the two outputs command by
+command — 24 comparisons, all identical:
+
+- A `PUBLIC` procedure took its arguments the way a private one does, which a
+  caller in another module cannot do. SDIR's `pdecimal(v, prec, zerosup)` read
+  two of its three arguments from slots nobody had written.
+- `AT(.MEMORY)` was a label at the end of the module rather than the linker's
+  `__END__`, so SDIR's hash table landed in the middle of the program and
+  cleared another module's strings.
+- A variable `BY` step in `DO I = A TO B BY I` was treated as `BY 1`, so SDIR
+  counted every allocated block twice on a large disk.
+- A `BYTE` loop index was not widened before the 16-bit loop path, so
+  `do i = 0 to last(user)` never terminated and `show users:` printed until the
+  session died.
+- `AT(...)` understood only a bare `NAME(<literal>)`; a constant expression or a
+  structure designator became `EQU $`, the assembler's location counter. STAT
+  read a stray byte as its `$` parameter, so `stat <file>` set the file
+  read-only instead of listing it; PIP and PRLCOM were miscompiled the same way.
+- A declared variable did not shadow the `ZERO` condition-flag built-in, so
+  STAT's zero-suppression flag read the Z flag and printed `(00001 file,
+  00001-1k blocks)`.
+- `x BASED s.m` read its pointer from the start of `s` rather than from the
+  member, so SDIR matched its command line against address 0 and answered
+  "File Not Found." to every argument.
+
 `stat` printed its drive line 1837 times and never printed a figure, because
 um80 assembled a label named after a mnemonic as the opcode byte. UTIL4/STAT.PLM
 declares `add: procedure(ap,bp)` for its BCD arithmetic, and `call add(...)`
@@ -93,18 +120,16 @@ now the base layer, as the comment there always claimed.
 ### Changed
 
 `--tree=src` produces a running system. A fully source-built MP/M II V2.0 boots,
-loads and runs transient programs, and `dir`, `stat`, `tod`, `user`, `console`
-and `show` all give the same output as DRI's own binaries — `stat` prints
+loads and runs transient programs, and every PL/M utility tried — `dir`, `sdir`,
+`stat`, `tod`, `user`, `console`, `show`, `type`, `dump`, `set`, `prlcom`,
+`printer`, `stopsplr`, `sched`, `spool`, `abort`, `ren`, `submit`, `mpmstat`,
+with and without arguments — gives the same output as DRI's own binaries — `stat` prints
 `A: RW, Space:     7,512k`, `dir` lists `A: $3$      SUP`, `tod` prints
 `Mon 09/14/81 00:00:19`, `user 0` prints `User Number = 0`, `console` prints
 `Console = 3`. Before this release a source-built system printed a program's
 load line and then dropped the session, whatever the program was.
 
 ### Known issues
-
-`sdir` produces a directory listing now but its columns are mangled — the sizes
-and record counts print as stray digits. DRI's own `SDIR.PRL` is correct on the
-same source-built system, so this is one more defect in what the compiler emits.
 
 The V2.0 nucleus sources here are not the V2.1 binaries in `bin/dri`, and V2.1
 looks like V2.0 plus in-place patches rather than a recompile: every nucleus
