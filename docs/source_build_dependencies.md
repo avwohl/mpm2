@@ -16,6 +16,45 @@ These tools are shipped in `bin/dri/` only. They have no corresponding source co
 
 **Note:** LINK.COM and RMAC.COM are not needed for the source build - the build system uses native `ul80` and `um80` tools instead.
 
+## The source tree is V2.0 and does not interoperate with V2.1
+
+This is the single reason `--tree=src` does not give a working system, and it
+is worth stating precisely because it looks like a bug in the build and is not.
+
+`mpm2_external/mpm2src/NUCLEUS` is MP/M II **V2.0** (`VER.ASM` says so, and a
+source-built system banners as "MP/M II V2.0", 1981). Everything in `bin/dri`
+is **V2.1** (1982). A system built from source is therefore a genuine V2.0
+MP/M II, and the V2.1 utilities on the disk do not work on it.
+
+Measured, same disk and same emulator, only MPM.SYS regenerated:
+
+| system | `stat` |
+|---|---|
+| all `bin/dri` (V2.1) | works, 6 of 6 sequential sessions |
+| all `bin/src` (V2.0) | no output, 6 of 6 sessions |
+
+The difference is not in one module. Substituting single modules into an
+otherwise all-DRI system, counting sessions that complete a `dir`:
+
+| system | sessions passing |
+|---|---|
+| all dri (control) | 30/30 |
+| dri + src `BNKBDOS.SPR` | 8/8 |
+| dri + src `TMP.SPR` | 12/12 (byte-identical in both trees) |
+| dri + src `XDOS.SPR` | 2/10 |
+| dri + src `RESBDOS.SPR` | 0/8 |
+| dri + src `BNKXDOS.SPR` | 1/8 |
+
+So installing DRI's V2.1 `XDOS.SPR` alone does not fix it, and `RESBDOS` or
+`BNKXDOS` alone each reproduce it. One concrete instance of the delta: V2.1
+hides a six-byte routine (`dcx b / ldax b / ani 0Fh / mov c,a / ret`) in
+`BNKXDOS` ProcAddressTable slots 2-4 at program offset 0x08, which the V2.0
+sources do not have.
+
+Fixing this needs V2.1 nucleus sources, which are not in this repository.
+Until then `--tree=src` is useful for checking that the toolchain builds
+everything, not for producing a runnable system; use `--tree=dri` for that.
+
 ## GENSYS.COM Version Mismatch
 
 The source code in `mpm2_external/mpm2src/` is **MP/M II V2.0**, but the DRI binaries are **V2.1**.
