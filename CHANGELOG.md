@@ -11,6 +11,35 @@ rather than empty.
 
 ### Fixed
 
+A source-built nucleus could not run a transient program at all. `LXI
+H,PDTBL-34H` in `NUCLEUS/CLI.ASM` assembled to `PDTBL+34H`, because um80 had the
+two branches of an external-symbol expression swapped and added a constant it
+should have subtracted. The CLI indexes the process descriptor table from there
+and primes a new process's initial stack with the program's entry address, so
+every entry it touched was 0x68 bytes past the real table and the dispatcher
+resumed each transient at whatever lay beyond it: MP/M loaded the `.PRL`,
+printed its load line, and warm-booted. Fixed in um80; the CLI's reference now
+assembles to the same bytes as DRI's own `XDOS.SPR`.
+
+The PL/M runtime took its arguments in the wrong place. `MON1`/`MON2`/`MON2A`/
+`MON3` read the BDOS function from `C` and the parameter from `DE`, which is
+DRI's PL/M-80 convention — it is why `PLM_WORK/X0100.ASM` can define all three
+as `EQU 0005H` — but uplm80 passes arguments to an external `PROCEDURE` on the
+stack. It open-codes `MON1` and `MON2` when the function number is a constant,
+which is why this went unseen: the routines were only reached when it could
+not, and then they ran on whatever `C` and `DE` happened to hold. `DIR.PLM`'s
+`parse` (XDOS 152, through `mon3`) was one such call, so DIR parsed its command
+line from garbage. Both runtimes now take the arguments from the stack, and all
+four are one routine: the BDOS returns a byte in `A` and an address in `HL`,
+which is what uplm80 reads for a `BYTE` and an `ADDRESS` result.
+
+Assignments of a comparison lost their store, through a defect in upeepz80's
+dead-store elimination — it treated the compiler's own `??` join label as a
+procedure entry, and judged liveness only to the end of the enclosing
+procedure. `DIR.PLM`'s `incl$sys = (fcb16(1) = 'S')` and `STAT.PLM`'s
+`sys = ((dirbuf(temp+10) and 80h) = 80h)` were both thrown away. Fixed in
+upeepz80 0.2.4.
+
 Source-built `.PRL` utilities produced no output on any nucleus, because the
 image was linked one page below where MP/M loads it. `NUCLEUS/CLI.ASM` loads a
 transient at `segment$bottom + 0100H`, but its `relocate` adds only the memory
@@ -43,42 +72,31 @@ now the base layer, as the comment there always claimed.
 
 ### Changed
 
-Source-built utilities work. On an otherwise all-DRI system, `bin/src/USER.PRL`
-prints `User Number = 0` and `bin/src/CONSOLE.PRL` prints `Console = 3`,
-matching DRI's originals byte for byte in behaviour; both printed nothing
-before. `SHOW.PRL` prints its V2.0 banner and option list. A five-line PL/M
-program compiled, assembled, linked and run through this toolchain now runs as
-an MP/M transient.
+`--tree=src` produces a running system. A fully source-built MP/M II V2.0 boots,
+loads and runs transient programs, and `dir`, `user` and `console` give the same
+output as DRI's own binaries — `dir` lists `A: $3$      SUP`, `user 0` prints
+`User Number = 0`, `console` prints `Console = 3`. Before this release a
+source-built system printed a program's load line and then dropped the session,
+whatever the program was.
 
 ### Known issues
 
-A source-built *nucleus* still does not run transients, and the explanation
-given for this in 0.3.5 was wrong. It claimed the V2.1 utilities on the disk
-would not run on a V2.0 nucleus. The measurement behind that claim could not
-distinguish the two faults, because at the time every source-built utility was
-mislinked and would not run on *any* nucleus, V2.0 or V2.1. With the link
-fixed, the two faults separate: the utilities were one bug, the nucleus is
-another, and both were real.
+`stat` on a source-built system prints its drive line but no free-space figure,
+and repeats the line instead of stopping. DRI's own `STAT.PRL` on the same
+source-built nucleus prints `A: RW, Space:     7,524k` and stops, so this is one
+more defect in what the compiler emits for `STAT.PLM`, not in the system it runs
+on. `tod` likewise prints nothing.
 
-The remaining fault is in the source-built `XDOS`/`BNKXDOS` pair, which have to
-match each other. Substituting whole modules into an otherwise source-built
-system and probing with a hand-written `.PRL`: DRI's `XDOS` + `BNKXDOS` is
-enough to make it work, DRI's `RESBDOS` + `BNKBDOS` is not, and neither `XDOS`
-nor `BNKXDOS` alone is. `BNKBDOS.SPR` and `TMP.SPR` build byte-identical to
-DRI's, so the assembler and linker reproduce DRI's output exactly for those.
-
-The failure is narrow. A transient that sets its own stack, spins and exits
-through page-zero 0 returns to the prompt, and XDOS function 12 returns
-normally — so the `CALL 5` chain the CLI builds (`segment$bottom+5` jumps to
-`top-3`, which jumps to `xbdos`) is intact. XDOS function 2 and function 0 kill
-the session.
-
-V2.1 looks like V2.0 plus in-place patches rather than a recompile: every
-nucleus module has the same program length in both trees, `PATCH.ASM`'s 128
-reserved zero bytes are filled with code in DRI's `XDOS.SPR`, and V2.0 call
-sites are rewritten to call into that area — at program offset 0x01F8 V2.0's
-`lxi h,0016 / dad d / mov m,b` becomes `call 1814H`, and at 0x0527 `lhld 2081H`
-becomes `call 183FH`. Reconstructing those patches is what is left.
+The V2.0 nucleus sources here are not the V2.1 binaries in `bin/dri`, and V2.1
+looks like V2.0 plus in-place patches rather than a recompile: every nucleus
+module has the same program length in both trees, `PATCH.ASM`'s 128 reserved
+zero bytes are filled with code in DRI's `XDOS.SPR`, and V2.0 call sites are
+rewritten to call into that area — at program offset 0x01F8 V2.0's `lxi h,0016 /
+dad d / mov m,b` becomes `call 1814H`, and at 0x0527 `lhld 2081H` becomes
+`call 183FH`. About 56 bytes of real code differ, the rest being those patch
+areas and the serial number. A source-built system is therefore a genuine V2.0
+and does not carry DRI's later fixes. `BNKBDOS.SPR` and `TMP.SPR` build
+byte-identical to DRI's.
 
 ## [0.3.5] - 2026-09-23
 

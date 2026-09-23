@@ -7,6 +7,7 @@
 #include "banked_mem.h"
 #include <iostream>
 #include <iomanip>
+#include <cstdlib>
 
 MpmCpu::MpmCpu(qkz80_cpu_mem* memory)
     : qkz80(memory)
@@ -34,7 +35,10 @@ void MpmCpu::port_out(qkz80_uint8 port, qkz80_uint8 value) {
             break;
 
         case MpmPorts::SIGNAL:
-            // Signal port - used for status
+            // TEMPORARY DEBUG: OUT (0E2H),A with A!=0 traces A*500 instructions.
+            std::cerr << "TRACEPORT hit value=" << (int)value << std::endl;
+            if (value) { g_trace_instructions = true; g_trace_count = value * 500; }
+            else { g_trace_instructions = false; }
             break;
 
         default:
@@ -100,6 +104,34 @@ void MpmCpu::handle_bank_select(uint8_t bank) {
 // halt() now inherited from qkz80 base class
 
 void MpmCpu::execute(void) {
+    // TEMPORARY DEBUG: arm the trace when a transient is entered.
+    if (!g_trace_instructions && g_trace_count == 0) {
+        static const char* at = getenv("MPM_TRACE_AT");
+        if (at) {
+            uint16_t want = (uint16_t)strtoul(at, nullptr, 16);
+            static const char* bk = getenv("MPM_TRACE_BANK");
+            int cur = banked_mem_ ? banked_mem_->current_bank() : 0;
+            bool bank_ok = !bk || atoi(bk) == cur;
+            if (regs.PC.get_pair16() == want && bank_ok) {
+                const char* n = getenv("MPM_TRACE_N");
+                g_trace_instructions = true;
+                g_trace_count = n ? atoi(n) : 200;
+            }
+        }
+    }
+    if (g_trace_instructions && g_trace_count > 0) {
+        uint16_t pc = regs.PC.get_pair16();
+        std::cerr << "T " << std::hex << std::setfill('0') << std::setw(4) << pc
+                  << " b" << (int)(banked_mem_ ? banked_mem_->current_bank() : 0)
+                  << " sp" << std::setw(4) << regs.SP.get_pair16()
+                  << " op" << std::setw(2) << (int)mem->fetch_mem(pc)
+                  << " a" << std::setw(2) << (int)regs.AF.get_high()
+                  << " bc" << std::setw(4) << regs.BC.get_pair16()
+                  << " de" << std::setw(4) << regs.DE.get_pair16()
+                  << " hl" << std::setw(4) << regs.HL.get_pair16()
+                  << std::dec << "\n";
+        if (--g_trace_count == 0) g_trace_instructions = false;
+    }
     qkz80::execute();
 }
 

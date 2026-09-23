@@ -53,55 +53,50 @@ With that fixed, source-built utilities work. On an otherwise all-DRI system,
 source-built `USER.PRL` prints `User Number = 0` and `CONSOLE.PRL` prints
 `Console = 3`, matching DRI's originals; before the fix both printed nothing.
 
-### Open: the source-built V2.0 nucleus
+### Fixed: the CLI indexed the process descriptor table 0x68 bytes too high
 
-A source-built nucleus still fails, and this part is a real V2.0/V2.1
-difference. `mpm2_external/mpm2src/NUCLEUS` is MP/M II **V2.0** (`VER.ASM` says
-so, and a source-built system banners as "MP/M II V2.0", 1981); everything in
-`bin/dri` is **V2.1** (1982).
+A source-built nucleus loaded a `.PRL`, printed its load line, and warm-booted,
+whatever the program was. `NUCLEUS/CLI.ASM` reaches the process descriptor
+table with
 
-Substituting whole modules into an otherwise source-built system, and probing
-with a hand-written `.PRL` that prints the word at page-zero offset 6:
+	LXI	H,PDTBL-34H
+	LXI	B,0034H
 
-| nucleus modules taken from `bin/dri` | probe |
-|---|---|
-| `XDOS` + `BNKXDOS` + `RESBDOS` + `BNKBDOS` | prints `BFFD` |
-| `XDOS` + `BNKXDOS` | prints `BFFD` |
-| `RESBDOS` + `BNKBDOS` | no output |
-| `XDOS` alone | no output |
-| `BNKXDOS` alone | no output |
+and um80 assembled that as `PDTBL+34H`: the two branches of an external-symbol
+expression were swapped, so a constant to the right of a `-` was added instead
+of subtracted. That is where the CLI primes a new process's initial stack with
+the program's entry address, so the dispatcher resumed each transient at
+whatever lay past the table. Fixed in um80; the reference now assembles to the
+same bytes as DRI's own `XDOS.SPR`.
 
-So the fault is in the source-built `XDOS`/`BNKXDOS` pair, and the two have to
-match. `BNKBDOS.SPR` and `TMP.SPR` build **byte-identical** to DRI's, so the
-assembler and linker are reproducing DRI's own output exactly for those.
+Traced by arming an instruction trace at the CLI's `MVI C,90H / JMP XDOS`
+(create process) and comparing the two systems at the dispatcher's resume. Both
+reach `ld sp,hl` / `ret`; DRI pops `0100` — the transient's entry — and a
+source-built system popped `cddb`, which falls through to `jp 0`.
 
-What a transient can and cannot do on a source-built nucleus, each tested with
-a minimal assembly `.PRL`:
+### Open: two utilities the compiler still gets wrong
 
-| program | result |
-|---|---|
-| set SP, spin, `jp` page-zero 0 (no XDOS call) | returns to the prompt |
-| XDOS function 12 (return version), then exit | returns to the prompt |
-| XDOS function 2 (console output) | kills the session |
-| XDOS function 0 (system reset) | kills the session |
+`stat` prints its drive line without the free-space figure and repeats it
+instead of stopping; `tod` prints nothing. Both are compiled PL/M. DRI's own
+`STAT.PRL` on the same source-built nucleus prints `A: RW, Space:     7,524k`
+and stops, and DRI's `DIR.PRL` lists correctly there too, so what remains is in
+what the compiler emits, not in the system.
 
-So the `CALL 5` chain the CLI sets up — `segment$bottom+5` jumps to `top-3`,
-which jumps to `xbdos` — is intact and reaches XDOS, and process termination
-through page-zero 0 works. Only certain XDOS functions are fatal.
+### The source tree is V2.0, and V2.1 is V2.0 plus patches
 
-V2.1 appears to be V2.0 plus in-place patches rather than a recompile: every
-nucleus module has exactly the same program length in both trees, `PATCH.ASM`'s
-128 reserved zero bytes are filled with code in DRI's `XDOS.SPR`, and V2.0 call
-sites are rewritten to call into that area (at 0x01F8 the V2.0 `lxi h,0016 /
+`mpm2_external/mpm2src/NUCLEUS` is MP/M II **V2.0** (`VER.ASM` says so, and a
+source-built system banners as "MP/M II V2.0", 1981); everything in `bin/dri` is
+**V2.1** (1982). The two are closer than that suggests. Every nucleus module has
+exactly the same program length in both trees, `PATCH.ASM`'s 128 reserved zero
+bytes are filled with code in DRI's `XDOS.SPR`, and V2.0 call sites are
+rewritten to call into that area — at program offset 0x01F8 V2.0's `lxi h,0016 /
 dad d / mov m,b` becomes `call 1814H`, and at 0x0527 `lhld 2081H` becomes
-`call 183FH`). Reconstructing those patches from the V2.0 sources is what is
-left to do. `BNKXDOS` is one visible instance: V2.1 holds a six-byte routine
-(`dcx b / ldax b / ani 0Fh / mov c,a / ret`) at program offset 0x08, where the
-V2.0 source has `dw 0,0,0` in `ProcAddressTable` slots 2-4.
+`call 183FH`. About 56 bytes of real code differ; the rest is those patch areas
+and the serial number. `BNKBDOS.SPR` and `TMP.SPR` build byte-identical to
+DRI's.
 
-Until that is done, use `--tree=dri` for a runnable system. `--tree=src`
-builds every module and produces working utilities, but its nucleus does not
-run transients.
+So a source-built system is a genuine V2.0 and does not carry DRI's later
+fixes, but it runs.
 
 ## GENSYS is a Python tool, not `GENSYS.COM`
 
