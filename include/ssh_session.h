@@ -18,6 +18,7 @@
 #include <map>
 #include <thread>
 #include <atomic>
+#include <chrono>
 #include <libssh/libssh.h>
 #include <libssh/server.h>
 #include <libssh/callbacks.h>
@@ -105,6 +106,8 @@ private:
     SSHState state_;
     int console_id_;
     bool kex_done_;
+    // When the session thread started, for the handshake watchdog.
+    std::chrono::steady_clock::time_point started_at_;
     bool sent_banner_;
     bool authenticated_;
     SSHServer* server_;

@@ -451,7 +451,28 @@ void SSHSession::run() {
     // Note: running_ is set in start() before thread spawn to prevent race condition
     if (DEBUG_SSH) std::cerr << "[SSH] Session thread started\n";
 
+    started_at_ = std::chrono::steady_clock::now();
+
     while (!stop_requested_ && state_ != SSHState::CLOSED) {
+        // Handshake watchdog. A session that never gets past authentication
+        // shows the user nothing at all - no banner, no prompt, no response
+        // to a keypress - because the banner is only sent once the shell
+        // request arrives. That silence is indistinguishable from a hung
+        // guest OS and it cost a long time to diagnose once already. Close
+        // such a session and say so, so the next one is a visible error
+        // rather than a mystery.
+        if (!authenticated_ && state_ != SSHState::READY) {
+            auto waited = std::chrono::steady_clock::now() - started_at_;
+            if (waited > std::chrono::seconds(20)) {
+                std::cerr << "[SSH] " << client_ip_
+                          << ": handshake did not complete within 20s (state="
+                          << (int)state_ << ", kex_done=" << (kex_done_ ? 1 : 0)
+                          << "); closing session\n";
+                state_ = SSHState::CLOSED;
+                break;
+            }
+        }
+
         // Use ssh_event for polling after key exchange, or add small delay during kex
         if (kex_done_ && event_) {
             // Use short timeout to allow quick response to I/O
