@@ -66,13 +66,28 @@ func6:
 		;direct output function
 		jmp conoutf
 	stsdirinp:
+		IFDEF	MPM21
+; ***** MP/M 2.1
+; a character that was read ahead and pushed back counts as ready
+		push d! call kbconst! pop d
+; Replaced code
+;		push d! call constf! pop d
+		ELSE
 		push d! call constf! pop d
+		ENDIF
 		ora a! jnz dirinp
 		mvi c,dispatch! call xdos
 		xra a! mov l,a! ret
 	stsinp:
 		;direct console status input
+		IFDEF	MPM21
+; ***** MP/M 2.1
+		call kbconst ;to A
+; Replaced code
+;		call constf ;to A
+		ELSE
 		call constf ;to A
+		ENDIF
 		mov l,a! ret
 	dirinp:
 		lxi h,kbchar! call ofsthl
@@ -635,9 +650,47 @@ patchsize equ	80
 	ds	patchsize
 patch:
 	org	(((patch-base)+255) AND 0ff00h)-patchsize
+patcharea:
+	IFDEF	MPM21
+
+; ***** MP/M 2.1
+; V2.0 reserves this page tail so that a field patch has somewhere to
+; put code.  V2.1 is that field patch.
+
+;+0000 - reached through extjmptbl in place of xprint
+attxprint:
+	PUSH	B
+	CALL	testcnsatt
+	POP	B
+	JZ	xprint
+	RET
+
+;+0009 - reached through extjmptbl in place of xcrlf
+attxcrlf:
+	CALL	testcnsatt
+	JZ	xcrlf
+	RET
+
+;+0010 - called in place of constf by the direct console i/o function
+kbconst:
+	LXI	H,kbchar
+	CALL	ofsthl
+	MOV	A,M
+	ORA	A
+	RNZ
+	CALL	constf
+	RET
+
+; a negative count here means a patch no longer fits in the area
+	ds	patchsize-($-patcharea)
+
+	ELSE
+
 	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 	dw	0,0,0,0,0,0,0,0
+
+	ENDIF
 
 ;
 ;	bios external jump table

@@ -116,8 +116,19 @@ extjmptbl:
 	jmp	rlr
 	jmp	getrlradr
 	jmp	dsplynm
+	IFDEF	MPM21
+; ***** MP/M 2.1
+; the XIOS may only print through these when the calling process owns
+; the console it would print on
+	jmp	attxprint
+	jmp	attxcrlf
+; Replaced code
+;	jmp	xprint
+;	jmp	xcrlf
+	ELSE
 	jmp	xprint
 	jmp	xcrlf
+	ENDIF
 	jmp	conoutx
 	jmp	xgetmemseg
 ;
@@ -158,7 +169,17 @@ CoNm:
 	db ' COPYRIGHT (C) 1981,'
 	db ' DIGITAL RESEARCH '
 Serial:
-	db '654321'
+; The nucleus DRI shipped is serialized; the sources carry the
+; unserialized placeholder the nucleus is assembled with.
+	IFDEF	DRISERIAL
+	IFDEF	MPM21
+	db	000h,014h,001h,000h,009h,02fh
+	ELSE
+	db	000h,014h,001h,000h,000h,001h
+	ENDIF
+	ELSE
+	db	'654321'
+	ENDIF
 
 lstack	equ	Serial+4
 
@@ -573,18 +594,39 @@ dfctbl:
 	db fcbin+fcbout		; 16=close file
 	db fcbin+dmain+dmaout	; 17=search first
 	db fcbin+dmain+dmaout	; 18=search next
+	IFDEF	MPM21
+; ***** MP/M 2.1
+	db fcbin+fcbout+CDMAIN	; 19=delete file
+; Replaced code
+;	db fcbin+CDMAIN		; 19=delete file
+	ELSE
 	db fcbin+CDMAIN		; 19=delete file
+	ENDIF
 	db fcbin+fcbout		; 20=read sequential
 	db fcbin+fcbout		; 21=write sequential
 	db fcbin+PFCBOUT+CDMAIN	; 22=make file
+	IFDEF	MPM21
+; ***** MP/M 2.1
+	db fcbin+fcbout+CDMAIN	; 23=rename file
+; Replaced code
+;	db fcbin+CDMAIN		; 23=rename file
+	ELSE
 	db fcbin+CDMAIN		; 23=rename file
+	ENDIF
 	db 0			; 24=return login vector
 	db 0			; 25=return current disk
 	db 0			; 26=set DMA address
 	db 0			; 27=get alloc address
 	db 0			; 28=write protect disk
 	db 0			; 29=get R/O vector
+	IFDEF	MPM21
+; ***** MP/M 2.1
+	db fcbin+fcbout+CDMAIN	; 30=set file attributes
+; Replaced code
+;	db fcbin+CDMAIN		; 30=set file attributes
+	ELSE
 	db fcbin+CDMAIN		; 30=set file attributes
+	ENDIF
 	db 0			; 31=get disk param addr
 	db 0			; 32=get/set user code
 	db fcbin+fcbout		; 33=read random
@@ -666,6 +708,7 @@ resetdma:
 ;
 shellerr:
 	lhld aret
+shellerr1:	; ***** MP/M 2.1 - enter here with the code already in HL
 	lda shellcnt! pop b! sub b
 	add a! add a! add a! add a
 	ora h! mov h,a! ret
@@ -720,7 +763,15 @@ comparerecs:
 	lhld shelldma! xchg! lhld dirbufa
 	mvi c,128
 	call compare! rz
+	IFDEF	MPM21
+; ***** MP/M 2.1
+; HL already holds the error code; shellerr would load aret over it
+	pop h! lxi h,0007! jmp shellerr1
+; Replaced code
+;	pop h! lxi h,0007! jmp shellerr
+	ELSE
 	pop h! lxi h,0007! jmp shellerr
+	ENDIF
 ;
 compare:
 	ldax d! cmp m! rnz

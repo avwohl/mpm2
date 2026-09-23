@@ -1,4 +1,4 @@
-$title ('MP/M II V2.0  Loader')
+$title ('MP/M II Loader')
 mpmldr:
 do;
 
@@ -27,7 +27,11 @@ do;
     0dh,   /* Filler */
     0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,
     0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,0ah,
+$if MPM21
+    'MP/M II V2.1 Loader   ',0dh,0ah,
+$else
     'MP/M II V2.0 Loader   ',0dh,0ah,
+$endif
     'Copyright (C) 1981, Digital Research',0dh,0dh,0ah,'$');
 
   /****************  Warning  ******************/

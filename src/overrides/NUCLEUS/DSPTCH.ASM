@@ -788,10 +788,27 @@ noz80save:
 	lhld	pdadr
 	mov	b,h
 	mov	c,l
+	IFDEF	MPM21
+; ***** MP/M 2.1
+; the MX queues are released in the XDOS terminate path now (see the
+; patch area's flshmx), early enough that a process that is waiting on
+; one of them is let go before this process is taken off the lists.
+	NOP
+	NOP
+	NOP
+	NOP
+	NOP
+; Replaced code
+;	push	b
+;	call	rlsmx	; release all owned MX queues
+;              call rlscon (pdadr);
+;	pop	b
+	ELSE
 	push	b
 	call	rlsmx	; release all owned MX queues
 ;              call rlscon (pdadr);
 	pop	b
+	ENDIF
 	push	b
 	CALL	rlscon
 ;              call rlslst (pdadr);

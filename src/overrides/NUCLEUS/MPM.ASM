@@ -472,9 +472,22 @@ mpm:
 	DAD	D
 	MOV	M,B
 ;        tmp$pd.disk$slct = i;
+	IFDEF	MPM21
+; ***** MP/M 2.1
+; the TMP's default list device goes in the high nibble as well
+	extrn	pdisksel
+	CALL	pdisksel
+	NOP
+	NOP
+; Replaced code
+;	LXI	H,16H
+;	DAD	D
+;	MOV	M,B
+	ELSE
 	LXI	H,16H
 	DAD	D
 	MOV	M,B
+	ENDIF
 ;        do j = 0 to 100;
 	MVI	C,202
 	LHLD	TMPSTKADR

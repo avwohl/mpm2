@@ -31,7 +31,11 @@ tod:
 ;    min byte,
 ;    sec byte ) public
 ;    initial (1353,00H,00H,00H);
+	IFDEF	MPM21
+	dw	1493	; day        /* 02/01/82 */
+	ELSE
 	dw	1353	; day
+	ENDIF
 	db	0	; hr
 	db	0	; min
 	db	0	; sec
@@ -168,8 +172,54 @@ pdtbl:
 	dw	0
 	db	'MP/M-80',' '+80h
 	db	0
+	IFDEF	MPM21
+; ***** MP/M 2.1
+; The tail of the first entry is never looked at before the entry is
+; filled in, so V2.1 borrows it for the routine that works out where a
+; process's abort return address goes.  Called from XDOS with
+; DE = .pd.stkptr and B = pd.memseg; returns HL = .pd.stkptr with the
+; low byte of the new stack pointer already stored, and DE = the value.
+	extrn	sysdat
+	public	pdstk
+pdstk:
+	PUSH	D
+	LHLD	sysdat
+	MVI	L,03H
+	MOV	A,M		;system$data(3), add system call user stacks
+	MOV	H,D
+	MOV	L,E
+	ANA	B
+	JZ	pdstk1		;not in a bank - use pd.stkptr
+	MOV	A,B
+	INR	A
+	JZ	pdstk1		;memseg = 0ffh - no segment
+	DCR	A
+	DCR	A
+	ADD	A
+	ADI	50H
+	LHLD	sysdat
+	MOV	L,A		;HL = .system$data(80+2*(memseg-2)),
+				; the system call user stack for the bank
+pdstk1:
+	MOV	E,M
+	INX	H
+	MOV	D,M
+	DCX	D
+	DCX	D
+	DCX	D
+	DCX	D		;room for the two extra words pushed
+	POP	H
+	MOV	M,E
+	RET
+; a negative count here means the routine no longer fits in the entry
+	ds	37-($-pdstk)
+; Replaced code
+;	db	0ffh
+;	ds	36
+	ELSE
 	db	0ffh
 	ds	36
+	ENDIF
 
 	ds	52
 	ds	52

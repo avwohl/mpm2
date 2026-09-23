@@ -7,6 +7,32 @@ release notes; they are summarised below from their commits, in less detail
 than they would have carried at the time, so the record before 0.3.5 is short
 rather than empty.
 
+## [Unreleased]
+
+### Added
+
+MP/M II V2.1 can be built from the same tree as V2.0. DRI published sources
+for V2.0 only, so the V2.1 changes were recovered from the binaries and put
+into `src/overrides` behind `IFDEF MPM21` / `$if MPM21`:
+
+- `./scripts/build_all.sh --tree=src --version=2.1` builds the V2.1 system,
+  which boots and reports `MP/M II V2.1 / Copyright (C) 1982, Digital
+  Research`.
+- `tools/verify_dri.py` builds both releases with `--dri-exact` and compares
+  them against DRI's own binaries. XDOS.SPR, BNKXDOS.SPR, RESBDOS.SPR and
+  TMP.SPR all come back byte for byte identical, in both releases.
+- `tools/build.py` gained `--version`, `--serial`, `--dri-exact` and
+  `--output-dir`; `build_all.sh` passes the first three through.
+- The reconstruction, the binary evidence behind each change, and the four
+  transients that are identified but not yet reconstructed (SDIR, SPOOL, PIP,
+  GENSYS) are written up in `docs/mpm2_v21.md`.
+
+### Fixed
+
+- `bin/dri/TMP.SPR` was this repository's own build rather than Digital
+  Research's, and 128 bytes longer than every DRI copy. Replaced with the one
+  from the distribution.
+
 ## [0.3.6] - 2026-09-23
 
 ### Fixed

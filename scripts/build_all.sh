@@ -24,6 +24,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Parse arguments
 TREE="dri"
+SRC_ARGS=()
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -35,14 +36,28 @@ while [ $# -gt 0 ]; do
             TREE="$2"
             shift 2
             ;;
+        --version=*|--serial=*|--dri-exact)
+            SRC_ARGS+=("$1")
+            shift
+            ;;
+        --version|--serial)
+            SRC_ARGS+=("$1" "$2")
+            shift 2
+            ;;
         -h|--help)
             cat <<EOF
-Usage: $0 [--tree=dri|src]
+Usage: $0 [--tree=dri|src] [--version=2.0|2.1] [--serial=none|dri]
 
 Build a complete MP/M II system ready to boot.
 
 Options:
     --tree=TREE     Binary tree to use: 'dri' (default) or 'src'
+    --version=VER   MP/M II release to build from source: 2.0 (default)
+                    or 2.1.  Only meaningful with --tree=src.
+    --serial=WHICH  Serial number for a source build: none (default) or
+                    dri.  Only meaningful with --tree=src.
+    --dri-exact     Build exactly what DRI shipped, leaving out the local
+                    fixes this repository carries.  --tree=src only.
     -h, --help      Show this help message
 
 Binary Trees:
@@ -81,7 +96,7 @@ echo ""
 # Step 0: If using source tree, build from source first
 if [ "$TREE" = "src" ]; then
     echo "Step 0: Building from source code..."
-    "$SCRIPT_DIR/build_src.sh"
+    "$SCRIPT_DIR/build_src.sh" "${SRC_ARGS[@]}"
     echo ""
 fi
 

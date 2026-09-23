@@ -315,6 +315,7 @@ commandtail	equ	field+2
 
 ;  declare fcb fcb$descriptor;
 fcb:
+	public	fcb		; ***** MP/M 2.1 - used by the patch area
 	db	$-$	; et
 	db	'        '	; fn
 	db	'   '	; ft
@@ -339,6 +340,7 @@ nxtchradr:
 
 ;  declare md memory$descriptor;
 md:
+	public	md		; ***** MP/M 2.1 - used by the patch area
 	db	$-$	; base
 	db	$-$	; size
 	db	$-$	; attrib
@@ -346,6 +348,7 @@ md:
 
 ;  declare pdadr address;
 pdadr:	ds	2
+	public	pdadr		; ***** MP/M 2.1 - used by the patch area
 ;  declare pd based pdadr process$descriptor;
 
 ;  declare (base,top) address;
@@ -376,6 +379,7 @@ todadr:  ds	2
 
 ;  declare drive byte;
 drive:	ds	1
+	public	drive		; ***** MP/M 2.1 - used by the patch area
 
 ;  declare dfltdrive byte;
 dfltdrive:	ds	1
@@ -385,6 +389,7 @@ notsyspass:  ds	1
 
 ;  declare chain$seg byte;
 chainseg: ds	1
+	public	chainseg	; ***** MP/M 2.1 - used by the patch area
 
 ;  declare sector$size literally '0080H';
 
@@ -884,7 +889,16 @@ pdinit:
 	DAD	D
 	XCHG
 	LXI	B,0014H
+	IFDEF	MPM21
+; ***** MP/M 2.1
+; pd(1dh) now collects the f1'..f4' attribute bits of the command's FCB
+	extrn	cliattr
+	CALL	cliattr
+; Replaced code
+;	LHLD	PDADR
+	ELSE
 	LHLD	PDADR
+	ENDIF
 	DAD	B
 	MOV	M,E
 	INX	H
@@ -1392,6 +1406,7 @@ loadprl:
 ;    end load$PRL;
 
 PRINTBrlsfile:
+	public	PRINTBrlsfile	; ***** MP/M 2.1 - used by the patch area
 	CALL	crlfprintb
 rlsfile:
 	lxi	b,clipd
@@ -1457,6 +1472,8 @@ fileloadexecute:
 ;        fcb.fn(5) = fcb.fn(5) or 80h;
 ;        /* open file R/O */
 @18:
+trysysdisk:			; ***** MP/M 2.1 - used by the patch area
+	public	trysysdisk
 	lxi	h,fcb+6h
 	mov	a,m
 	ori	80h
@@ -1522,7 +1539,16 @@ fileloadexecute:
 	jz	@19
 	xra	a
 	sta	notsyspass
+	IFDEF	MPM21
+; ***** MP/M 2.1
+; remember the drive the command was asked for first
+	extrn	clidrive
+	jmp	clidrive	;go try with system disk
+; Replaced code
+;	jmp	@18	;go try with system disk
+	ELSE
 	jmp	@18	;go try with system disk
+	ENDIF
 @19:
 ;          /* unsuccessful file open */
 ;          do;
@@ -1538,7 +1564,16 @@ fileloadexecute:
 	INX	H
 	MVI	M,'$'
 	LXI	B,FCB+1H
+	IFDEF	MPM21
+; ***** MP/M 2.1
+; give the memory segment back when the program cannot be loaded
+	extrn	clinofile
+	JMP	clinofile
+; Replaced code
+;	JMP	PRINTBrlsfile
+	ELSE
 	JMP	PRINTBrlsfile
+	ENDIF
 ;              'No such file.','$'));
 ;            return;
 ;          end;

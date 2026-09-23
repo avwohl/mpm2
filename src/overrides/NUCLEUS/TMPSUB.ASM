@@ -194,9 +194,11 @@ tmp:
 ;  Temporarily swap stack pointers to avoid TMP process
 ; descriptor destruction during SUP file read.
 ;
+	IFNDEF	DRIEXACT	; not in DRI's build - see docs/mpm2_v21.md
 	lxi	h,00a2h
 	dad	sp
 	sphl
+	ENDIF
 
 	mvi	c,26
 	call	bdos
@@ -287,9 +289,11 @@ tmp:
 	lxi	d,startup
 	call	bdos
 ;  Restore stack pointer before jumping (SUP file was processed successfully)
+	IFNDEF	DRIEXACT	; not in DRI's build - see docs/mpm2_v21.md
 	lxi	h,-00a2h
 	dad	sp
 	sphl
+	ENDIF
 	jmp	@7c
 @2:
 ;      ret = xdos (detach,0);
@@ -297,9 +301,11 @@ tmp:
 	CALL	XDOS
 
 ;  Restore stack pointer after SUP file processing
+	IFNDEF	DRIEXACT	; not in DRI's build - see docs/mpm2_v21.md
 	lxi	h,-00a2h
 	dad	sp
 	sphl
+	ENDIF
 
 ;      do forever;
 @17:
@@ -417,7 +423,16 @@ tmp:
 @1:
 ;        if submit$flag and subflg(console) then
 	call	subflgadr
+	IFDEF	MPM21
+; ***** MP/M 2.1
+; a submit file that has already been started stays in force
+	jmp	patch
+; Replaced code
+;	jz	@10a
+	ELSE
 	jz	@10a
+	ENDIF
+submitgo:			; ***** MP/M 2.1 - patch re-entry
 ;        do;
 ; use buffer area as temporary stack
 ;	lxi	h,0081h
@@ -461,8 +476,18 @@ tmp:
 	xchg
 	mvi	c,33
 	call	bdos
+	IFDEF	MPM21
+; ***** MP/M 2.1
+; any non-zero return from read random is an error, not just 0ffh
+	ORA	A
+	JZ	@7
+; Replaced code
+;	INR	A
+;	JNZ	@7
+	ELSE
 	INR	A
 	JNZ	@7
+	ENDIF
 	call	tmpuser
 ;            do;
 ;              call bdos (19,.fcb); /* delete file */
@@ -528,14 +553,18 @@ tmp:
 ; line buffer.  Note that the line buffer length is reduced
 ; from 128 to 100 bytes.
 ;
+	IFNDEF	DRIEXACT	; not in DRI's build - see docs/mpm2_v21.md
 	lxi	h,00a2h
 	dad	sp
 	sphl
+	ENDIF
 	mvi	c,10
 	call	bdos
+	IFNDEF	DRIEXACT	; not in DRI's build - see docs/mpm2_v21.md
 	lxi	h,-00a2h
 	dad	sp
 	sphl
+	ENDIF
 
 ;        end;
 @9:
@@ -731,10 +760,35 @@ tmpuser:
 	jmp	bdos
 
 patch:
+	IFDEF	MPM21
+
+; ***** MP/M 2.1
+; V2.0 reserves 128 bytes here for a field patch.  V2.1 uses the first
+; seventeen of them: the submit flag for this console may have been
+; cleared while a submit file is still part way through, and in that
+; case the file has to go on being read.
+
+	JZ	@10a		;no submit file at all
+	LXI	H,00A2H		;fcb.nr
+	DAD	SP
+	MOV	A,M
+	INX	H
+	MOV	E,M
+	ORA	E
+	JNZ	submitgo	;part way through - keep going
+	JMP	@10a
+
+; a negative count here means the patch no longer fits in the area
+	ds	128-($-patch)
+
+	ELSE
+
 	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 	dw	0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+
+	ENDIF
 
 	END
 

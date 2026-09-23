@@ -167,6 +167,23 @@ To build just the source binaries without creating a disk:
 ./scripts/build_src.sh
 ```
 
+### MP/M II V2.0 and V2.1
+
+`mpm2src.zip` is the V2.0 source release; DRI never published V2.1 sources.
+The V2.1 changes have been recovered from the binaries and put into
+`src/overrides` behind `IFDEF MPM21`, so either release builds from the one
+tree:
+
+```bash
+./scripts/build_all.sh --tree=src --version=2.1   # or 2.0, the default
+python3 tools/verify_dri.py                       # both, against DRI's binaries
+```
+
+All four nucleus SPRs — XDOS, BNKXDOS, RESBDOS and TMP — come back byte for
+byte identical to Digital Research's own V2.0 and V2.1 binaries. See
+[docs/mpm2_v21.md](docs/mpm2_v21.md) for what changed between the releases
+and what is still outstanding.
+
 ### Modern GENSYS
 
 The original DRI GENSYS.COM has a bug in its relocation code (LDRLWR.ASM) that

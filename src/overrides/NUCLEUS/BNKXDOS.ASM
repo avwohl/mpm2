@@ -24,7 +24,23 @@ cmnbufferadr:
 ;  declare Proc$Address$Table (20) address data (
 ;    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0);
 ProcAddressTable:
+	IFDEF	MPM21
+; ***** MP/M 2.1
+; Entries 2..4 are still unused, and this table is copied into the
+; resident XDOS, so six bytes of code put here can be called from the
+; resident side (see TH.ASM) where there is no room for them.
+	dw	parse,patch
+lstnmb:				;BC -> the console/list byte
+	DCX	B
+	LDAX	B
+	ANI	0FH
+	MOV	C,A
+	RET
+; Replaced code
+;	dw	parse,patch,0,0,0
+	ELSE
 	dw	parse,patch,0,0,0
+	ENDIF
         dw	0,0,0,0,0
 	dw	0,0,0,0,0
 	dw	0,0,0,0,0

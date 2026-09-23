@@ -277,10 +277,18 @@ ALL_TARGETS = (
 # ============================================================================
 
 class Builder:
-    def __init__(self, verbose=False):
+    def __init__(self, verbose=False, defines=None):
         self.verbose = verbose
         self.build_dir = BUILD_DIR
         self.output_dir = OUTPUT_DIR
+        # Conditional-assembly symbols, e.g. MPM21 for the V2.1 sources.
+        self.defines = list(defines or [])
+
+    def define_args(self, flag="-D"):
+        out = []
+        for d in self.defines:
+            out.extend([flag, d])
+        return out
 
     def log(self, msg):
         print(msg)
@@ -337,6 +345,8 @@ class Builder:
         if absolute:
             cmd.append("--aseg")
 
+        cmd.extend(self.define_args())
+
         # Add include paths
         for inc in INCLUDE_PATHS:
             cmd.extend(["-I", str(inc)])
@@ -360,6 +370,7 @@ class Builder:
         # Step 1: Compile PLM to MAC
         # Add include path for .LIT files
         cmd = [UPLM80, "-I", str(SRC_ROOT / "UTIL8")]
+        cmd.extend(self.define_args())
         if mode != "cpm":
             cmd.extend(["--mode", mode])
         cmd.extend(["-o", str(mac_file), str(plm_file)])
@@ -618,11 +629,40 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--list", action="store_true", help="List all targets")
     parser.add_argument("--asm-only", action="store_true", help="Build only ASM targets (skip PL/M)")
+    parser.add_argument("--version", choices=["2.0", "2.1"], default="2.0",
+                        help="MP/M II release to build (default: 2.0). "
+                             "2.1 defines MPM21 for the assembler and the "
+                             "PL/M compiler, which selects the V2.1 code in "
+                             "the conditional blocks.")
+    parser.add_argument("--serial", choices=["none", "dri"], default="none",
+                        help="Serial number to build into the nucleus: "
+                             "'none' leaves DRI's unserialized 654321 "
+                             "placeholder, 'dri' uses the serial stamped on "
+                             "DRI's own distribution master.")
+    parser.add_argument("--dri-exact", action="store_true",
+                        help="Build exactly what Digital Research shipped: "
+                             "take DRI's serial number and leave out the "
+                             "local fixes this repository carries, so the "
+                             "output can be compared byte for byte against "
+                             "the reference binaries.")
+    parser.add_argument("--output-dir", type=Path, default=None,
+                        help="Where to put the built binaries "
+                             "(default: bin/src)")
     parser.add_argument("targets", nargs="*", help="Specific targets to build")
 
     args = parser.parse_args()
 
-    builder = Builder(verbose=args.verbose)
+    defines = []
+    if args.version == "2.1":
+        defines.append("MPM21")
+    if args.serial == "dri" or args.dri_exact:
+        defines.append("DRISERIAL")
+    if args.dri_exact:
+        defines.append("DRIEXACT")
+
+    builder = Builder(verbose=args.verbose, defines=defines)
+    if args.output_dir:
+        builder.output_dir = args.output_dir
 
     if args.clean:
         builder.clean()
