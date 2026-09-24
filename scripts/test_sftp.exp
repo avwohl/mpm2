@@ -104,7 +104,12 @@ proc sftp_batch {what lines} {
     write_file "$dir/batch" [join [concat $lines [list ""]] "\n"]
     spawn sftp -b $dir/batch -P $port -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR user@localhost
+    # A transfer goes through the Z80 RSP a record at a time, so its speed is
+    # the emulated machine's.  A 64K put and get takes about 5 s on an idle
+    # host and passed 180 s on one with a load average near 100; 30 s, the
+    # prompt timeout, failed there on every tree alike.
     expect {
+        -timeout 180
         eof {}
         timeout { fail "sftp did not finish: $what"; exit 1 }
     }
