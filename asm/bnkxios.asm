@@ -1,6 +1,6 @@
 	;; printed at start increment every change to be sure we
 ;; get the right version
-BNK_VERSION	EQU 25
+BNK_VERSION	EQU 26
 ; bnkxios_port.asm - MP/M II BNKXIOS using I/O port dispatch
 ; Part of MP/M II Emulator
 ; SPDX-License-Identifier: GPL-3.0-or-later
@@ -21,6 +21,11 @@ BNK_VERSION	EQU 25
 
 ; I/O Ports
 XIOS_DISPATCH:  EQU     0E0H    ; XIOS dispatch (A = function)
+; The emulator hands a result back in A as part of the OUT itself.  Nothing
+; reads it back with IN A,(XIOS_DISPATCH): that returns whatever the last
+; XIOS call of any process left there, and a tick between the OUT and the
+; IN lets the dispatcher's SELMEMORY in first - READ then reported the
+; SELMEMORY function code, 33H, and the BDOS said Bad Sector.
 BANK_SELECT:    EQU     0E1H    ; Bank select (A = bank)
 
 ; XIOS function offsets (must match xios.h constants)
@@ -134,7 +139,6 @@ DO_CONST:
         ; Returns A = 0FFH if char ready, 00H if not
         LD      A, FUNC_CONST
         OUT     (XIOS_DISPATCH), A      ; Dispatch function
-        IN      A, (XIOS_DISPATCH)      ; Get result in A
         RET
 
 DO_CONIN:
@@ -157,7 +161,6 @@ DO_CONIN:
 
         LD      A, FUNC_CONIN
         OUT     (XIOS_DISPATCH), A
-        IN      A, (XIOS_DISPATCH)
         RET
 
 DO_CONOUT:
@@ -257,7 +260,6 @@ DO_READ:
         ; Read sector - returns A = 0 success, A = 1 error
         LD      A, FUNC_READ
         OUT     (XIOS_DISPATCH), A      ; Dispatch function
-        IN      A, (XIOS_DISPATCH)      ; Get result in A
         RET
 
 DO_WRITE:
@@ -265,14 +267,12 @@ DO_WRITE:
         ; Returns A = 0 success, A = 1 error
         LD      A, FUNC_WRITE
         OUT     (XIOS_DISPATCH), A      ; Dispatch function
-        IN      A, (XIOS_DISPATCH)      ; Get result in A
         RET
 
 DO_LISTST:
         ; List status - returns A = 0FFH if ready
         LD      A, FUNC_LISTST
         OUT     (XIOS_DISPATCH), A      ; Dispatch function
-        IN      A, (XIOS_DISPATCH)      ; Get result in A
         RET
 
 DO_SECTRAN:
@@ -298,7 +298,6 @@ DO_POLLDEV:
         ; Returns A = 0FFH if ready, 00H if not
         LD      A, FUNC_POLLDEV
         OUT     (XIOS_DISPATCH), A      ; Dispatch function
-        IN      A, (XIOS_DISPATCH)      ; Get result in A
         RET
 
 DO_STARTCLK:
@@ -333,7 +332,6 @@ DO_MAXCON:
         ; DEBUG: Use FUNC_MAXCON to let emulator trace the call
         LD      A, FUNC_MAXCON
         OUT     (XIOS_DISPATCH), A
-        IN      A, (XIOS_DISPATCH)      ; Get result from emulator
         RET
 
 DO_IDLE:
