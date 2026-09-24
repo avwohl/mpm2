@@ -32,6 +32,9 @@ $include (fcb.lit)
           delay            literally '141',
           dispatch         literally '142',
           set$priority     literally '145',
+$if MPM21
+          detach           literally '147',
+$endif
           parse$fname      literally '152',
           attach$list      literally '158',
           detach$list      literally '159';
@@ -231,9 +234,24 @@ $include (fcb.lit)
       call mon1 (set$priority,201);
   
       do forever;
+$if MPM21
+        /* ***** MP/M 2.1 - the spooler lets go of the console of the
+           last request before it waits for the next one.  DRI patched
+           this into the binary in place (SPOOL.BRS 01C2-01E2): the call
+           is MVI C,93H / CALL MON1 with no LXI D, and the room for it came
+           from storing console first so disk$slct reuses the same pointer
+           (LXI B,8 / DAD B instead of a second LHLD spool$pd$adr) and from
+           dropping the LXI D,0 before the detach$list call below.  Neither
+           detach reads DE; one NOP fills the last byte. */
+        call mon1 (detach,0);
+        call mon1 (read$queue,.spool$uqcb);
+        spool$pd.console = console;
+        spool$pd.disk$slct = disk$select;
+$else
         call mon1 (read$queue,.spool$uqcb);
         spool$pd.disk$slct = disk$select;
         spool$pd.console = console;
+$endif
 
         call mon1 (detach$list,0);
         if nxt$chr$adr <> 0ffffh
