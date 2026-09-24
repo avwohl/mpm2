@@ -45,7 +45,9 @@ while [ $# -gt 0 ]; do
             SRC_ARGS+=("$1" "$2")
             shift 2
             ;;
-        --compat-attributes|--compat-attributes=*)
+        # Only the forms gensys.sh accepts, so that a mistyped value stops
+        # here rather than at step 3, after the whole build has run.
+        --compat-attributes|--compat-attributes=yes|--compat-attributes=no)
             GENSYS_ARGS+=("$1")
             shift
             ;;
