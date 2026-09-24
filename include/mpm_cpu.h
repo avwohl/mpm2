@@ -46,7 +46,6 @@ public:
 private:
     XIOS* xios_ = nullptr;
     BankedMemory* banked_mem_ = nullptr;
-    uint8_t last_xios_result_ = 0;  // Result from last XIOS dispatch (for IN instruction)
 
     // Handle XIOS dispatch via port 0xE0
     void handle_xios_dispatch();

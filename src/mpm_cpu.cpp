@@ -47,9 +47,17 @@ qkz80_uint8 MpmCpu::port_in(qkz80_uint8 port) {
 
     switch (port) {
         case MpmPorts::XIOS_DISPATCH:
-            // Return the result from the last XIOS dispatch
-            // This is used with IN A, (0xE0) after OUT (0xE0), A to get return values
-            value = last_xios_result_;
+            // The XIOS reads its result with IN A,(0E0H) right after the
+            // OUT (0E0H),A that dispatched it.  The handler has already left
+            // the result in A, so the IN hands back A itself.  It must not
+            // read a copy kept here: the 60Hz tick can land between the OUT
+            // and the IN, the interrupt handler ends in the dispatcher, and
+            // whichever process runs next makes XIOS calls of its own before
+            // this one gets back to its IN.  A saved copy then held the other
+            // process's result, and the BDOS took it for its own - a disk
+            // read or write that had succeeded reported NONRECOVERABLE.  A is
+            // saved and restored with the rest of the process's registers.
+            value = regs.AF.get_high();
             break;
 
         case MpmPorts::SIGNAL:
@@ -76,11 +84,9 @@ void MpmCpu::handle_xios_dispatch() {
     // Dispatch to XIOS handler
     // The handler will set result registers (A, HL, etc.)
     // The Z80 code has its own RET instruction, so we don't simulate RET here
+    // The handler leaves its result in A (and HL where there is one), which
+    // is where the IN A,(0E0H) that follows reads it back from.
     xios_->handle_port_dispatch(func);
-
-    // Save the result for IN A, (port) to read later
-    // The XIOS handler sets the result in A register via set_high()
-    last_xios_result_ = regs.AF.get_high();
 }
 
 void MpmCpu::handle_bank_select(uint8_t bank) {
