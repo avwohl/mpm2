@@ -135,11 +135,14 @@ def mac_plus_r(source):
     +R is what the MP/M II Programmer's Guide (section 4.4.1) tells a user
     to do by hand to make a PRL - "assemble the source program twice,
     adding 100H to each ORG statement during the second assembly" - so
-    that is what this does, to the text.  Checked against DRI's MAC.COM
-    under cpmemu: the HEX files of all ten UTIL1 modules come out the same
-    either way.
+    that is what this does, to the text.  MAC.COM (run under cpmemu)
+    does exactly that, `ORG $+10H' included, which comes out 200H past
+    the first assembly's; and code before the first ORG starts at 100H
+    rather than 0, which the ORG put in front of the source does.  The
+    HEX files of all ten UTIL1 modules come out the same either way.
     """
-    out = []
+    newline = "\r\n" if "\r\n" in source else "\n"
+    out = ["\tORG\t100H" + newline]
     for line in source.splitlines(keepends=True):
         m = _ORG.match(line)
         if m:
