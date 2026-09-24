@@ -98,6 +98,11 @@ cd ..
 # MP/M II distribution files are included in the mpm2_external/ directory
 ```
 
+um80 and uplm80 are also on PyPI (`pip install um80 uplm80`). A source build
+needs um80 0.3.48 or later and uplm80 0.3.6 or later, which brings upeepz80
+0.2.4: earlier releases link `.PRL` transients a page low and miscompile
+several of the utilities.
+
 ### Optional: SSH Support
 
 For network access via SSH (recommended for multi-user):

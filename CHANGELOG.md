@@ -95,7 +95,7 @@ dropped silently rather than reported; `AT(.MEMORY)` was an EQU, which reads as
 zero above its own declaration, so UTIL7/DSE.PLM's hash table cleared 128
 entries over page zero; and the compiler's page-zero symbols shared a namespace
 with PL/M identifiers, so UTIL7/DM.PLM's variable `bdos` captured the BDOS
-entry. Fixed in uplm80 0.3.7.
+entry. Fixed in uplm80 0.3.6.
 
 A source-built nucleus could not run a transient program at all. `LXI
 H,PDTBL-34H` in `NUCLEUS/CLI.ASM` assembled to `PDTBL+34H`, because um80 had the
