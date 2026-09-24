@@ -31,6 +31,10 @@ PORT=${PORT:-2222}
 # "Failed to start HTTP server" aborts the emulator and every test with it.
 HTTP_PORT=${HTTP_PORT:-$((PORT + 6000))}
 EMU_PID=""
+# Logs go under build/, next to the emulator, so two checkouts can run their
+# tests at the same time (on different PORTs) without sharing a log.
+EMU_LOG="$BUILD_DIR/mpm2_test.log"
+SRC_BUILD_LOG="$BUILD_DIR/mpm2_src_build.log"
 
 cleanup() {
     if [ -n "$EMU_PID" ]; then
@@ -61,7 +65,7 @@ start_emulator() {
     ./mpm2_emu --no-auth -p $PORT -w $HTTP_PORT \
         -k "$PROJECT_DIR/keys/ssh_host_rsa_key" \
         -d "A:$DISKS_DIR/mpm2_system.img" \
-        > /tmp/mpm2_test.log 2>&1 &
+        > "$EMU_LOG" 2>&1 &
     EMU_PID=$!
 
     echo "Emulator started with PID $EMU_PID"
@@ -82,7 +86,7 @@ start_emulator() {
 
     echo "ERROR: SSH server did not start within 15 seconds"
     echo "Emulator log:"
-    cat /tmp/mpm2_test.log
+    cat "$EMU_LOG"
     exit 1
 }
 
@@ -158,15 +162,15 @@ test_src_build() {
     # Note: Some programs may fail to build due to uplm80 strictness.
     # We continue if the core system files are built successfully.
     echo "Building with --tree=src..."
-    "$SCRIPT_DIR/build_all.sh" --tree=src > /tmp/mpm2_src_build.log 2>&1 || {
-        echo "WARNING: Some source builds had errors (see /tmp/mpm2_src_build.log)"
+    "$SCRIPT_DIR/build_all.sh" --tree=src > "$SRC_BUILD_LOG" 2>&1 || {
+        echo "WARNING: Some source builds had errors (see $SRC_BUILD_LOG)"
         echo "Continuing with partial build..."
     }
 
     # Check if disk image was created (indicates at least partial success)
     if [ ! -f "$DISKS_DIR/mpm2_system.img" ]; then
         echo "ERROR: Disk image not created. Build completely failed."
-        cat /tmp/mpm2_src_build.log
+        cat "$SRC_BUILD_LOG"
         return 1
     fi
 

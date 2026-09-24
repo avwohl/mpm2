@@ -29,7 +29,9 @@ BUILD_DIR="$PROJECT_DIR/build"
 ASM_DIR="$PROJECT_DIR/asm"
 DISKS_DIR="$PROJECT_DIR/disks"
 TOOLS_DIR="$PROJECT_DIR/tools"
-WORK_DIR="/tmp/gensys_work"
+# Under build/, not a fixed /tmp path, so two checkouts can generate a
+# system at the same time without clearing each other's work directory.
+WORK_DIR="${GENSYS_WORK:-$BUILD_DIR/gensys_work}"
 CPM_DISK="${CPM_DISK:-$HOME/src/cpmemu/util/cpm_disk.py}"
 
 # Parse arguments
