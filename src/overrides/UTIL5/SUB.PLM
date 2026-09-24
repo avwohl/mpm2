@@ -297,24 +297,29 @@ writebuff: procedure;
         call error(.('disk write error$'));
     end writebuff;
 
-  /* ***** um80 workaround - rbuff is declared AT minimum$buffer, which
-     used to be declared further down, below makefile.  uplm80 writes
-     that as RBUFF: EQU MINIMUMBUFFER ahead of MINIMUMBUFFER's own label,
-     and um80 0.3.48 values an EQU once, when it first reads it, so a
-     symbol defined later counts as an absolute 0 - with no error.
-     rbuff was page zero: the command file was built over 0000H-00FFH,
-     over the tick's RST 1 vector at 0008H and the JMP BDOS at 0005H, and
-     the first tick after that left interrupts off for good - the whole
-     system stopped, not just SUBMIT.  minimum$buffer and last$dseg$byte
-     are declared here instead, ahead of rbuff, and after rbp and rlen so
-     that the variables keep the order they had. */
+  /* ***** uplm80 workaround - DRI's rbuff is AT (.minimum$buffer), a
+     1024-byte array declared as the last variable.  Intel's LOCATE put
+     the stack below the data, so minimum$buffer was the end of the
+     program and the command file could grow from there up to maxb, the
+     top of SUBMIT's memory segment, which is the limit putrbuff checks.
+     uplm80 puts its string constants, the ??AUTO locals of the
+     procedures and the stack after the last variable, and a command file
+     over 1K ran into them: 266 lines of `user' came out as
+     "}Is"qsa"ssu*ls~#fo>o>" and "Bad entry", and the rest of the file
+     was lost.  .memory, the linker's __END__, is the first byte after
+     all of that, so the buffer starts there and still goes up to maxb.
+     minimum$buffer is left out: it kept 1K of the program image for the
+     command file, and tools/build.py now asks MP/M for that 1K past the
+     image instead, in the .PRL header, the way DRI did for PIP and ED.
+     (Declared ahead of minimum$buffer, rbuff also came out as RBUFF: EQU
+     MINIMUMBUFFER in front of MINIMUMBUFFER's label, which um80 0.3.48
+     values as an absolute 0 - the command file went over page zero and
+     the system stopped.  uplm80 declares __END__ external before it uses
+     it, so .memory does not have that problem.) */
 declare
+    rbuff(1) byte at (.memory), /* jcl buffer */
     rbp address,      /* jcl buffer pointer */
     rlen byte;     /* length of current command */
-declare minimum$buffer (1024) byte;
-declare last$dseg$byte byte
-  initial (0);
-declare rbuff(1) byte at (.minimum$buffer); /* jcl buffer */
 
 fillrbuff: procedure;
     declare (s,ssbp) byte;  /* sub string buffer pointer */
@@ -510,6 +515,9 @@ makefile: procedure;
       then call error(.('close error$'));
       else subflg(cur$console) = (getuser or 1111$0000b);
     end makefile;
+
+declare last$dseg$byte byte
+  initial (0);
 
 start:
   do;
