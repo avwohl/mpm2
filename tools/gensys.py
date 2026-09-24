@@ -207,11 +207,31 @@ class RSPModule:
     brs_record: int = 0
     rsp_base: int = 0  # RSP load address (set during relocation)
 
+    # Offset of the process descriptor's memory segment byte in an .RSP: the
+    # descriptor starts at 2, after the word MP/M sets to its BDOS entry, and
+    # memseg is its byte 15 (UTIL8/PROCES.LIT).
+    PD_MEMSEG = 2 + 15
+
     def load(self) -> None:
-        """Load RSP and optional BRS modules."""
+        """Load RSP and optional BRS modules.
+
+        DRI's GENSYS decides whether an RSP has a banked half from the RSP
+        itself: memory segment 0 in its process descriptor means the code is
+        in a .BRS, which it then must find.  Any other value means the RSP is
+        entirely resident - ABORT.RSP has 0FFH - and no .BRS is loaded.
+        """
         self.rsp = SPRModule.load(self.rsp_path)
-        if self.brs_path and self.brs_path.exists():
+        banked = self.rsp.code[self.PD_MEMSEG] == 0
+        if banked:
+            if not (self.brs_path and self.brs_path.exists()):
+                raise ValueError(f"{self.rsp_path}: the process descriptor "
+                                 f"says it is banked (memory segment 0) but "
+                                 f"there is no {self.brs_path}")
             self.brs = SPRModule.load(self.brs_path)
+        elif self.brs_path and self.brs_path.exists():
+            print(f"  Note: {self.rsp_path.name} is not banked "
+                  f"(memory segment {self.rsp.code[self.PD_MEMSEG]:02X}H), "
+                  f"so {self.brs_path.name} is not loaded")
 
 
 @dataclass
@@ -406,7 +426,7 @@ class SystemGenerator:
             rsp = RSPModule(
                 name=name.upper(),
                 rsp_path=rsp_path,
-                brs_path=brs_path if brs_path.exists() else None
+                brs_path=brs_path
             )
             rsp.load()
             self.rsps.append(rsp)
@@ -610,6 +630,12 @@ class SystemGenerator:
         prev_rsp_addr = 0  # Address of previously loaded RSP (or 0 for first)
         for rsp in self.rsps:
             base, size = self.load_and_relocate_module(rsp.rsp, f"{rsp.name:8s}RSP")
+            if base < cfg.common_base:
+                # The descriptor and queues in an RSP are used by MP/M whatever
+                # bank is selected, so DRI's GENSYS refuses this too.
+                raise ValueError(f"GENSYS Failure - RSP {rsp.name} extends "
+                                 f"below the common base ({base:02X}00H < "
+                                 f"{cfg.common_base:02X}00H)")
             rsp.rsp_base = base * 256  # Store for BRS patching later
 
             # Patch this RSP's pd_link (offset 0-1) to point to previous RSP

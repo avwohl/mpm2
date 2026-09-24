@@ -7,7 +7,7 @@ set -o errexit
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # This script generates an MP/M II system:
-# 1. Copies SPR files to work directory
+# 1. Copies SPR files, and the resident system processes, to work directory
 # 2. Runs Python gensys.py with JSON configuration
 # 3. Patches MPMLDR.COM serial number to match (DRI tree only)
 # 4. Creates boot image and disk
@@ -115,15 +115,41 @@ else
     exit 1
 fi
 
-# Copy SFTP RSP modules if present
-HAVE_SFTP=false
+# Resident system processes.  DRI's GENSYS offers every *.RSP on the disk
+# and a distributed system has the four DRI ships: ABORT, MPMSTAT, SCHED and
+# SPOOL.  Without them the transients that talk to them have nothing to talk
+# to - SCHED.PRL answers "Resident portion of scheduler is not in memory".
+# A .RSP whose process descriptor says it is banked (memory segment 0) has
+# its code in a .BRS of the same name, loaded into bank 0.
+RSP_NAMES=()
+RSP_BRS=()
+echo "Copying resident system processes from $TREE tree..."
+for name in ABORT MPMSTAT SCHED SPOOL; do
+    lf=$(echo "$name" | tr '[:upper:]' '[:lower:]')
+    if [ ! -f "$BIN_DIR/$name.RSP" ]; then
+        echo "Error: $name.RSP not found in $BIN_DIR"
+        exit 1
+    fi
+    cp "$BIN_DIR/$name.RSP" "./$lf.rsp"
+    brs=""
+    if [ -f "$BIN_DIR/$name.BRS" ]; then
+        cp "$BIN_DIR/$name.BRS" "./$lf.brs"
+        brs="$lf.brs"
+    fi
+    RSP_NAMES+=("$name")
+    RSP_BRS+=("$brs")
+    echo "  $lf.rsp ($(wc -c < "./$lf.rsp" | tr -d ' ') bytes)${brs:+, $brs ($(wc -c < "./$brs" | tr -d ' ') bytes)} [$TREE]"
+done
+
+# The SFTP RSP, which serves the emulator's SFTP and HTTP file access
 if [ -f "$ASM_DIR/SFTP.RSP" ] && [ -f "$ASM_DIR/SFTP.BRS" ]; then
     echo "Copying SFTP RSP modules from $ASM_DIR"
     cp "$ASM_DIR/SFTP.RSP" sftp.rsp
     cp "$ASM_DIR/SFTP.BRS" sftp.brs
     echo "  sftp.rsp ($(wc -c < sftp.rsp | tr -d ' ') bytes)"
     echo "  sftp.brs ($(wc -c < sftp.brs | tr -d ' ') bytes)"
-    HAVE_SFTP=true
+    RSP_NAMES+=("SFTP")
+    RSP_BRS+=("sftp.brs")
 else
     echo "Note: SFTP RSP not found - run scripts/build_sftp_rsp.sh to build"
 fi
@@ -159,22 +185,20 @@ cat > gensys_config.json << EOF
   "tmp_spr": "tmp.spr",
 EOF
 
-# Add RSPs if available
-if [ "$HAVE_SFTP" = true ]; then
-    cat >> gensys_config.json << EOF
-  "rsps": [
-    {
-      "name": "SFTP",
-      "rsp": "sftp.rsp",
-      "brs": "sftp.brs"
-    }
-  ],
-EOF
-else
-    cat >> gensys_config.json << EOF
-  "rsps": [],
-EOF
-fi
+# The RSPs, in the order GENSYS loads them (downwards from the XDOS)
+echo '  "rsps": [' >> gensys_config.json
+for i in "${!RSP_NAMES[@]}"; do
+    name="${RSP_NAMES[$i]}"
+    lf=$(echo "$name" | tr '[:upper:]' '[:lower:]')
+    sep=","
+    [ "$i" -eq $((${#RSP_NAMES[@]} - 1)) ] && sep=""
+    if [ -n "${RSP_BRS[$i]}" ]; then
+        echo "    {\"name\": \"$name\", \"rsp\": \"$lf.rsp\", \"brs\": \"${RSP_BRS[$i]}\"}$sep" >> gensys_config.json
+    else
+        echo "    {\"name\": \"$name\", \"rsp\": \"$lf.rsp\"}$sep" >> gensys_config.json
+    fi
+done
+echo '  ],' >> gensys_config.json
 
 cat >> gensys_config.json << EOF
   "output": "mpm.sys",
