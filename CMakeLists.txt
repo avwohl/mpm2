@@ -26,8 +26,12 @@ if(NOT QKZ80_FOUND)
     if(EXISTS "${SISTER_QKZ80}/qkz80.h" AND EXISTS "${SISTER_QKZ80}/libqkz80.a")
         set(QKZ80_FOUND TRUE)
         set(QKZ80_INCLUDE_DIRS "${SISTER_QKZ80}")
-        set(QKZ80_LIBRARY_DIRS "${SISTER_QKZ80}")
-        set(QKZ80_LIBRARIES "qkz80")
+        # The archive by path, not -lqkz80.  On macOS cpmemu/src also holds
+        # libqkz80.4.dylib, which the linker prefers to the .a beside it, and
+        # its install name is /usr/local/lib/libqkz80.4.dylib - where nothing
+        # is unless cpmemu's 'make install' was run - so the emulator linked
+        # cleanly and then would not start: "Library not loaded".
+        set(QKZ80_LIBRARIES "${SISTER_QKZ80}/libqkz80.a")
         message(STATUS "Found qkz80 in sister directory: ${SISTER_QKZ80}")
     endif()
 endif()
