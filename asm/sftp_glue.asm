@@ -68,6 +68,12 @@ BDOS:
         jp      (hl)            ; jump to bdos$entry (returns to our caller)
 
 ;----------------------------------------------------------------------
+; The emulator leaves an XIOS function's result in A as part of the OUT.
+; An IN A,(0E0H) after it only reads A back (src/mpm_cpu.cpp), so the two
+; routines below that return a result no longer have one - as the XIOS
+; routines in asm/bnkxios.asm no longer do.
+;
+;----------------------------------------------------------------------
 ; SFTPPOLLWORK - Poll XIOS for pending SFTP work
 ; Entry: none
 ; Exit:  A = 0FFh if work pending, 00h if idle
@@ -75,8 +81,7 @@ BDOS:
         PUBLIC  SFTPPOLLWORK
 SFTPPOLLWORK:
         ld      a, 60H          ; SFTP_POLL function code
-        out     (0E0H), a       ; Dispatch to XIOS
-        in      a, (0E0H)       ; Get result
+        out     (0E0H), a       ; Dispatch to XIOS - result comes back in A
         ret
 
 ;----------------------------------------------------------------------
@@ -127,8 +132,7 @@ SETBUFBYTE:
 SFTPGETREQUEST:
         ld      bc, SFTPBUF     ; BC = SFTPBUF address (gensys.py relocates)
         ld      a, 63H          ; SFTP_GET function code
-        out     (0E0H), a       ; Dispatch to XIOS
-        in      a, (0E0H)       ; Get result
+        out     (0E0H), a       ; Dispatch to XIOS - result comes back in A
         ret
 
 ;----------------------------------------------------------------------

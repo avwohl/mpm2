@@ -24,7 +24,7 @@ void MpmCpu::port_out(qkz80_uint8 port, qkz80_uint8 value) {
     switch (port) {
         case MpmPorts::XIOS_DISPATCH:
             // XIOS dispatch: A register contains function offset
-            // Protocol: LD A, function; OUT (0xE0), A; IN A, (0xE0); RET
+            // Protocol: LD A, function; OUT (0xE0), A; RET - the result is in A
             handle_xios_dispatch();
             break;
 
@@ -47,9 +47,10 @@ qkz80_uint8 MpmCpu::port_in(qkz80_uint8 port) {
 
     switch (port) {
         case MpmPorts::XIOS_DISPATCH:
-            // The XIOS reads its result with IN A,(0E0H) right after the
-            // OUT (0E0H),A that dispatched it.  The handler has already left
-            // the result in A, so the IN hands back A itself.  It must not
+            // The handler leaves an XIOS function's result in A as part of
+            // the OUT (0E0H),A that dispatched it, and neither asm/bnkxios.asm
+            // nor asm/sftp_glue.asm reads it again.  Code that still follows
+            // the OUT with IN A,(0E0H) gets A itself back.  It must not
             // read a copy kept here: the 60Hz tick can land between the OUT
             // and the IN, the interrupt handler ends in the dispatcher, and
             // whichever process runs next makes XIOS calls of its own before
@@ -85,7 +86,7 @@ void MpmCpu::handle_xios_dispatch() {
     // The handler will set result registers (A, HL, etc.)
     // The Z80 code has its own RET instruction, so we don't simulate RET here
     // The handler leaves its result in A (and HL where there is one), which
-    // is where the IN A,(0E0H) that follows reads it back from.
+    // is where the Z80 code takes it from after the OUT.
     xios_->handle_port_dispatch(func);
 }
 
