@@ -19,12 +19,21 @@
 #                       command file over page zero and stopped the whole
 #                       system here.
 #
-# Then ED opens sftptest.txt, locked, and an HTTP read of it is refused (404),
-# while the RSP and the console carry on.  The refusal is a BDOS error, which
-# the RSP takes as a return code.  In the default error mode the BDOS printed
-# it, and V2.0's RESBDOS handed the XIOS the RSP's whole console byte, 0F0H:
-# the XIOS polled for console 0F0H to be ready, holding the disk, and the
-# whole system stopped.
+# Then two checks of how the RSP opens files against a console's own:
+#
+#   pip from DUMP.ASM   while HTTP reads DUMP.ASM over and over.  The RSP opens
+#                       a file it reads in read-only mode, as PIP does, so the
+#                       two opens are compatible.  In MP/M's default, locked,
+#                       mode nearly every copy failed with "OPEN FILE
+#                       INCOMPATIBLE MODE".
+#   ed sftptest.txt     ED has the file open, locked: an HTTP read of it is
+#                       refused (404), and the RSP and the console carry on.
+#                       The refusal is a BDOS error, which the RSP takes as a
+#                       return code.  In the default error mode the BDOS
+#                       printed it, and V2.0's RESBDOS handed the XIOS the
+#                       RSP's whole console byte, 0F0H: the XIOS polled for
+#                       console 0F0H to be ready, holding the disk, and the
+#                       whole system stopped.
 #
 # Then a 64K file goes up and comes back over SFTP while HTTP reads DUMP.ASM
 # over and over.  The one RSP serves both, and their requests arrive
@@ -124,6 +133,23 @@ proc http_status {path} {
     return [string range $code 0 2]
 }
 
+# HTTP reads of a file in the background, three at a time, until stopped
+proc http_readers {path} {
+    global http_port
+    return [exec sh -c "for n in 1 2 3; do \
+        (while :; do curl -s -m 30 -o /dev/null \
+            http://localhost:$http_port/$path; done) & \
+        done; wait" &]
+}
+
+proc stop_readers {pid} {
+    catch {exec pkill -P $pid}
+    catch {exec kill $pid}
+    after 500
+    # the readers' own children, the curls in flight
+    catch {exec pkill -f "curl -s -m 30 -o /dev/null http://localhost:[set ::http_port]/"}
+}
+
 puts "=== MP/M II SFTP test ==="
 set dir [exec mktemp -d]
 write_file "$dir/sftptest.txt" "$text\r\n"
@@ -187,6 +213,30 @@ expect {
 }
 wait_prompt "submit"
 
+# --- PIP opens DUMP.ASM while HTTP reads it
+set readers [http_readers a.0/dump.asm]
+after 1000
+set copies 0
+for {set i 1} {$i <= 3} {incr i} {
+    cmd "pip sftpcopy.txt=dump.asm"
+    set error ""
+    expect {
+        -re {(ERROR[^\r\n]*)[\r\n]} { set error $expect_out(1,string); exp_continue }
+        -re $prompt {}
+        timeout { set error "no answer - the system may have stopped" }
+        eof { fail "pip: connection closed"; exit 1 }
+    }
+    if {$error eq ""} {
+        incr copies
+    } else {
+        fail "pip from a file HTTP is reading: $error"
+    }
+}
+stop_readers $readers
+if {$copies == 3} {
+    pass "pip copied a file three times while HTTP read it"
+}
+
 # --- ED has SFTPTEST.TXT open: HTTP is refused it, and everything goes on
 cmd "ed sftptest.txt"
 set editing 0
@@ -213,6 +263,8 @@ if {$editing} {
 }
 
 cmd "era sftptest.*"
+wait_prompt "era"
+cmd "era sftpcopy.txt"
 wait_prompt "era"
 
 send "\r"

@@ -256,6 +256,17 @@ do$dir$search: procedure;
     end;
 end do$dir$search;
 
+/* open the file in fcb in read-only mode (f6'), as TYPE and PIP open a
+   file they read: other processes that only read it can open it at the
+   same time.  In MP/M's default, locked, mode the file is the opener's
+   alone while it is open, and an HTTP client reading a file over and
+   over made a console's PIP from it fail with "OPEN FILE INCOMPATIBLE
+   MODE" nearly every time. */
+open$read$only: procedure byte;
+    fcb(6) = fcb(6) or 80h;
+    return bdos(bdos$open, .fcb);
+end open$read$only;
+
 /* process file open request - says whether the file can be opened;
    it is closed again, as nothing stays open between requests */
 do$file$open: procedure;
@@ -264,7 +275,7 @@ do$file$open: procedure;
     call setup$fcb;
     call bdos(bdos$setdma, .dma$buf);
 
-    result = bdos(bdos$open, .fcb);
+    result = open$read$only;
 
     if result = 0ffh then
         call set$reply$status(status$not$found, 0);
@@ -285,7 +296,7 @@ do$file$read: procedure;
 
     call setup$fcb;
     call bdos(bdos$setdma, .dma$buf);
-    if bdos(bdos$open, .fcb) = 0ffh then do;
+    if open$read$only = 0ffh then do;
         call set$reply$status(status$not$found, 0);
         return;
     end;
