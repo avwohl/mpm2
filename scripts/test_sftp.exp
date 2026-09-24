@@ -19,6 +19,13 @@
 #                       command file over page zero and stopped the whole
 #                       system here.
 #
+# Then ED opens sftptest.txt, locked, and an HTTP read of it is refused (404),
+# while the RSP and the console carry on.  The refusal is a BDOS error, which
+# the RSP takes as a return code.  In the default error mode the BDOS printed
+# it, and V2.0's RESBDOS handed the XIOS the RSP's whole console byte, 0F0H:
+# the XIOS polled for console 0F0H to be ready, holding the disk, and the
+# whole system stopped.
+#
 # Then a 64K file goes up and comes back over SFTP while HTTP reads DUMP.ASM
 # over and over.  The one RSP serves both, and their requests arrive
 # interleaved: when a transfer kept its file open in the RSP from one
@@ -108,6 +115,15 @@ proc http_get {path} {
     return $body
 }
 
+# The HTTP status of a read; 000 if there is no answer in 10 seconds
+proc http_status {path} {
+    global http_port
+    # curl exits non-zero on a timeout, and exec then adds its own message
+    catch {exec curl -s -m 10 -o /dev/null -w %{http_code} \
+        "http://localhost:$http_port/$path"} code
+    return [string range $code 0 2]
+}
+
 puts "=== MP/M II SFTP test ==="
 set dir [exec mktemp -d]
 write_file "$dir/sftptest.txt" "$text\r\n"
@@ -170,6 +186,31 @@ expect {
     eof { fail "submit: connection closed - the system may have stopped"; exit 1 }
 }
 wait_prompt "submit"
+
+# --- ED has SFTPTEST.TXT open: HTTP is refused it, and everything goes on
+cmd "ed sftptest.txt"
+set editing 0
+expect {
+    -re {: *\*} { set editing 1 }
+    timeout { fail "ed: no prompt" }
+    eof { fail "ed: connection closed"; exit 1 }
+}
+if {$editing} {
+    set refused [http_status a.0/sftptest.txt]
+    set other [http_status a.0/sftptest.sub]
+    if {$refused eq "404" && $other eq "200"} {
+        pass "HTTP is refused a file ED has open, and reads another"
+    } else {
+        fail "with ED holding sftptest.txt, HTTP answered $refused for it and $other for sftptest.sub"
+    }
+    cmd "q"
+    expect {
+        -re {Q-\(Y/N\)\?} { send -- "y" }
+        timeout { fail "ed did not ask to quit - the system may have stopped" }
+        eof { fail "ed: connection closed"; exit 1 }
+    }
+    wait_prompt "ed"
+}
 
 cmd "era sftptest.*"
 wait_prompt "era"

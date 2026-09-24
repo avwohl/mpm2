@@ -30,6 +30,7 @@ declare bdos$setdma  literally '01ah';   /* 26: set dma address */
 declare bdos$setuser literally '020h';   /* 32: set user */
 declare bdos$readr   literally '021h';   /* 33: read random */
 declare bdos$writer  literally '022h';   /* 34: write random */
+declare bdos$errmode literally '02dh';   /* 45: set bdos error mode */
 
 /* sftp request types (must match sftp_bridge.h) */
 declare req$dir$search literally '0';
@@ -495,6 +496,19 @@ sftp$main: procedure public;
 
     /* signal startup to C++ emulator */
     call sftp$hello;
+
+    /* return error mode: a BDOS error comes back to the RSP as a return
+       code, as it does to PIP, and nothing is printed.  In the default
+       mode the BDOS prints an error - "File Currently Open" when an HTTP
+       read asks for a file ED has open - on the process's console, and
+       V2.0's RESBDOS hands the XIOS the whole console byte of the process
+       descriptor: 0F0H here, console 0 and list device 15.  The XIOS
+       polled device 0E0H for console 0F0H's output to be ready, which it
+       never is, inside the BDOS, holding the disk: every process that
+       went near a disk stopped behind it, and the whole system with them.
+       V2.1's RESBDOS masks the byte and prints only for a process that
+       owns the console, so there the message just went missing. */
+    call bdos(bdos$errmode, 0ffh);
 
     /* initialize counter */
     poll$counter = 0;
