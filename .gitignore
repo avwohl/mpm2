@@ -76,8 +76,8 @@ asm/sftp_symbols.txt
 asm/test.*
 
 # Root-level build artifacts (copied from asm/)
-*.BRS
-*.RSP
+/*.BRS
+/*.RSP
 *.spr
 *.SPR
 *.sys
