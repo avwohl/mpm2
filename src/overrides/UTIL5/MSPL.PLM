@@ -221,7 +221,16 @@ $if MPM21
   declare field$end based field$adr (1) byte;
 $endif
 
-  declare spool$msg (1) byte at (.tbuff-1);
+  /* ***** uplm80 workaround - an AT address that is an external's
+     location plus or minus a constant came out as EQU $, the assembler's
+     location counter, so spool$msg sat on top of SPOOLQ$uqcb below: the
+     first two bytes of the message overwrote the queue pointer, and the
+     queue write went through it into the system as soon as a spooler
+     RSP was there to take the message.  The byte below tbuff is the last
+     byte of the default FCB, r2 (5CH + 35 = 80H - 1), which uplm80 does
+     resolve - to FCB+35, relocated like tbuff itself.  spool$msg(1) is
+     stored as tbuff.et below, for the reason given there. */
+  declare spool$msg (1) byte at (.fcb.r2);
 
   declare SPOOLQ$uqcb userqcb
     initial (0,.spool$msg,'SPOOLQ  ');
@@ -292,7 +301,10 @@ $endif
   if xdos (open$queue,.SPOOLQ$uqcb) <> 0ffh then
   do;
     spool$msg(0) = xdos (get$disk,0)*16 + xdos (get$user,0ffh);
-    spool$msg(1) = xdos (get$list$nmb,0)*16 + xdos (get$console$nmb,0);  
+    /* ***** um80 workaround - spool$msg(1) is tbuff's first byte, and
+       spool$msg(1) itself assembles as FCB+35+1, which um80 takes for
+       FCB+1. */
+    tbuff.et = xdos (get$list$nmb,0)*16 + xdos (get$console$nmb,0);  
     if xdos (cond$write$queue,.SPOOLQ$uqcb) = 0ffh then
     do;
       call print$console$buffer (.(
