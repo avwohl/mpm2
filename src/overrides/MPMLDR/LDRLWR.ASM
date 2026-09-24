@@ -12,6 +12,7 @@ $title	('MP/M II V2.0  Load, Relocate, and Write File')
 ;
 ;  Modified for um80 assembler compatibility:
 ;    - Replaced low(sctbfr) with runtime calculation
+;    - Replaced low(bitmap+128) with runtime calculation
 ;*/
 
 	cseg
@@ -95,7 +96,16 @@ pgrel0:
 	lda	btmptp
 	cmp	l
 	jnz	pgrel2
-	mvi	a,low(bitmap+128)
+	; Workaround (um80 0.3.48): low() of a relocatable address assembles
+	; to the low byte of its offset in this module, with no relocation,
+	; so 'mvi a,low(bitmap+128)' set btmptp to the wrong byte and the loop
+	; read the next bit map record too early or too late, depending on
+	; where the module was linked.  Take the low byte from a relocated
+	; 16-bit address instead: the same value, relocated.  HL is free here;
+	; it is reloaded with the buffer address below.
+;	mvi	a,low(bitmap+128)
+	lxi	h,bitmap+128
+	mov	a,l
 	sta	btmptp
 	push	b
 	push	d
@@ -130,6 +140,16 @@ pgrel4:
 ;
 ExitLdRl:
 	pop	h
+	IFDEF	MPM21
+; ***** MP/M 2.1
+; close the file just loaded.  V2.0 closed none of them, and under MP/M
+; every file a process has open counts against its open file limit and
+; holds a lock list entry until it is closed (GENSYS.COM 1D4DH ->
+; 257BH, which calls the PL/M close$file with .FCBin).
+	lxi	d,FCBin
+	mvi	c,16	;close file
+	call	mon1
+	ENDIF
 	lxi	h,0
 	mov	a,h
 	ret
