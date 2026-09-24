@@ -6,7 +6,8 @@ Builds MP/M II from source using:
 - um80: Assembler (.ASM/.MAC -> .REL)
 - ul80: Linker (.REL -> .COM/.PRL)
 - cpmemu + PLM80: PL/M compiler (.PLM -> .REL) [via CP/M emulator]
-- GENMOD: Creates relocatable files (.PRL/.RSP/.BRS/.SPR)
+- tools/genmod.py: DRI's GENMOD, GENHEX and PRLCOM, for the programs DRI
+  built without a linker (ASM, RDT, DDT)
 
 Usage:
     python build.py [--clean] [--verbose] [target...]
@@ -20,6 +21,9 @@ import argparse
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import genmod  # noqa: E402  (tools/genmod.py)
 
 # ============================================================================
 # Configuration
@@ -88,6 +92,16 @@ class BuildTarget:
     prl_extra_v21: Optional[str] = None  # The V2.1 figure, where V2.1 changed it.
     skip_runtime: bool = False   # If True, don't link with cpm_runtime
     post_build: Optional[str] = None  # Special post-build action (e.g., "mpmldr")
+    genmod: bool = False         # Built the way DRI built it, with no linker:
+                                 # every source assembled twice, the second
+                                 # time 100H higher, and the two GENMOD'd into
+                                 # a .PRL (Builder.build_genmod).
+    genmod_module: Optional[list] = None  # Sources GENMOD'd first, into a
+                                 # module that is GENHEX'd in at 0100H, its
+                                 # header page there and its image at 0200H;
+                                 # the target's own sources load after it.
+    genmod_zeros: bool = False   # GENMOD's $Z: a byte that is zero in the
+                                 # second copy is never compared.
 
 # Source files that produce differently-named binaries
 NAME_MAPPING = {
@@ -165,17 +179,34 @@ UTIL3_TARGETS = [
 # ============================================================================
 # UTIL1 - Assembler & Debugger (multi-module ASM)
 # ============================================================================
+# MAC sources that DRI never linked (UTIL1/ASM.SUB, DDT.SUB): each module has
+# its own ORG, is assembled twice, and GENMOD makes the .PRL.
+#
+# ASM.SUB: the seven modules, `genmod asm.hex asm.prl $1000'.
+#
+# DDT.SUB: DDT1ASM (ORG 0) and DDT2MON (ORG 0, then DS 680H over DDT1ASM's
+# space, so its code starts at 0680H) are GENMOD'd into RELDDT, the debugger
+# as a relocatable module - its image and its relocation map.
+# GENHEX puts that at 0100H, so the module itself starts at 0200H, and
+# DDT0MOV is loaded over the header page in front of it: its `LXI B' at
+# 0100H has no operand of its own and takes the module's length from the
+# header.  At run time DDT0MOV moves the module to the top of memory and
+# relocates it with its map.  `genmod relddt.hex rdt.prl $z1500' makes RDT.PRL
+# of the lot - $Z because the second copy of the header page is zeros where
+# the first has DDT0MOV's code - and `prlcom rdt.prl ddt.com' DDT.COM.
+UTIL1_ASM_SOURCES = [
+    "AS0COM.ASM", "AS1IO.ASM", "AS2SCAN.ASM",
+    "AS3SYM.ASM", "AS4SEAR.ASM", "AS5OPER.ASM", "AS6MAIN.ASM"
+]
 UTIL1_TARGETS = [
-    BuildTarget("ASM", "prl", [
-        "AS0COM.ASM", "AS1IO.ASM", "AS2SCAN.ASM",
-        "AS3SYM.ASM", "AS4SEAR.ASM", "AS5OPER.ASM", "AS6MAIN.ASM"
-    ], "UTIL1", prl_extra="1000", asm_absolute=True, skip_runtime=True),
-    BuildTarget("RDT", "prl", [
-        "DDT0MOV.ASM", "DDT1ASM.ASM", "DDT2MON.ASM"
-    ], "UTIL1", prl_extra="1500", asm_absolute=True, skip_runtime=True),
-    BuildTarget("DDT", "com", [
-        "DDT0MOV.ASM", "DDT1ASM.ASM", "DDT2MON.ASM"
-    ], "UTIL1", asm_absolute=True, skip_runtime=True),
+    BuildTarget("ASM", "prl", UTIL1_ASM_SOURCES, "UTIL1", prl_extra="1000",
+                genmod=True),
+    BuildTarget("RDT", "prl", ["DDT0MOV.ASM"], "UTIL1", prl_extra="1500",
+                genmod=True, genmod_module=["DDT1ASM.ASM", "DDT2MON.ASM"],
+                genmod_zeros=True),
+    BuildTarget("DDT", "com", ["DDT0MOV.ASM"], "UTIL1", prl_extra="1500",
+                genmod=True, genmod_module=["DDT1ASM.ASM", "DDT2MON.ASM"],
+                genmod_zeros=True),
 ]
 
 # ============================================================================
@@ -380,9 +411,9 @@ class Builder:
         ``absolute`` assembles the way DRI's MAC does, with no relocatable
         segments, so an ORG is an absolute address.  MP/M II's own assembler,
         DDT, GENHEX and GENMOD are MAC sources: each of ASM's seven modules
-        carries its own ORG (100H, 200H, 1100H, ...) and DRI simply
-        concatenated the resulting HEX files.  Assembling them as relocatable
-        put each one after the last instead of at its own address.
+        carries its own ORG (100H, 200H, 1100H, ...).  Assembling them as
+        relocatable put each one after the last instead of at its own
+        address.
         """
         cmd = [UM80]
         if absolute:
@@ -481,9 +512,109 @@ class Builder:
 
         return self.run(cmd)
 
+    def find_source(self, target: BuildTarget, src: str) -> Optional[Path]:
+        """A source file: the local override if there is one, else DRI's."""
+        for d in (LOCAL_SRC_ROOT, SRC_ROOT):
+            path = d / target.directory / src
+            if path.exists():
+                if d == LOCAL_SRC_ROOT:
+                    self.debug(f"Using local override: {path}")
+                return path
+        self.log(f"  ERROR: Source file not found: {SRC_ROOT / target.directory / src}")
+        return None
+
+    def assemble_twice(self, target: BuildTarget, sources: list):
+        """Each source assembled as MAC assembles it, and as MAC +R does.
+
+        Returns the bytes the two assemblies load, each a list of (address,
+        byte) in the order of the sources - what DRI's PIP made of the HEX
+        files - or None if an assembly failed.  +R is `mac x $pzsz+r', which
+        assembles the module 100H higher; genmod.mac_plus_r() does that to
+        a copy of the source, and um80 assembles the copy.
+        """
+        first, second = [], []
+        plus_r_dir = self.build_dir / "plus_r"
+        plus_r_dir.mkdir(parents=True, exist_ok=True)
+        for src in sources:
+            path = self.find_source(target, src)
+            if path is None:
+                return None
+            stem = Path(src).stem
+            rel = self.build_dir / (stem + ".REL")
+            copy = plus_r_dir / src
+            text = path.read_bytes().decode("latin-1")
+            copy.write_bytes(genmod.mac_plus_r(text, str(path)).encode("latin-1"))
+            rel_r = plus_r_dir / (stem + ".REL")
+            if not (self.assemble(path, rel, absolute=True)
+                    and self.assemble(copy, rel_r, absolute=True)):
+                return None
+            first += genmod.rel_bytes(rel)
+            second += genmod.rel_bytes(rel_r)
+        return first, second
+
+    def genmod_memory(self):
+        """The memory GENMOD found where it builds the image, or None (zeros).
+
+        GENMOD loads the first copy at 0700H and does not clear memory
+        first, so the bytes no HEX record loads - a DS area, the gap before
+        a module's ORG - keep what the program before it left there.  The
+        default build has zeros.  --dri-exact has what the GENMOD that made
+        DRI's shipped files found: MAC.COM, from UTIL9, where the source
+        release keeps DRI's own copy.  That is the same for both releases,
+        since the V2.0 masters (CONTROL) and V2.1 (mpm2dist) carry the same
+        ASM.PRL, RDT.PRL and DDT.COM.  The copies in mpm2src/UTIL1 are a
+        rebuild in the source tree that neither master carries, made where
+        PIP.COM had run over MAC.COM; see docs/mpm2_v21.md, "ASM, RDT and
+        DDT".
+        """
+        if "DRIEXACT" not in self.defines:
+            return None
+        return genmod.prior_memory([(SRC_ROOT / "UTIL9" / "MAC.COM").read_bytes()])
+
+    def build_genmod(self, target: BuildTarget, extra: str) -> bool:
+        """Build a program the way UTIL1's submit files do: MAC and GENMOD.
+
+        No linker: each source is assembled twice (assemble_twice) and
+        GENMOD makes the .PRL from the bytes that differ between the
+        copies.  A target with a `genmod_module' gets it first, GENMOD'd on
+        its own and GENHEX'd in at 0100H (header page) and 0200H (image),
+        ahead of its own sources.  A .COM is the .PRL through PRLCOM.
+        """
+        memory = self.genmod_memory()
+        first, second = [], []
+        try:
+            if target.genmod_module:
+                copies = self.assemble_twice(target, target.genmod_module)
+                if copies is None:
+                    return False
+                module = genmod.genmod(*copies, memory=memory)
+                first = genmod.genhex(module, 0x100)
+                second = genmod.genhex(module, 0x200)
+            copies = self.assemble_twice(target, target.sources)
+            if copies is None:
+                return False
+            prl = genmod.genmod(first + copies[0], second + copies[1],
+                                extra=int(extra, 16),
+                                ignore_zeros=target.genmod_zeros,
+                                memory=memory)
+        except genmod.GenmodError as e:
+            self.log(f"  ERROR: GENMOD: {e}")
+            return False
+        data = genmod.prlcom(prl) if target.output_type == "com" else prl
+        output_file = self.output_dir / f"{target.name}.{target.output_type.upper()}"
+        output_file.write_bytes(data)
+        self.log(f"  Created {output_file}")
+        return True
+
     def build_target(self, target: BuildTarget) -> bool:
         """Build a single target"""
         self.log(f"Building {target.name}.{target.output_type}...")
+
+        extra = target.prl_extra
+        if target.prl_extra_v21 is not None and "MPM21" in self.defines:
+            extra = target.prl_extra_v21
+        if target.genmod:
+            return self.build_genmod(target, extra)
 
         # Determine source directories (local overrides take precedence)
         src_dir = SRC_ROOT / target.directory
@@ -583,9 +714,6 @@ class Builder:
 
         # Link
         output_file = self.output_dir / f"{target.name}.{target.output_type.upper()}"
-        extra = target.prl_extra
-        if target.prl_extra_v21 is not None and "MPM21" in self.defines:
-            extra = target.prl_extra_v21
         if not self.link(rel_files, output_file, target.output_type, target.origin,
                          extra):
             return False
@@ -705,10 +833,12 @@ def main():
                              "DRI's own distribution master.")
     parser.add_argument("--dri-exact", action="store_true",
                         help="Build exactly what Digital Research shipped: "
-                             "take DRI's serial number and leave out the "
-                             "local fixes this repository carries, so the "
-                             "output can be compared byte for byte against "
-                             "the reference binaries.")
+                             "take DRI's serial number, leave out the "
+                             "local fixes this repository carries, and give "
+                             "the bytes GENMOD leaves unset (ASM, RDT, DDT) "
+                             "what DRI's GENMOD found in memory (MAC.COM), "
+                             "so the output can be compared byte for byte "
+                             "against the reference binaries.")
     parser.add_argument("--output-dir", type=Path, default=None,
                         help="Where to put the built binaries "
                              "(default: bin/src)")
@@ -736,7 +866,9 @@ def main():
         print("Available targets:")
         for t in ALL_TARGETS:
             plm_flag = " [PLM]" if any(s.upper().endswith(".PLM") for s in t.sources) else ""
-            print(f"  {t.name}.{t.output_type} <- {', '.join(t.sources)}{plm_flag}")
+            sources = (t.genmod_module or []) + t.sources
+            how = " [GENMOD]" if t.genmod else ""
+            print(f"  {t.name}.{t.output_type} <- {', '.join(sources)}{plm_flag}{how}")
         return 0
 
     # Filter to ASM-only if requested

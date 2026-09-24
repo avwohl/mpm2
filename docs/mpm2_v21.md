@@ -54,26 +54,37 @@ binaries:
 python3 tools/verify_dri.py
 ```
 
-builds both releases with `--dri-exact` and compares each `.SPR` against
-the matching reference:
+builds both releases with `--dri-exact` and compares the nucleus and
+UTIL1's assembler and debugger against the matching reference:
 
 ```
 MP/M II V2.0:
-  XDOS      identical to DRI 2.0
-  BNKXDOS   identical to DRI 2.0
-  RESBDOS   identical to DRI 2.0
-  TMP       identical to DRI 2.0
+  XDOS.SPR     identical to DRI 2.0
+  BNKXDOS.SPR  identical to DRI 2.0
+  RESBDOS.SPR  identical to DRI 2.0
+  TMP.SPR      identical to DRI 2.0
+  ASM.PRL      identical to DRI 2.0 but for 11 bytes no source sets
+  RDT.PRL      identical to DRI 2.0
+  DDT.COM      identical to DRI 2.0
 MP/M II V2.1:
-  XDOS      identical to DRI 2.1
-  BNKXDOS   identical to DRI 2.1
-  RESBDOS   identical to DRI 2.1
-  TMP       identical to DRI 2.1
+  XDOS.SPR     identical to DRI 2.1
+  BNKXDOS.SPR  identical to DRI 2.1
+  RESBDOS.SPR  identical to DRI 2.1
+  TMP.SPR      identical to DRI 2.1
+  ASM.PRL      identical to DRI 2.1 but for 11 bytes no source sets
+  RDT.PRL      identical to DRI 2.1
+  DDT.COM      identical to DRI 2.1
 ```
 
-The comparison covers the program image and the relocation bits that
-describe it.  It stops at the end of the program: DRI's linker left
-stale bytes in the tail of the bitmap, which no loader reads and no
-assembler can be made to reproduce.
+For an `.SPR` the comparison covers the program image and the
+relocation bits that describe it.  It stops at the end of the program:
+DRI's linker left stale bytes in the tail of the bitmap, which no loader
+reads and no assembler can be made to reproduce.  `ASM.PRL`, `RDT.PRL`
+and `DDT.COM` are compared whole, header and bitmap included; the bytes
+of `ASM.PRL` it lets through are explained under
+[ASM, RDT and DDT](#asm-rdt-and-ddt---no-change).  `CONTROL` and
+`mpm2dist` carry the same three files, so the V2.0 and V2.1 references
+for them are one and the same.
 
 ## What changed between the releases
 
@@ -103,6 +114,12 @@ from:
 The four transients built from PL/M cannot be checked byte for byte in
 any case: `uplm80` is not Digital Research's PL/M-80 and generates
 different code.  The nucleus is all assembler, which is why it can be.
+
+`ASM.PRL`, `RDT.PRL` and `DDT.COM` are not in the table: `CONTROL`'s and
+`mpm2dist`'s are the same file.  The copies next to their sources in
+`mpm2src/UTIL1`, which neither master carries, differ from it, but only
+in bytes no source sets; see
+[ASM, RDT and DDT](#asm-rdt-and-ddt---no-change).
 
 ## The nucleus changes
 
@@ -266,6 +283,82 @@ DRI's V2.0 binary across 26 separate regions, including 271 bytes of
 patch routines that moved wholesale from around `05xx-08xx` to `22xx`.
 That is undoing bug fixes rather than recovering sources, so it has not
 been done.
+
+### ASM, RDT and DDT - no change
+
+The assembler and the debugger are MAC sources that Digital Research
+never linked.  `UTIL1/ASM.SUB` and `DDT.SUB` assemble each module twice,
+the second time with MAC's `+R` toggle (`mac ddt1asm $pzsz+r`), which
+puts every ORG 100H higher - what the Programmer's Guide (4.4.1) tells a
+user to do by hand to make a PRL.  PIP joins the two HEX files and GENMOD
+compares the copies: a byte one more in the second is the high byte of
+an address and gets a bit in the relocation map, and `$Z` makes it skip
+a byte that is zero in the second copy.
+
+* `ASM.PRL`: the seven `AS*.ASM` modules, each at its own ORG (100H,
+  200H, 1100H, ... 1BA0H), `genmod asm.hex asm.prl $1000`.
+* `RDT.PRL`: `DDT1ASM` (ORG 0) and `DDT2MON` (ORG 0 too, then `DS 680H`
+  over `DDT1ASM`'s space, so its code starts at 0680H) are GENMOD'd
+  into `RELDDT`, the debugger as a relocatable module with its own map.
+  GENHEX puts it at 100H, so its header page is at 100H and the module
+  at 200H, and `DDT0MOV`, the relocator, is loaded over the header page:
+  its first instruction is a lone `LXI B` opcode at 100H, whose operand
+  is the module length GENMOD left at 101H.  At run time it moves the
+  module under the BDOS and relocates it with the module's map.
+  `genmod relddt.hex rdt.prl $z1500` makes the PRL - `$Z` because the
+  second copy of the header page is zeros where the first has
+  `DDT0MOV`'s code.
+* `DDT.COM`: `prlcom rdt.prl ddt.com` - RDT.PRL's image, without the
+  header or the map.
+
+`tools/build.py` does the same (`genmod=True` targets): `um80 --aseg`
+assembles each module as it is and a copy with every ORG 100H higher,
+and `tools/genmod.py` does what GENMOD, GENHEX and PRLCOM did.  Under
+cpmemu, DRI's own `MAC.COM` gives the same HEX records for all ten
+modules both ways.  `genmod.py` refuses the two kinds of ORG that um80
+does not assemble as MAC does, in either copy, rather than let them
+through: an ORG in column 1, which MAC takes for an ORG and um80 does
+not, and a label on an ORG line, which MAC sets to the new location
+and um80 to the old.  None of the ten modules has either.
+
+The code is the same in V2.0 and V2.1, and so are the files: the V2.0
+master (`CONTROL`) and V2.1 (`mpm2dist`) carry byte for byte the same
+`ASM.PRL`, `RDT.PRL` and `DDT.COM`.  GENMOD loads the first copy at
+0700H and never clears memory, so a DS area, or the gap before a
+module's ORG, keeps whatever the program before it left there - in the
+shipped files, MAC.COM, as MAC leaves memory after assembling `AS3SYM`:
+with a memory image saved by cpmemu after `mac as3sym`, GENMOD
+reproduces all three exactly.
+
+The default build leaves those bytes zero.  `--dri-exact` loads MAC.COM
+from `UTIL9` into GENMOD's memory, which makes `RDT.PRL` and `DDT.COM`
+identical to DRI's, and `ASM.PRL` identical except for 11 bytes of
+MAC's variables, which MAC changed while it ran.  `verify_dri.py`
+allows exactly those, in both releases.
+
+The copies next to the sources in `mpm2src/UTIL1` are not a reference.
+They are a rebuild in the source tree that neither master carries, and
+they differ from the shipped files in 3141 (`ASM.PRL`), 77 (`RDT.PRL`)
+and 77 (`DDT.COM`) bytes, every one of them a byte no source sets.
+There GENMOD's memory held PIP.COM - the CP/M PIP in `UTIL9`, which the
+submit files run just before GENMOD - over MAC.COM.  All 78 such bytes
+of `RELDDT` and 3154 of `ASM` are PIP.COM's, byte for byte, 29 more of
+`ASM`'s are MAC.COM's from above PIP's end, and the other 34 are what
+PIP left in its storage above its code, most of it pieces of the HEX
+text it had been copying (`61DC54623E5CD48EC` CR LF at 1B8D).
+
+The build used to link the three with `ul80`, which made none of them
+right.  `RDT.PRL` was the bare module, 1194H bytes, with no relocator
+and an empty relocation map, and `DDT.COM` started with `DDT1ASM`'s
+`JMP 0683H` at 100H (the pending ul80 now stops there: "DDT1ASM is
+assembled at 0000H and was loaded over DDT0MOV's relocator").
+`ASM.PRL` had the right code but not one relocation bit - it ran only
+in a memory segment based at 0000H - and five bytes of `AS6MAIN`'s
+closing DS written out as zeros.
+
+MP/M II's DDT will not run under a CP/M emulator: it asks the BDOS for
+its version and warm boots unless it is MP/M, and it finds the
+breakpoint vector through the system data page.
 
 ## Loose ends found on the way
 
