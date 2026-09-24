@@ -184,8 +184,9 @@ UTIL3_TARGETS = [
 #
 # ASM.SUB: the seven modules, `genmod asm.hex asm.prl $1000'.
 #
-# DDT.SUB: DDT1ASM (ORG 0) and DDT2MON (ORG 0680H) are GENMOD'd into RELDDT,
-# the debugger as a relocatable module - its image and its relocation map.
+# DDT.SUB: DDT1ASM (ORG 0) and DDT2MON (ORG 0, then DS 680H over DDT1ASM's
+# space, so its code starts at 0680H) are GENMOD'd into RELDDT, the debugger
+# as a relocatable module - its image and its relocation map.
 # GENHEX puts that at 0100H, so the module itself starts at 0200H, and
 # DDT0MOV is loaded over the header page in front of it: its `LXI B' at
 # 0100H has no operand of its own and takes the module's length from the
@@ -557,18 +558,18 @@ class Builder:
         GENMOD loads the first copy at 0700H and does not clear memory
         first, so the bytes no HEX record loads - a DS area, the gap before
         a module's ORG - keep what the program before it left there.  The
-        default build has zeros.  --dri-exact has what Digital Research's
-        GENMOD found: the V2.0 copies in UTIL1 were made after ASM.SUB and
-        DDT.SUB's PIP had run over MAC, and the V2.1 ones (mpm2dist; the
-        CONTROL masters have the same) where MAC had run - so MAC.COM, and
-        for V2.0 PIP.COM on top of it, from UTIL9, where the source release
-        keeps DRI's own copies.
+        default build has zeros.  --dri-exact has what the GENMOD that made
+        DRI's shipped files found: MAC.COM, from UTIL9, where the source
+        release keeps DRI's own copy.  That is the same for both releases,
+        since the V2.0 masters (CONTROL) and V2.1 (mpm2dist) carry the same
+        ASM.PRL, RDT.PRL and DDT.COM.  The copies in mpm2src/UTIL1 are a
+        rebuild in the source tree that neither master carries, made where
+        PIP.COM had run over MAC.COM; see docs/mpm2_v21.md, "ASM, RDT and
+        DDT".
         """
         if "DRIEXACT" not in self.defines:
             return None
-        programs = ["MAC.COM"] if "MPM21" in self.defines else ["MAC.COM", "PIP.COM"]
-        return genmod.prior_memory([(SRC_ROOT / "UTIL9" / p).read_bytes()
-                                    for p in programs])
+        return genmod.prior_memory([(SRC_ROOT / "UTIL9" / "MAC.COM").read_bytes()])
 
     def build_genmod(self, target: BuildTarget, extra: str) -> bool:
         """Build a program the way UTIL1's submit files do: MAC and GENMOD.
@@ -835,9 +836,9 @@ def main():
                              "take DRI's serial number, leave out the "
                              "local fixes this repository carries, and give "
                              "the bytes GENMOD leaves unset (ASM, RDT, DDT) "
-                             "what DRI's GENMOD found in memory, so the "
-                             "output can be compared byte for byte against "
-                             "the reference binaries.")
+                             "what DRI's GENMOD found in memory (MAC.COM), "
+                             "so the output can be compared byte for byte "
+                             "against the reference binaries.")
     parser.add_argument("--output-dir", type=Path, default=None,
                         help="Where to put the built binaries "
                              "(default: bin/src)")

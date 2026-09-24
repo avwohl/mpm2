@@ -2,10 +2,9 @@
 """Check the source build against Digital Research's own binaries.
 
 mpm2src.zip ships two sets of binaries: the V2.0 masters the sources were
-cut from (mpm2src/CONTROL, and next to the sources the programs their
-submit files made, as in mpm2src/UTIL1) and the V2.1 distribution
-(mpm2dist).  The nucleus sources in src/overrides carry both releases
-behind IFDEF MPM21, so each one should come back byte for byte.
+cut from (mpm2src/CONTROL) and the V2.1 distribution (mpm2dist).  The
+nucleus sources in src/overrides carry both releases behind IFDEF MPM21,
+so each one should come back byte for byte.
 
     python3 tools/verify_dri.py            # both releases
     python3 tools/verify_dri.py 2.1        # just one
@@ -17,7 +16,10 @@ reproduce.
 
 ASM.PRL, RDT.PRL and DDT.COM were made with GENMOD (UTIL1/ASM.SUB,
 DDT.SUB), not a linker, and are compared whole, except for the bytes in
-UNSET below.
+UNSET below.  The two masters carry the same three files.  (The copies
+next to their sources in mpm2src/UTIL1 are a later rebuild that was never
+shipped, and are not a reference; see docs/mpm2_v21.md, "ASM, RDT and
+DDT".)
 """
 import argparse
 import pathlib
@@ -26,37 +28,33 @@ import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-CONTROL = ROOT / "mpm2_external/mpm2src/CONTROL"
-UTIL1 = ROOT / "mpm2_external/mpm2src/UTIL1"
-DIST = ROOT / "mpm2_external/mpm2dist"
+REFS = {
+    "2.0": ROOT / "mpm2_external/mpm2src/CONTROL",
+    "2.1": ROOT / "mpm2_external/mpm2dist",
+}
 
-# (build.py target, file, V2.0 reference, V2.1 reference).  CONTROL's
-# ASM.PRL, RDT.PRL and DDT.COM are byte for byte mpm2dist's; UTIL1's are the
-# ones the V2.0 source tree's own submit files made.
+# (build.py target, file)
 TARGETS = [
-    ("XDOS", "XDOS.SPR", CONTROL, DIST),
-    ("BNKXDOS", "BNKXDOS.SPR", CONTROL, DIST),
-    ("RESBDOS", "RESBDOS.SPR", CONTROL, DIST),
-    ("TMP", "TMP.SPR", CONTROL, DIST),
-    ("ASM", "ASM.PRL", UTIL1, DIST),
-    ("RDT", "RDT.PRL", UTIL1, DIST),
-    ("DDT", "DDT.COM", UTIL1, DIST),
+    ("XDOS", "XDOS.SPR"),
+    ("BNKXDOS", "BNKXDOS.SPR"),
+    ("RESBDOS", "RESBDOS.SPR"),
+    ("TMP", "TMP.SPR"),
+    ("ASM", "ASM.PRL"),
+    ("RDT", "RDT.PRL"),
+    ("DDT", "DDT.COM"),
 ]
-VERSIONS = ["2.0", "2.1"]
 
 # Bytes of a GENMOD'd program that no source sets and that the build cannot
 # reproduce, as offsets into the file.  A DS area, or the gap before a
-# module's ORG, keeps whatever the program before GENMOD left in memory, and
-# build.py --dri-exact loads that program's .COM file there (genmod_memory):
-# that accounts for every such byte of RDT.PRL and DDT.COM.  What the program
-# changed while it ran is not modelled.  In V2.0's ASM.PRL that is 34 bytes
-# of PIP's storage above its code, mostly pieces of the HEX text it had been
-# copying, such as "61DC54623E5CD48EC" CR LF at 1B8D - and in V2.1's, 11 of
-# MAC's variables, as MAC leaves them after assembling AS3SYM.  See
-# docs/mpm2_v21.md, "ASM, RDT and DDT".
+# module's ORG, keeps whatever the program before GENMOD left in memory -
+# MAC.COM, which build.py --dri-exact loads there (genmod_memory): that
+# accounts for every such byte of RDT.PRL and DDT.COM.  What MAC changed
+# while it ran is not modelled: in ASM.PRL that is 11 of MAC's variables,
+# as MAC leaves them after assembling AS3SYM.  The same in both releases,
+# since both masters carry the same file.  See docs/mpm2_v21.md, "ASM, RDT
+# and DDT".
 UNSET = {
-    ("2.0", "ASM.PRL"): "185E-185F 186C-1876 196B 196D 1B8D-1B9F",
-    ("2.1", "ASM.PRL"): "0BC9 0BD8-0BD9 0C0C-0C0E 0C17-0C18 0C21-0C23",
+    "ASM.PRL": "0BC9 0BD8-0BD9 0C0C-0C0E 0C17-0C18 0C21-0C23",
 }
 
 
@@ -79,7 +77,7 @@ class Spr:
         self.bitmap = bits[:(self.length + 7) // 8]
 
 
-def compare_spr(ref, built, version):
+def compare_spr(ref, built):
     a, b = Spr(ref), Spr(built)
     if a.length != b.length:
         return f"program length {a.length:04x} vs {b.length:04x}"
@@ -96,11 +94,11 @@ def compare_spr(ref, built, version):
     return None
 
 
-def compare_file(ref, built, version):
+def compare_file(ref, built):
     a, b = ref.read_bytes(), built.read_bytes()
     if len(a) != len(b):
         return f"length {len(a)} vs {len(b)}"
-    unset = offsets(UNSET.get((version, ref.name), ""))
+    unset = offsets(UNSET.get(ref.name, ""))
     bad = [i for i in range(len(a)) if a[i] != b[i] and i not in unset]
     if bad:
         return (f"{len(bad)} bytes differ, first at "
@@ -118,14 +116,14 @@ def run(version, keep=None):
         print(r.stdout + r.stderr)
         return False
     ok = True
-    for _, name, ref20, ref21 in TARGETS:
-        ref = (ref20 if version == "2.0" else ref21) / name
+    for _, name in TARGETS:
+        ref = REFS[version] / name
         built = out / name
         compare = compare_spr if name.endswith(".SPR") else compare_file
-        why = compare(ref, built, version) if built.exists() else "not built"
+        why = compare(ref, built) if built.exists() else "not built"
         if why is None:
             why = "identical to DRI " + version
-            unset = offsets(UNSET.get((version, name), ""))
+            unset = offsets(UNSET.get(name, ""))
             if unset:
                 why += f" but for {len(unset)} bytes no source sets"
         print(f"  {name:<12} {why}")
@@ -141,10 +139,10 @@ def main():
     ap.add_argument("--keep", help="build into this directory instead of a temporary one")
     args = ap.parse_args()
     for v in args.versions:
-        if v not in VERSIONS:
+        if v not in REFS:
             ap.error(f"unknown release {v!r}; choose from 2.0, 2.1")
     ok = True
-    for v in (args.versions or VERSIONS):
+    for v in (args.versions or list(REFS)):
         print(f"MP/M II V{v}:")
         ok = run(v, args.keep) and ok
     return 0 if ok else 1

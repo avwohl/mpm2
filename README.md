@@ -196,8 +196,8 @@ python3 tools/verify_dri.py                       # both, against DRI's binaries
 All four nucleus SPRs — XDOS, BNKXDOS, RESBDOS and TMP — come back byte for
 byte identical to Digital Research's own V2.0 and V2.1 binaries, and so do
 the debugger, `RDT.PRL` and `DDT.COM`, and the assembler, `ASM.PRL`, but for
-34 (V2.0) or 11 (V2.1) bytes that no source sets and GENMOD took from the
-memory the program before it had left. See
+11 bytes of it that no source sets and GENMOD took from the memory MAC had
+left. See
 [docs/mpm2_v21.md](docs/mpm2_v21.md) for what changed between the releases
 and what is still outstanding.
 
@@ -224,7 +224,7 @@ XDOS never reads the byte, and `gensys.py` leaves it zero there with a note.
 | `--version=2.0\|2.1` | Release to build from source (default 2.0); `--tree=src` only |
 | `--compat-attributes[=yes\|no]` | Answer to V2.1 GENSYS's "Enable Compatibility Attributes" (default no) |
 | `--serial=none\|dri` | Serial number in a source-built nucleus: the sources' `654321` placeholder (default) or the one on DRI's master; `--tree=src` only |
-| `--dri-exact` | Build what DRI shipped: DRI's serial number, without the local fixes `src/overrides` keeps behind `DRIEXACT`, and with what DRI's GENMOD found in memory in the bytes of ASM, RDT and DDT no source sets; `--tree=src` only |
+| `--dri-exact` | Build what DRI shipped: DRI's serial number, without the local fixes `src/overrides` keeps behind `DRIEXACT`, and with what DRI's GENMOD found in memory (MAC.COM) in the bytes of ASM, RDT and DDT no source sets; `--tree=src` only |
 
 ### Modern GENSYS
 
