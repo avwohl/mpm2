@@ -313,7 +313,11 @@ a byte that is zero in the second copy.
 assembles each module as it is and a copy with every ORG 100H higher,
 and `tools/genmod.py` does what GENMOD, GENHEX and PRLCOM did.  Under
 cpmemu, DRI's own `MAC.COM` gives the same HEX records for all ten
-modules both ways.
+modules both ways.  `genmod.py` refuses the two kinds of ORG that um80
+does not assemble as MAC does, in either copy, rather than let them
+through: an ORG in column 1, which MAC takes for an ORG and um80 does
+not, and a label on an ORG line, which MAC sets to the new location
+and um80 to the old.  None of the ten modules has either.
 
 The code is the same in V2.0 and V2.1.  The masters in `CONTROL` carry
 the V2.1 files, and `mpm2src/UTIL1`'s copies - what the source tree's

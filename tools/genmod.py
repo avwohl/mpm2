@@ -123,13 +123,42 @@ def rel_bytes(path):
 # MAC's +R: every ORG 100H higher
 # ---------------------------------------------------------------------------
 
-# An ORG statement: an optional label, ORG, its operand, an optional comment.
-_ORG = re.compile(r"^(?P<head>(?:[A-Za-z_?@$][\w?@$]*:?)?[ \t]+ORG[ \t]+)"
-                  r"(?P<expr>[^;\r\n]*?)(?P<tail>[ \t]*(?:;[^\r\n]*)?(?:\r?\n)?)$",
-                  re.IGNORECASE)
+# ORG as a word of its own: MAC's names are letters, digits, `?', `@' and `$'.
+_ORG = re.compile(r"(?<![\w?@$])ORG(?![\w?@$])", re.IGNORECASE)
+_LABEL = re.compile(r"[ \t]*[A-Za-z_?@][\w?@$]*:?[ \t]*$")
 
 
-def mac_plus_r(source):
+def _statements(line):
+    """A source line split the way MAC reads it.
+
+    Returns (statements, masked, rest): the `!'-separated statements, the
+    same with the inside of every quoted string blanked out, so that a
+    string or comment never looks like an ORG, and the rest of the line -
+    the comment and the line end.
+    """
+    body = line.rstrip("\r\n")
+    rest = line[len(body):]
+    stmts, masked, cur, mcur = [], [], [], []
+    quote = False
+    for i, ch in enumerate(body):
+        if ch == "'":
+            quote = not quote
+        elif not quote and ch == ";":
+            rest = body[i:] + rest
+            break
+        elif not quote and ch == "!":
+            stmts.append("".join(cur))
+            masked.append("".join(mcur))
+            cur, mcur = [], []
+            continue
+        cur.append(ch)
+        mcur.append(" " if quote and ch != "'" else ch)
+    stmts.append("".join(cur))
+    masked.append("".join(mcur))
+    return stmts, masked, rest
+
+
+def mac_plus_r(source, name="source"):
     """A MAC source assembled the way `mac x $+r' assembles it: 100H higher.
 
     +R is what the MP/M II Programmer's Guide (section 4.4.1) tells a user
@@ -140,13 +169,50 @@ def mac_plus_r(source):
     the first assembly's; and code before the first ORG starts at 100H
     rather than 0, which the ORG put in front of the source does.  The
     HEX files of all ten UTIL1 modules come out the same either way.
+
+    Every ORG statement is shifted, including one after a `!' and one
+    whose operand follows it with no space (`ORG(200H)').  Two forms are
+    refused, because um80 does not assemble them as MAC does, in either
+    copy: an ORG in column 1, which um80 does not take for an ORG at
+    all, and a label on an ORG line, which MAC sets to the new location
+    and um80 to the old.
     """
     newline = "\r\n" if "\r\n" in source else "\n"
     out = ["\tORG\t100H" + newline]
-    for line in source.splitlines(keepends=True):
-        m = _ORG.match(line)
-        if m:
-            line = f"{m['head']}({m['expr']})+100H{m['tail']}"
+    # Lines end at LF only: str.splitlines() would also split at the form
+    # feeds DRI's sources have, and throw the line numbers off.
+    lines = [line + "\n" for line in source.split("\n")]
+    lines[-1] = lines[-1][:-1]
+    for number, line in enumerate(lines, 1):
+        stmts, masked, rest = _statements(line)
+        changed = False
+        for k, (text, mask) in enumerate(zip(stmts, masked)):
+            m = _ORG.search(mask)
+            if not m:
+                continue
+            where = f"{name} line {number}: {line.strip()!r}"
+            head = mask[:m.start()]
+            if _LABEL.match(head) and head.strip():
+                raise GenmodError(
+                    f"{where}: a label on an ORG line, which MAC sets to the "
+                    "new location and um80 to the old - put the label on a "
+                    "line of its own after the ORG")
+            if head.strip():
+                raise GenmodError(f"{where}: an ORG that is not the first "
+                                  "word of its statement")
+            if k == 0 and not head:
+                raise GenmodError(f"{where}: an ORG in column 1, which um80 "
+                                  "does not assemble as an ORG - indent it")
+            expr = text[m.end():]
+            operand = expr.strip()
+            if not operand:
+                raise GenmodError(f"{where}: an ORG with no operand")
+            lead = expr[:len(expr) - len(expr.lstrip())] or "\t"
+            trail = expr[len(expr.rstrip()):]
+            stmts[k] = f"{text[:m.end()]}{lead}({operand})+100H{trail}"
+            changed = True
+        if changed:
+            line = "!".join(stmts) + rest
         out.append(line)
     return "".join(out)
 

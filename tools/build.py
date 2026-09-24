@@ -542,7 +542,7 @@ class Builder:
             rel = self.build_dir / (stem + ".REL")
             copy = plus_r_dir / src
             text = path.read_bytes().decode("latin-1")
-            copy.write_bytes(genmod.mac_plus_r(text).encode("latin-1"))
+            copy.write_bytes(genmod.mac_plus_r(text, str(path)).encode("latin-1"))
             rel_r = plus_r_dir / (stem + ".REL")
             if not (self.assemble(path, rel, absolute=True)
                     and self.assemble(copy, rel_r, absolute=True)):
