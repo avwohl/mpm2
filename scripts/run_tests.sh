@@ -12,8 +12,10 @@ set -o errexit
 # Tests:
 #   basic   - DIR and STAT commands (default)
 #   stat    - STAT command variants
-#   all     - All basic tests
-#   src     - Build from source and run basic tests (optional)
+#   rsp     - The resident system processes: MPMSTAT, SCHED, ABORT, SPOOL
+#   http    - A file read through the HTTP server (and the SFTP RSP)
+#   all     - All of the above
+#   src     - Build from source and run the basic, rsp and http tests
 #   interactive - Start interactive SSH session
 #
 
@@ -138,9 +140,49 @@ test_stat() {
     run_expect_test "STAT drive" "stat a:"
 }
 
+test_rsp() {
+    echo ""
+    echo "========================================"
+    echo "Running resident system process tests"
+    echo "========================================"
+
+    sleep 5
+    if "$SCRIPT_DIR/test_rsp.exp" $PORT; then
+        echo ""
+        echo ">>> TEST PASSED: resident system processes"
+        return 0
+    else
+        echo ""
+        echo ">>> TEST FAILED: resident system processes"
+        return 1
+    fi
+}
+
+test_http() {
+    echo ""
+    echo "========================================"
+    echo "Running HTTP file access test"
+    echo "========================================"
+
+    # The HTTP server reads files through the SFTP RSP, whose buffers are
+    # in bank 0; this is the read that used to land in a user bank instead.
+    local body
+    body=$(curl -s -m 30 "http://localhost:$HTTP_PORT/a.0/dump.asm") || true
+    if printf '%s' "$body" | grep -q "MP/M II V2.0  File Dump"; then
+        echo ">>> TEST PASSED: HTTP file read"
+        return 0
+    else
+        echo "Got: $(printf '%s' "$body" | head -5)"
+        echo ">>> TEST FAILED: HTTP file read"
+        return 1
+    fi
+}
+
 test_all() {
     test_basic
     test_stat
+    test_rsp
+    test_http
 }
 
 test_src_build() {
@@ -221,6 +263,8 @@ test_src_build() {
 
     # Run basic tests
     test_basic
+    test_rsp
+    test_http
 }
 
 # Main
@@ -243,6 +287,12 @@ case "$TEST" in
     stat)
         test_stat
         ;;
+    rsp)
+        test_rsp
+        ;;
+    http)
+        test_http
+        ;;
     all)
         test_all
         ;;
@@ -256,7 +306,7 @@ case "$TEST" in
         ;;
     *)
         echo "Unknown test: $TEST"
-        echo "Available tests: basic, stat, all, src, interactive"
+        echo "Available tests: basic, stat, rsp, http, all, src, interactive"
         exit 1
         ;;
 esac
