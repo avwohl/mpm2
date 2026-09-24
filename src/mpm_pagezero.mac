@@ -48,7 +48,14 @@ LEN1    equ     0056H           ; Second password's length
 ??MAXB  equ     0006H
         public  ??BDOS, ??BOOT, ??MAXB
 
-        public  BOOT, WBOOT, BDOS
+        ; BDOS is deliberately not published.  DRI's X0100.ASM does not
+        ; publish it either, and a PL/M program may declare its own: UTIL7/
+        ; DM.PLM has a PUBLIC variable `bdos', so every SDIR link reported a
+        ; multiply defined global and came out right only because DM.REL was
+        ; linked first.  The compiler reaches the BDOS through ??BDOS, and
+        ; DUMP.ASM, the one assembler transient that wants `bdos', is linked
+        ; with its own EXTRN.ASM, as DRI linked it.
+        public  BOOT, WBOOT
         public  IOBYTE, CDISK, BDISK, CMDRV
         public  MAXB, BUFF
         public  FCB, FCB16, TBUFF

@@ -127,7 +127,11 @@ UTIL5_TARGETS = [
     BuildTarget("CONSOLE", "prl", ["CNS.PLM"], "UTIL5"),         # CNS.PLM -> CONSOLE.PRL
     BuildTarget("USER", "prl", ["USER.PLM"], "UTIL5"),
     BuildTarget("PRLCOM", "prl", ["PRLCM.PLM"], "UTIL5"),        # PRLCM.PLM -> PRLCOM.PRL
-    BuildTarget("DUMP", "prl", ["DUMP.ASM"], "UTIL5"),
+    # DRI: `link dump,extrn[op]' (DUMP.ASM's header).  EXTRN.ASM publishes
+    # bdos, fcb and buff from a module of their own, so the references are
+    # resolved symbols and reach the .PRL bitmap; the PL/M runtime is not
+    # wanted - DUMP is pure assembler.
+    BuildTarget("DUMP", "prl", ["DUMP.ASM", "EXTRN.ASM"], "UTIL5", skip_runtime=True),
 ]
 
 # ============================================================================
