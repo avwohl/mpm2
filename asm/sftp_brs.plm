@@ -28,6 +28,8 @@ declare bdos$make    literally '016h';   /* 22: make file */
 declare bdos$rename  literally '017h';   /* 23: rename file */
 declare bdos$setdma  literally '01ah';   /* 26: set dma address */
 declare bdos$setuser literally '020h';   /* 32: set user */
+declare bdos$readr   literally '021h';   /* 33: read random */
+declare bdos$writer  literally '022h';   /* 34: write random */
 
 /* sftp request types (must match sftp_bridge.h) */
 declare req$dir$search literally '0';
@@ -56,6 +58,7 @@ declare max$dir$entries literally '63';
 /* but keep it aligned to 128-byte records: 16 * 128 = 2048, minus header = 2045 */
 /* use 1920 bytes = 15 records to leave room for header */
 declare max$file$data literally '1920';
+declare max$file$recs literally '15';
 
 /* external: shared buffer in bank 0 (2KB) */
 /* request buffer layout:
@@ -65,10 +68,20 @@ declare max$file$data literally '1920';
    [3]     flags
    [4-11]  filename (8 bytes)
    [12-14] extension (3 bytes)
-   [15-18] offset (32-bit)
+   [15-18] offset (32-bit): the byte offset for read and write, the
+           number of entries to skip for a directory search
    [19-20] length
    [21+]   data
 */
+/* Every request stands on its own: nothing is left open, and nothing in
+   fcb is used, from one request to the next.  The emulator's SFTP
+   sessions and its HTTP server share this one RSP, and their requests
+   arrive interleaved - a transfer that opened a file in one request and
+   read or wrote it in the next went on through whatever file the request
+   in between had opened.  So a read or write opens the file, positions
+   it with a random record number taken from the offset, and closes it
+   again; a create closes the file it made; and a directory search starts
+   from the first entry and skips the ones already returned. */
 /* reply buffer layout:
    [0]     status (bit 7 = more data)
    [1-2]   length
@@ -158,19 +171,42 @@ setup$fcb: procedure;
     end;
 end setup$fcb;
 
+/* set fcb's random record number (r0-r2) from the request's byte offset */
+set$random$record: procedure;
+    declare (o0, o1, o2, o3) byte;
+    o0 = get$buf$byte(15);
+    o1 = get$buf$byte(16);
+    o2 = get$buf$byte(17);
+    o3 = get$buf$byte(18);
+    fcb(33) = shr(o0, 7) or shl(o1, 1);
+    fcb(34) = shr(o1, 7) or shl(o2, 1);
+    fcb(35) = shr(o2, 7) or shl(o3, 1);
+end set$random$record;
+
+/* step fcb's random record number on by one */
+next$random$record: procedure;
+    fcb(33) = fcb(33) + 1;
+    if fcb(33) = 0 then do;
+        fcb(34) = fcb(34) + 1;
+        if fcb(34) = 0 then
+            fcb(35) = fcb(35) + 1;
+    end;
+end next$random$record;
+
 /* process directory search request - batched version */
 /* returns multiple directory entries in one reply */
 /* reply format: [status][count_lo][count_hi][entry0][entry1]... */
 do$dir$search: procedure;
     declare result byte;
-    declare flags byte;
+    declare skip address;
     declare dma$offset address;
     declare buf$offset address;
     declare entry$count address;
     declare i byte;
     declare done byte;
 
-    flags = get$buf$byte(3);
+    /* entries already returned by earlier requests */
+    skip = get$buf$byte(15) + (get$buf$byte(16) * 256);
     call setup$fcb;
 
     /* set dma for directory entry */
@@ -181,11 +217,12 @@ do$dir$search: procedure;
     buf$offset = 3;  /* start of data in reply buffer */
     done = 0;
 
-    /* first search based on flags */
-    if flags = 0 then
-        result = bdos(bdos$search1, .fcb);
-    else
+    /* search from the first entry, past the ones already returned */
+    result = bdos(bdos$search1, .fcb);
+    do while (result <> 0ffh) and (skip <> 0);
         result = bdos(bdos$searchn, .fcb);
+        skip = skip - 1;
+    end;
 
     /* loop to collect multiple entries */
     do while (result <> 0ffh) and (entry$count < max$dir$entries) and (done = 0);
@@ -218,7 +255,8 @@ do$dir$search: procedure;
     end;
 end do$dir$search;
 
-/* process file open request */
+/* process file open request - says whether the file can be opened;
+   it is closed again, as nothing stays open between requests */
 do$file$open: procedure;
     declare result byte;
 
@@ -229,54 +267,60 @@ do$file$open: procedure;
 
     if result = 0ffh then
         call set$reply$status(status$not$found, 0);
-    else
+    else do;
+        call bdos(bdos$close, .fcb);
         call set$reply$status(status$ok, 0);
+    end;
 end do$file$open;
 
 /* process file read request - batched version */
-/* reads multiple 128-byte records until EOF or buffer full */
+/* opens the file, reads up to 15 records from the offset, closes it */
 do$file$read: procedure;
     declare result byte;
     declare i byte;
+    declare recs byte;
     declare buf$offset address;
     declare bytes$read address;
 
+    call setup$fcb;
+    call bdos(bdos$setdma, .dma$buf);
+    if bdos(bdos$open, .fcb) = 0ffh then do;
+        call set$reply$status(status$not$found, 0);
+        return;
+    end;
+    call set$random$record;
+
     buf$offset = 3;  /* start of data in reply buffer */
     bytes$read = 0;
+    recs = 0;
+    result = 0;
 
     /* read records until EOF or buffer full */
-    do while bytes$read < max$file$data;
-        call bdos(bdos$setdma, .dma$buf);
-        result = bdos(bdos$read, .fcb);
-
-        if result <> 0 then do;
-            /* eof or error - stop reading */
-            if bytes$read = 0 then do;
-                /* no data read at all - return not found */
-                call set$reply$status(status$not$found, 0);
-                return;
+    do while (result = 0) and (recs < max$file$recs);
+        result = bdos(bdos$readr, .fcb);
+        if result = 0 then do;
+            /* copy 128 bytes to reply buffer */
+            do i = 0 to 127;
+                call set$buf$byte(buf$offset + i, dma$buf(i));
             end;
-            /* return what we have */
-            call set$reply$status(status$ok, bytes$read);
-            return;
+            buf$offset = buf$offset + 128;
+            bytes$read = bytes$read + 128;
+            recs = recs + 1;
+            call next$random$record;
         end;
-
-        /* copy 128 bytes to reply buffer */
-        do i = 0 to 127;
-            call set$buf$byte(buf$offset + i, dma$buf(i));
-        end;
-        buf$offset = buf$offset + 128;
-        bytes$read = bytes$read + 128;
     end;
 
+    call bdos(bdos$close, .fcb);
+
     /* buffer full - indicate more data may exist */
-    call set$buf$byte(0, status$ok + status$more$data);
-    call set$buf$byte(1, low(bytes$read));
-    call set$buf$byte(2, high(bytes$read));
+    if recs = max$file$recs then
+        call set$reply$status(status$ok + status$more$data, bytes$read);
+    else
+        call set$reply$status(status$ok, bytes$read);
 end do$file$read;
 
 /* process file write request - batched version */
-/* writes multiple 128-byte records from request buffer */
+/* opens the file, writes the request's records at the offset, closes it */
 do$file$write: procedure;
     declare result byte;
     declare length address;
@@ -288,11 +332,20 @@ do$file$write: procedure;
     length = get$buf$byte(19) + (get$buf$byte(20) * 256);
     if length > max$file$data then length = max$file$data;
 
+    call setup$fcb;
+    call bdos(bdos$setdma, .dma$buf);
+    if bdos(bdos$open, .fcb) = 0ffh then do;
+        call set$reply$status(status$not$found, 0);
+        return;
+    end;
+    call set$random$record;
+
     buf$offset = 21;  /* start of data in request buffer */
     bytes$written = 0;
+    result = 0;
 
     /* write 128-byte records */
-    do while bytes$written < length;
+    do while (result = 0) and (bytes$written < length);
         /* calculate how many bytes left */
         rec$len = length - bytes$written;
         if rec$len > 128 then rec$len = 128;
@@ -305,19 +358,22 @@ do$file$write: procedure;
                 dma$buf(i) = 01ah;  /* ctrl-z eof filler */
         end;
 
-        call bdos(bdos$setdma, .dma$buf);
-        result = bdos(bdos$write, .fcb);
-
-        if result <> 0 then do;
-            call set$reply$status(status$disk$full, 0);
-            return;
+        result = bdos(bdos$writer, .fcb);
+        if result = 0 then do;
+            buf$offset = buf$offset + 128;
+            bytes$written = bytes$written + 128;
+            call next$random$record;
         end;
-
-        buf$offset = buf$offset + 128;
-        bytes$written = bytes$written + 128;
     end;
 
-    call set$reply$status(status$ok, 0);
+    /* the close writes the directory entry: a failed one fails the write */
+    if bdos(bdos$close, .fcb) = 0ffh then
+        result = 0ffh;
+
+    if result <> 0 then
+        call set$reply$status(status$disk$full, 0);
+    else
+        call set$reply$status(status$ok, 0);
 end do$file$write;
 
 /* process file create request */
@@ -331,6 +387,9 @@ do$file$create: procedure;
 
     if result = 0ffh then
         call set$reply$status(status$disk$full, 0);
+    /* make leaves the file open, on MP/M's lock list: close it */
+    else if bdos(bdos$close, .fcb) = 0ffh then
+        call set$reply$status(status$invalid, 0);
     else
         call set$reply$status(status$ok, 0);
 end do$file$create;
@@ -348,16 +407,10 @@ do$file$delete: procedure;
         call set$reply$status(status$ok, 0);
 end do$file$delete;
 
-/* process file close request */
+/* process file close request - nothing is left open between requests,
+   so there is nothing to close: fcb may be some other request's */
 do$file$close: procedure;
-    declare result byte;
-
-    result = bdos(bdos$close, .fcb);
-
-    if result = 0ffh then
-        call set$reply$status(status$invalid, 0);
-    else
-        call set$reply$status(status$ok, 0);
+    call set$reply$status(status$ok, 0);
 end do$file$close;
 
 /* process file rename request */

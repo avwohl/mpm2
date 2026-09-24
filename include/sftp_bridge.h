@@ -15,14 +15,21 @@
 #include <functional>
 
 // SFTP request types (sent to Z80)
+//
+// Every request stands on its own: the RSP leaves no file open and keeps no
+// FCB from one request to the next, because requests from the SSH sessions
+// and the HTTP server arrive interleaved.  A read or write opens the file,
+// works from the request's offset with random reads or writes, and closes
+// it; a directory search starts again from the first entry each time and
+// skips the entries already returned.
 enum class SftpRequestType : uint8_t {
-    DIR_SEARCH = 0,    // Directory search (BDOS 17/18)
-    FILE_READ = 1,     // Read file data (BDOS 20)
-    FILE_WRITE = 2,    // Write file data (BDOS 21)
+    DIR_SEARCH = 0,    // Directory search (BDOS 17/18); offset = entries to skip
+    FILE_READ = 1,     // Read up to 1920 bytes at offset (BDOS 15/33/16)
+    FILE_WRITE = 2,    // Write data at offset (BDOS 15/34/16)
     FILE_DELETE = 3,   // Delete file (BDOS 19)
-    FILE_CREATE = 4,   // Create file (BDOS 22)
-    FILE_CLOSE = 5,    // Close file (BDOS 16)
-    FILE_OPEN = 6,     // Open file (BDOS 15)
+    FILE_CREATE = 4,   // Create an empty file (BDOS 22, then 16)
+    FILE_CLOSE = 5,    // Nothing to close: answers OK
+    FILE_OPEN = 6,     // Can the file be opened? (BDOS 15, then 16)
     FILE_RENAME = 7,   // Rename file (BDOS 23)
     TEST = 255,        // Test - returns poll counter
 };
@@ -43,10 +50,11 @@ enum class SftpReplyStatus : uint8_t {
 //   [0]     type (SftpRequestType)
 //   [1]     drive (0=A, 1=B, ...)
 //   [2]     user (0-15)
-//   [3]     flags (search: 0=first, 1=next; open: bit0=create)
+//   [3]     flags (unused)
 //   [4-11]  filename (8 bytes, space padded)
 //   [12-14] extension (3 bytes, space padded)
-//   [15-16] offset_low (for read/write)
+//   [15-16] offset_low (read/write: byte offset, a multiple of 128;
+//           search: entries to skip)
 //   [17-18] offset_high
 //   [19-20] length (for read/write)
 //   [21+]   data (for write)
@@ -79,19 +87,16 @@ constexpr size_t SFTP_DIRENT_SIZE = 32;
 
 // High-level request structure (C++ side)
 struct SftpRequest {
-    uint32_t id;                // Request ID for matching replies
-    SftpRequestType type;
-    uint8_t drive;              // 0=A, 1=B, etc.
-    uint8_t user;               // User area 0-15
-    uint8_t flags;              // Type-specific flags
+    uint32_t id = 0;            // Request ID for matching replies
+    SftpRequestType type = SftpRequestType::TEST;
+    uint8_t drive = 0;          // 0=A, 1=B, etc.
+    uint8_t user = 0;           // User area 0-15
+    uint8_t flags = 0;          // Type-specific flags
     std::string filename;       // CP/M 8.3 format
     std::string new_filename;   // For rename: new CP/M 8.3 name
-    uint32_t offset;            // File offset for read/write
-    uint16_t length;            // Requested length
+    uint32_t offset = 0;        // Read/write: byte offset; search: entries to skip
+    uint16_t length = 0;        // Requested length
     std::vector<uint8_t> data;  // Write data
-    // False for a request nobody waits on: its reply is dropped instead of
-    // being queued, where nothing would ever take it off again.
-    bool want_reply = true;
 
     // Serialize to Z80 buffer format
     void serialize(uint8_t* buf, size_t buf_size) const;

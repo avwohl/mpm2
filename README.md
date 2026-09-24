@@ -380,12 +380,15 @@ sftp> quit
 
 SFTP operations are handled by an RSP (Resident System Process) running inside MP/M II. The C++ emulator receives SFTP protocol messages and forwards them to the Z80 RSP via a bridge interface. The RSP performs actual file operations using BDOS calls, ensuring proper file locking and consistency with MP/M II processes.
 
-- A download reads the whole file through the RSP when the client opens it,
-  and closes it again before the first byte is sent.
+- The RSP takes one request at a time, and each stands on its own: a read
+  or write opens the file, reads or writes up to 1920 bytes at the request's
+  offset and closes it again, and nothing is left open in between.  SFTP
+  sessions and HTTP clients can use it at the same time.
+- A download reads the whole file through the RSP when the client opens it.
 - An upload creates the file when the client opens it (`put` replaces one of
   the same name), and holds what the client writes until the client closes
-  it; the RSP then opens the file, writes it and closes it.  `put` returns
-  only once MP/M has the file closed, so a console can use it straight away.
+  it, when it is written.  `put` returns only once it is all on the disk and
+  closed, so a console can use the file straight away.
 - CP/M files are whole 128-byte records.  An upload whose length is not a
   multiple of 128 is padded with ctl-Z (1AH), and a download returns whole
   records, padding included.
@@ -412,7 +415,7 @@ http://localhost:8000/
 | Path | Description |
 |------|-------------|
 | `/` | List mounted drives |
-| `/a/` | Drive A, all users |
+| `/a/` | Drive A - the listing is of user 0, as `/a.0/` |
 | `/a.0/` | Drive A, user 0 only |
 | `/a/file.txt` | Download file from drive A |
 | `/a.0/file.txt` | Download file from drive A, user 0 |
@@ -438,7 +441,7 @@ http://localhost:8000/
 
 ### How It Works
 
-HTTP file operations share the same RSP bridge as SFTP. When an HTTP request arrives, it queues a file request to the Z80 RSP, which performs the actual disk read via BDOS calls, and closes the file when it has read it. Requests from HTTP and SFTP clients are serialized to ensure consistent access.
+HTTP file operations share the same RSP bridge as SFTP. When an HTTP request arrives, it queues file requests to the Z80 RSP, which performs the actual disk reads via BDOS calls. Requests from HTTP and SFTP clients are served one at a time, and each opens and closes its file, so they can be interleaved safely.
 
 ## Testing
 
@@ -457,7 +460,7 @@ PORT=2311 ./scripts/run_tests.sh all                   # SSH on 2311, HTTP on 83
 | `stat` | `stat` and `stat a:` |
 | `rsp` | `scripts/test_rsp.exp`: the resident system processes - MPMSTAT lists their queues, SCHED runs a command that is due, ABORT answers through its queue, SPOOL lists and deletes a file and STOPSPLR stops it |
 | `http` | a file read over HTTP, through the SFTP RSP |
-| `sftp` | `scripts/test_sftp.exp`: files put over SFTP read back over SFTP and HTTP, then open from a console - `type` one, `submit` the other |
+| `sftp` | `scripts/test_sftp.exp`: files put over SFTP read back over SFTP and HTTP, then open from a console - `type` one, `submit` the other; and a 64K file goes up and comes back intact while HTTP reads another file, which stays intact too |
 | `all` | all of the above |
 | `src` | `build_all.sh --tree=src`, then `basic`, `rsp`, `http` and `sftp` |
 | `interactive` | an SSH session to type at |
