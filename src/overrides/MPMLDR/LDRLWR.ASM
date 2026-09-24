@@ -140,6 +140,16 @@ pgrel4:
 ;
 ExitLdRl:
 	pop	h
+	IFDEF	MPM21
+; ***** MP/M 2.1
+; close the file just loaded.  V2.0 closed none of them, and under MP/M
+; every file a process has open counts against its open file limit and
+; holds a lock list entry until it is closed (GENSYS.COM 1D4DH ->
+; 257BH, which calls the PL/M close$file with .FCBin).
+	lxi	d,FCBin
+	mvi	c,16	;close file
+	call	mon1
+	ENDIF
 	lxi	h,0
 	mov	a,h
 	ret
