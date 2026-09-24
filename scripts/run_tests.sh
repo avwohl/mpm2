@@ -14,8 +14,10 @@ set -o errexit
 #   stat    - STAT command variants
 #   rsp     - The resident system processes: MPMSTAT, SCHED, ABORT, SPOOL
 #   http    - A file read through the HTTP server (and the SFTP RSP)
+#   sftp    - Files put over SFTP are closed behind them: TYPE and SUBMIT
+#             open them from a console
 #   all     - All of the above
-#   src     - Build from source and run the basic, rsp and http tests
+#   src     - Build from source and run the basic, rsp, http and sftp tests
 #   interactive - Start interactive SSH session
 #
 
@@ -178,11 +180,30 @@ test_http() {
     fi
 }
 
+test_sftp() {
+    echo ""
+    echo "========================================"
+    echo "Running SFTP file transfer test"
+    echo "========================================"
+
+    sleep 5
+    if "$SCRIPT_DIR/test_sftp.exp" $PORT $HTTP_PORT; then
+        echo ""
+        echo ">>> TEST PASSED: SFTP file transfer"
+        return 0
+    else
+        echo ""
+        echo ">>> TEST FAILED: SFTP file transfer"
+        return 1
+    fi
+}
+
 test_all() {
     test_basic
     test_stat
     test_rsp
     test_http
+    test_sftp
 }
 
 test_src_build() {
@@ -265,6 +286,7 @@ test_src_build() {
     test_basic
     test_rsp
     test_http
+    test_sftp
 }
 
 # Main
@@ -293,6 +315,9 @@ case "$TEST" in
     http)
         test_http
         ;;
+    sftp)
+        test_sftp
+        ;;
     all)
         test_all
         ;;
@@ -306,7 +331,7 @@ case "$TEST" in
         ;;
     *)
         echo "Unknown test: $TEST"
-        echo "Available tests: basic, stat, rsp, http, all, src, interactive"
+        echo "Available tests: basic, stat, rsp, http, sftp, all, src, interactive"
         exit 1
         ;;
 esac

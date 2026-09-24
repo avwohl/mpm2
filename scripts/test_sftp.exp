@@ -1,0 +1,170 @@
+#!/usr/bin/expect -f
+#
+# test_sftp.exp - files that come in over SFTP are closed behind them
+# Part of MP/M II Emulator
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Usage: ./test_sftp.exp [port] [http-port]
+#
+# The SFTP RSP opens files with the BDOS like any MP/M process, and every
+# open or make puts the file on MP/M's lock list until it is closed.  The RSP
+# never terminates, so a file it leaves open stays open to every other
+# process until the system is restarted ("Bdos Err On A: File Currently
+# Open").  This puts two files over SFTP, reads one back over SFTP and over
+# HTTP, and then uses them from a console:
+#
+#   type sftptest.txt   the uploaded file opens, and holds what was sent
+#   submit sftptest     SUBMIT opens the uploaded .SUB file and the command
+#                       in it runs.  A source-built SUBMIT once built its
+#                       command file over page zero and stopped the whole
+#                       system here.
+#
+# The files go to user 0 of drive A, and the console changes to user 0 to
+# use them, whichever console the session gets.
+
+set timeout 30
+set port [lindex $argv 0]
+if {$port eq ""} {
+    set port 2222
+}
+set http_port [lindex $argv 1]
+if {$http_port eq ""} {
+    set http_port [expr {$port + 6000}]
+}
+match_max 20000
+log_user 1
+
+set prompt {\d+[A-P]>}
+set failures 0
+set text "SFTP upload check"
+
+proc fail {msg} {
+    global failures
+    puts "\n>>> FAIL: $msg"
+    incr failures
+}
+
+proc pass {msg} {
+    puts "\n>>> ok: $msg"
+}
+
+proc cmd {c} {
+    after 300
+    send -- "$c\r"
+}
+
+proc wait_prompt {what} {
+    global prompt
+    expect {
+        -re $prompt {}
+        timeout { fail "no prompt after $what"; exit 1 }
+        eof { fail "connection closed after $what"; exit 1 }
+    }
+}
+
+proc write_file {path data} {
+    set f [open $path w]
+    fconfigure $f -translation binary
+    puts -nonewline $f $data
+    close $f
+}
+
+proc read_file {path} {
+    set f [open $path r]
+    fconfigure $f -translation binary
+    set data [read $f]
+    close $f
+    return $data
+}
+
+puts "=== MP/M II SFTP test ==="
+set dir [exec mktemp -d]
+write_file "$dir/sftptest.txt" "$text\r\n"
+write_file "$dir/sftptest.sub" "type sftptest.txt\r\n"
+write_file "$dir/batch" [join [list \
+    "put $dir/sftptest.txt /A.0/SFTPTEST.TXT" \
+    "put $dir/sftptest.sub /A.0/SFTPTEST.SUB" \
+    "get /A.0/SFTPTEST.TXT $dir/back.txt" ""] "\n"]
+
+# --- SFTP: put both files, and read one back
+spawn sftp -b $dir/batch -P $port -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR user@localhost
+expect {
+    eof {}
+    timeout { fail "sftp did not finish"; exit 1 }
+}
+lassign [wait] pid spawn_id_ os_error status
+if {$status != 0} {
+    fail "sftp exited with status $status"
+} else {
+    pass "sftp put two files and got one back"
+}
+if {[file exists "$dir/back.txt"] &&
+    [string first "$text\r\n" [read_file "$dir/back.txt"]] == 0} {
+    pass "the file read back over SFTP holds what was put"
+} else {
+    fail "the file read back over SFTP is not what was put"
+}
+
+# --- HTTP: the other way a file is read, and closed
+if {[catch {exec curl -s -m 30 "http://localhost:$http_port/a.0/sftptest.txt"} body]} {
+    set body ""
+}
+if {[string first $text $body] >= 0} {
+    pass "the file reads back over HTTP"
+} else {
+    fail "HTTP did not return the file"
+}
+
+# --- The console: the files are closed, so they open
+spawn ssh -tt -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null user@localhost
+expect {
+    -re $prompt {}
+    timeout { puts "\n>>> TIMEOUT waiting for prompt"; exit 1 }
+    eof { puts "\n>>> Connection closed unexpectedly"; exit 1 }
+}
+
+cmd "user 0"
+expect {
+    -re {User Number = 0} {}
+    timeout { fail "user 0: no answer"; exit 1 }
+    eof { fail "user 0: connection closed"; exit 1 }
+}
+wait_prompt "user 0"
+
+cmd "type sftptest.txt"
+expect {
+    -re {File Currently Open} { fail "type: the uploaded file is still open" }
+    -ex $text { pass "type reads the uploaded file" }
+    timeout { fail "type: no answer" }
+    eof { fail "type: connection closed"; exit 1 }
+}
+wait_prompt "type"
+
+# SUBMIT prints nothing of its own; the text comes from the TYPE in the
+# .SUB file, run by the CLI once SUBMIT has written the command file.
+cmd "submit sftptest"
+expect {
+    -re {File Currently Open} { fail "submit: the uploaded .SUB file is still open" }
+    -re {no 'SUB' file present} { fail "submit: SUBMIT did not find the .SUB file" }
+    -ex $text { pass "submit ran the command in the uploaded .SUB file" }
+    timeout { fail "submit: the submitted command did not run - the system may have stopped" }
+    eof { fail "submit: connection closed - the system may have stopped"; exit 1 }
+}
+wait_prompt "submit"
+
+cmd "era sftptest.*"
+wait_prompt "era"
+
+send "\r"
+after 500
+close
+wait
+file delete -force $dir
+
+if {$failures > 0} {
+    puts "\n>>> $failures SFTP check(s) failed"
+    exit 1
+}
+puts "\n>>> All SFTP checks passed"
+exit 0
