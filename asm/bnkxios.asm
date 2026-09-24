@@ -1,6 +1,6 @@
 	;; printed at start increment every change to be sure we
 ;; get the right version
-BNK_VERSION	EQU 26
+BNK_VERSION	EQU 27
 ; bnkxios_port.asm - MP/M II BNKXIOS using I/O port dispatch
 ; Part of MP/M II Emulator
 ; SPDX-License-Identifier: GPL-3.0-or-later
@@ -256,17 +256,35 @@ DO_SETDMA:
         OUT     (XIOS_DISPATCH), A
         RET
 
+; READ and WRITE move the record to or from the DMA address in the calling
+; process's bank.  The BNKBDOS calls them with bank 0 selected, so - as in
+; DRI's own banked XIOS - the transfer is bracketed by SWTUSER, which selects
+; the bank of the process the BDOS is working for, and SWTSYS, which puts
+; bank 0 back; the emulator moves the data in whatever bank is selected.
+; (System Implementor's Guide, SWTUSER: "to enable BIOS disk read and write
+; code to transfer data ... to/from the DMA buffer in the user's calling
+; program".)  The process may live in bank 0 itself: the banked half of a
+; resident system process, the spooler's, has its buffers there.
+
 DO_READ:
         ; Read sector - returns A = 0 success, A = 1 error
+        CALL    SWTUSER                 ; the caller's bank
         LD      A, FUNC_READ
         OUT     (XIOS_DISPATCH), A      ; Dispatch function
+        PUSH    AF
+        CALL    SWTSYS                  ; back to bank 0
+        POP     AF
         RET
 
 DO_WRITE:
         ; Write sector - C = deblocking code
         ; Returns A = 0 success, A = 1 error
+        CALL    SWTUSER                 ; the caller's bank
         LD      A, FUNC_WRITE
         OUT     (XIOS_DISPATCH), A      ; Dispatch function
+        PUSH    AF
+        CALL    SWTSYS                  ; back to bank 0
+        POP     AF
         RET
 
 DO_LISTST:

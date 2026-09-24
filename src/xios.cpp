@@ -26,7 +26,6 @@ XIOS::XIOS(qkz80* cpu, BankedMemory* mem)
     , current_track_(0)
     , current_sector_(0)
     , dma_addr_(0x0080)
-    , dma_bank_(0)
     , tick_enabled_(false)
     , systeminit_done_(false)
 {
@@ -423,7 +422,9 @@ void XIOS::do_setdma() {
 void XIOS::do_read() {
     DiskSystem::instance().set_track(current_track_);
     DiskSystem::instance().set_sector(current_sector_);
-    DiskSystem::instance().set_dma(dma_addr_, dma_bank_);
+    // The record goes to the DMA address in the bank selected now: the XIOS
+    // has called SWTUSER, which selected the calling process's bank.
+    DiskSystem::instance().set_dma(dma_addr_, mem_->current_bank());
 
     int result = DiskSystem::instance().read(mem_);
 
@@ -462,7 +463,8 @@ void XIOS::do_read() {
 void XIOS::do_write() {
     DiskSystem::instance().set_track(current_track_);
     DiskSystem::instance().set_sector(current_sector_);
-    DiskSystem::instance().set_dma(dma_addr_, dma_bank_);
+    // As for do_read: the bank SWTUSER selected is the caller's.
+    DiskSystem::instance().set_dma(dma_addr_, mem_->current_bank());
 
     int result = DiskSystem::instance().write(mem_);
     cpu_->regs.AF.set_high(result);
@@ -490,11 +492,6 @@ void XIOS::do_selmemory() {
     // descriptor: base(1), size(1), attrib(1), bank(1)
     uint16_t desc_addr = cpu_->regs.BC.get_pair16();
     uint8_t bank = mem_->fetch_mem(desc_addr + 3);
-
-    // Track last non-zero bank as the DMA target for user data
-    if (bank != 0) {
-        dma_bank_ = bank;
-    }
 
     // Debug: trace bank switches after SYSTEMINIT
     if (systeminit_done_.load()) {

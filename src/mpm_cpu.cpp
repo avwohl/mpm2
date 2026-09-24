@@ -90,11 +90,6 @@ void MpmCpu::handle_bank_select(uint8_t bank) {
     }
 
     banked_mem_->select_bank(bank);
-
-    // Notify XIOS of bank change for DMA targeting
-    if (xios_) {
-        xios_->update_dma_bank(bank);
-    }
 }
 
 // halt() now inherited from qkz80 base class
