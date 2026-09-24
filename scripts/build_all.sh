@@ -11,7 +11,7 @@ set -o errexit
 # MP/M II system ready to boot.
 #
 # Usage:
-#   build_all.sh [--tree=dri|src]
+#   build_all.sh [--tree=dri|src] [--version=2.0|2.1] [--compat-attributes]
 #
 # Binary Trees:
 #   dri (default) - Use original DRI binaries
@@ -25,6 +25,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 # Parse arguments
 TREE="dri"
 SRC_ARGS=()
+GENSYS_ARGS=()
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -44,9 +45,14 @@ while [ $# -gt 0 ]; do
             SRC_ARGS+=("$1" "$2")
             shift 2
             ;;
+        --compat-attributes|--compat-attributes=*)
+            GENSYS_ARGS+=("$1")
+            shift
+            ;;
         -h|--help)
             cat <<EOF
 Usage: $0 [--tree=dri|src] [--version=2.0|2.1] [--serial=none|dri]
+          [--compat-attributes[=yes|no]]
 
 Build a complete MP/M II system ready to boot.
 
@@ -58,6 +64,10 @@ Options:
                     dri.  Only meaningful with --tree=src.
     --dri-exact     Build exactly what DRI shipped, leaving out the local
                     fixes this repository carries.  --tree=src only.
+    --compat-attributes[=yes|no]
+                    Answer V2.1 GENSYS's "Enable Compatibility Attributes"
+                    (default no, as DRI's).  Needs a V2.1 XDOS: the DRI
+                    tree, or --tree=src --version=2.1.
     -h, --help      Show this help message
 
 Binary Trees:
@@ -119,7 +129,7 @@ echo "Step 2: Building assembly and C++ tools..."
 # Step 3: Run GENSYS to create MPM.SYS
 echo ""
 echo "Step 3: Running GENSYS to create MPM.SYS..."
-"$SCRIPT_DIR/gensys.sh" --tree="$TREE"
+"$SCRIPT_DIR/gensys.sh" --tree="$TREE" "${GENSYS_ARGS[@]}"
 
 echo ""
 echo "=============================================="

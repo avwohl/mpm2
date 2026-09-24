@@ -245,11 +245,19 @@ class SystemConfig:
     max_open_files: int = 16
     total_open_files: int = 32
 
-    # Memory segments (base, size, attrib, bank) - up to 8
+    # Number of user memory segments.  The segment table has eight entries
+    # and the first is MP/M's own, so at most seven (see MAX_USER_SEGMENTS).
     num_mem_segments: int = 7
 
     # Breakpoint
     breakpoint_rst: int = 6
+
+    # V2.1 only: GENSYS's "Enable Compatibility Attributes (N) ?", system
+    # data byte 96.  When it is set, the CLI copies the f1'..f4' attributes
+    # of a command file's name into byte 1DH of the loaded program's process
+    # descriptor.  DRI's default is N.  Ignored for a V2.0 XDOS, which does
+    # not read the byte.
+    compatibility_attributes: bool = False
 
     # Input files
     spr_dir: str = "."
@@ -301,6 +309,7 @@ class SystemConfig:
             'total_open_files': self.total_open_files,
             'num_mem_segments': self.num_mem_segments,
             'breakpoint_rst': self.breakpoint_rst,
+            'compatibility_attributes': self.compatibility_attributes,
             'spr_dir': self.spr_dir,
             'resbdos_spr': self.resbdos_spr,
             'xdos_spr': self.xdos_spr,
@@ -327,6 +336,15 @@ class SystemGenerator:
     SERIAL_OFFSET = 0xF9  # Serial: 6 bytes starting at 0xF9 in code
     SERIAL_LEN = 6
 
+    # XDOS.SPR is linked with VER.ASM first, and VER's mpmver word - 0120H
+    # in V2.0, 0121H in V2.1 - is at this offset in its code.
+    MPMVER_OFFSET = 0x61
+
+    # The memory segment table (system data 16-47) has eight entries and the
+    # first is MP/M's own.  V2.1 GENSYS clamps the answer to seven; V2.0 took
+    # any number and wrote the entries past seven over the breakpoint vectors.
+    MAX_USER_SEGMENTS = 7
+
     def __init__(self, config: SystemConfig):
         self.config = config
         self.spr_dir = Path(config.spr_dir)
@@ -339,6 +357,7 @@ class SystemGenerator:
         self.bnkxdos: Optional[SPRModule] = None
         self.tmp: Optional[SPRModule] = None
         self.rsps: List[RSPModule] = []
+        self.mpmver = 0x0120  # XDOS release, read from XDOS.SPR on load
 
         # Memory layout (filled during generation)
         self.cur_base = config.mem_top  # Current base page (decreases as we add modules)
@@ -376,6 +395,13 @@ class SystemGenerator:
 
         self.xdos = SPRModule.load(self.spr_dir / self.config.xdos_spr)
         print(f"  XDOS: {self.xdos.psize} bytes code, {self.xdos.dsize} bytes data")
+        self.mpmver = struct.unpack_from('<H', self.xdos.code, self.MPMVER_OFFSET)[0]
+        if self.mpmver not in (0x0120, 0x0121):
+            print(f"  Warning: XDOS has no MP/M II V2.0/V2.1 version word "
+                  f"({self.mpmver:04X}H at {self.MPMVER_OFFSET:02X}H); "
+                  f"generating a V2.0 system data page")
+            self.mpmver = 0x0120
+        print(f"  XDOS is MP/M II V{(self.mpmver >> 4) & 0xF}.{self.mpmver & 0xF}")
 
         self.bnkxios = SPRModule.load(self.spr_dir / self.config.bnkxios_spr)
         print(f"  BNKXIOS: {self.bnkxios.psize} bytes code, {self.bnkxios.dsize} bytes data")
@@ -433,6 +459,15 @@ class SystemGenerator:
         self.system_data[15] = cfg.num_mem_segments
 
         # Memory segment table (bytes 16-47) - filled later
+
+        # Byte 96: compatibility attributes, V2.1.  The byte is unassigned in
+        # V2.0 - V2.0 GENSYS asks nothing for it and has a zero in its default
+        # table, and no V2.0 code reads it - so a V2.0 system gets zero.
+        compat = cfg.compatibility_attributes and self.mpmver >= 0x0121
+        if cfg.compatibility_attributes and not compat:
+            print("  Note: compatibility_attributes ignored: a V2.0 XDOS "
+                  "does not read system data byte 96")
+        self.system_data[96] = 0xFF if compat else 0
 
         # Byte 122: ticks per second
         self.system_data[122] = cfg.ticks_per_second
@@ -566,6 +601,14 @@ class SystemGenerator:
 
         # Load modules
         self.load_modules()
+
+        # V2.1 GENSYS: "*** Error Maximum Exceeded - 7 Assumed ***".  Applied
+        # to V2.0 as well: DRI's V2.0 GENSYS overran the segment table with
+        # more than seven, and this generator used to truncate the table
+        # silently while still sizing the user stacks for the larger number.
+        if cfg.num_mem_segments > self.MAX_USER_SEGMENTS:
+            print(f"*** Error Maximum Exceeded - {self.MAX_USER_SEGMENTS} Assumed ***")
+            cfg.num_mem_segments = self.MAX_USER_SEGMENTS
 
         # Setup system data
         self.setup_system_data()

@@ -13,7 +13,12 @@ set -o errexit
 # 4. Creates boot image and disk
 #
 # Usage:
-#   gensys.sh [--tree=dri|src] [num_consoles]
+#   gensys.sh [--tree=dri|src] [--compat-attributes[=yes|no]] [num_consoles]
+#
+# --compat-attributes answers yes to V2.1 GENSYS's "Enable Compatibility
+# Attributes (N) ?" (system data byte 96): the CLI then copies a command
+# file's f1'..f4' attributes into its process descriptor.  DRI's default,
+# and ours, is no.  A V2.0 XDOS does not read the byte and gets zero.
 #
 # Default configuration:
 # - 4 consoles
@@ -37,6 +42,7 @@ CPM_DISK="${CPM_DISK:-$HOME/src/cpmemu/util/cpm_disk.py}"
 # Parse arguments
 TREE="dri"  # Default to DRI binaries
 NMBCNS=4    # Default console count
+COMPAT=false  # V2.1 compatibility attributes, DRI's default N
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -48,13 +54,21 @@ while [ $# -gt 0 ]; do
             TREE="$2"
             shift 2
             ;;
+        --compat-attributes|--compat-attributes=yes)
+            COMPAT=true
+            shift
+            ;;
+        --compat-attributes=no)
+            COMPAT=false
+            shift
+            ;;
         [0-9]*)
             NMBCNS="$1"
             shift
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--tree=dri|src] [num_consoles]"
+            echo "Usage: $0 [--tree=dri|src] [--compat-attributes[=yes|no]] [num_consoles]"
             exit 1
             ;;
     esac
@@ -73,6 +87,7 @@ echo "MP/M II System Generation (Python GENSYS)"
 echo "=========================================="
 echo "Tree:     $TREE"
 echo "Consoles: $NMBCNS"
+echo "Compatibility attributes: $COMPAT"
 echo "Binaries: $BIN_DIR"
 echo ""
 
@@ -150,6 +165,7 @@ cat > gensys_config.json << EOF
   "total_open_files": 32,
   "num_mem_segments": 7,
   "breakpoint_rst": 6,
+  "compatibility_attributes": $COMPAT,
   "spr_dir": ".",
   "resbdos_spr": "resbdos.spr",
   "xdos_spr": "xdos.spr",
