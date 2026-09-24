@@ -207,8 +207,10 @@ void SftpBridge::set_reply(const uint8_t* buf, size_t buf_size) {
     SftpReply reply = SftpReply::deserialize(buf, buf_size);
 
     if (current_request_) {
+        bool wanted = current_request_->want_reply;
         reply.request_id = current_request_->id;
         current_request_.reset();
+        if (!wanted) return;
     }
 
     pending_replies_.push(std::move(reply));

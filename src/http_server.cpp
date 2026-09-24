@@ -600,12 +600,14 @@ bool HTTPConnection::poll_file_read() {
         return true;
     }
 
-    // Done reading - close file (don't wait for reply)
+    // Done reading - close file.  Nothing waits for the reply, so the
+    // bridge is told to drop it rather than queue it for no one.
     SftpRequest close_req;
     close_req.type = SftpRequestType::FILE_CLOSE;
     close_req.drive = parsed_path_.drive;
     close_req.user = (parsed_path_.user >= 0) ? parsed_path_.user : 0;
     close_req.filename = parsed_path_.filename;
+    close_req.want_reply = false;
     SftpBridge::instance().enqueue_request(close_req);
 
     // Build response

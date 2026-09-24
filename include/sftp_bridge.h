@@ -89,6 +89,9 @@ struct SftpRequest {
     uint32_t offset;            // File offset for read/write
     uint16_t length;            // Requested length
     std::vector<uint8_t> data;  // Write data
+    // False for a request nobody waits on: its reply is dropped instead of
+    // being queued, where nothing would ever take it off again.
+    bool want_reply = true;
 
     // Serialize to Z80 buffer format
     void serialize(uint8_t* buf, size_t buf_size) const;

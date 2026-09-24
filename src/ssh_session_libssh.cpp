@@ -56,6 +56,29 @@ static bool set_nonblocking(int fd) {
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK) != -1;
 }
 
+// Send one request to the SFTP RSP and wait for its answer
+static std::optional<SftpReply> rsp_call(const SftpRequest& req, int timeout_ms = 10000) {
+    uint32_t id = SftpBridge::instance().enqueue_request(req);
+    return SftpBridge::instance().wait_for_reply(id, timeout_ms);
+}
+
+static bool rsp_ok(const std::optional<SftpReply>& reply) {
+    return reply && reply->status == SftpReplyStatus::OK;
+}
+
+// Close the file the RSP has open.  Each open or make the RSP does puts an
+// entry for the file on MP/M's lock list, and only a close takes it off; the
+// RSP never terminates, so an entry left there keeps the file "currently
+// open" to every other process until the system is restarted.
+static bool rsp_close(int drive, int user, const std::string& filename) {
+    SftpRequest close_req;
+    close_req.type = SftpRequestType::FILE_CLOSE;
+    close_req.drive = drive;
+    close_req.user = user;
+    close_req.filename = filename;
+    return rsp_ok(rsp_call(close_req));
+}
+
 // Forward declaration for callback
 class SSHSession;
 
@@ -1027,10 +1050,25 @@ bool SSHSession::poll_sftp() {
                 if (it != open_files_.end()) {
                     OpenFile* file = it->second.get();
 
-                    // If file was opened for writing, flush data to disk
+                    // A file opened for writing is written out now, in one
+                    // open/write/close: the RSP does not hold it open between
+                    // the SFTP open and close (the open made it already).
                     if (file->is_write && !file->cached_data.empty()) {
                         if (DEBUG_SFTP) std::cerr << "[SFTP] CLOSE: writing " << file->cached_data.size()
                                   << " bytes to disk\n";
+
+                        SftpRequest open_req;
+                        open_req.type = SftpRequestType::FILE_OPEN;
+                        open_req.drive = file->drive;
+                        open_req.user = file->user;
+                        open_req.filename = file->filename;
+                        open_req.flags = 1;  // Write mode
+                        if (!rsp_ok(rsp_call(open_req))) {
+                            if (DEBUG_SFTP) std::cerr << "[SFTP] CLOSE: open for write failed\n";
+                            open_files_.erase(it);
+                            rc = sftp_reply_status(msg, SSH_FX_FAILURE, "Cannot open file");
+                            break;
+                        }
 
                         // Write data in chunks (max 1920 bytes per RSP request)
                         constexpr size_t CHUNK_SIZE = 1920;
@@ -1051,10 +1089,7 @@ bool SSHSession::poll_sftp() {
                                 file->cached_data.begin() + offset,
                                 file->cached_data.begin() + offset + chunk_len);
 
-                            uint32_t req_id = SftpBridge::instance().enqueue_request(write_req);
-                            auto write_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
-
-                            if (!write_reply || write_reply->status != SftpReplyStatus::OK) {
+                            if (!rsp_ok(rsp_call(write_req))) {
                                 if (DEBUG_SFTP) std::cerr << "[SFTP] CLOSE: write error at offset " << offset << "\n";
                                 write_error = true;
                             } else {
@@ -1064,18 +1099,15 @@ bool SSHSession::poll_sftp() {
                             }
                         }
 
-                        // Close file via RSP
-                        SftpRequest close_req;
-                        close_req.type = SftpRequestType::FILE_CLOSE;
-                        close_req.drive = file->drive;
-                        close_req.user = file->user;
-                        close_req.filename = file->filename;
-                        SftpBridge::instance().enqueue_request(close_req);
-                        // Don't wait for close reply
+                        // Closed even after a failed write, and waited for:
+                        // the client is told the file is written only once
+                        // MP/M has it closed and another process can open it.
+                        bool closed = rsp_close(file->drive, file->user, file->filename);
 
-                        if (write_error) {
+                        if (write_error || !closed) {
                             open_files_.erase(it);
-                            rc = sftp_reply_status(msg, SSH_FX_FAILURE, "Write failed");
+                            rc = sftp_reply_status(msg, SSH_FX_FAILURE,
+                                                   write_error ? "Write failed" : "Close failed");
                             break;
                         }
                     }
@@ -1152,9 +1184,8 @@ bool SSHSession::poll_sftp() {
                     create_req.user = parsed.user;
                     create_req.filename = parsed.filename;
 
-                    req_id = SftpBridge::instance().enqueue_request(create_req);
-                    auto create_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
-                    if (!create_reply || create_reply->status != SftpReplyStatus::OK) {
+                    auto create_reply = rsp_call(create_req);
+                    if (!rsp_ok(create_reply)) {
                         SftpReplyStatus st = create_reply ? create_reply->status : SftpReplyStatus::ERROR_INVALID;
                         if (DEBUG_SFTP) std::cerr << "[SFTP] OPEN: create failed, status=" << (int)st << "\n";
                         if (st == SftpReplyStatus::ERROR_DISK_FULL) {
@@ -1164,27 +1195,20 @@ bool SSHSession::poll_sftp() {
                         }
                         break;
                     }
+                    // BDOS make leaves the new file open.  Close it straight
+                    // away: the data is written at the SFTP close, which opens
+                    // the file again, and a client that writes nothing (an
+                    // empty file) or goes away without closing its handle
+                    // would otherwise leave the file open for good.
+                    if (!rsp_close(parsed.drive, parsed.user, parsed.filename)) {
+                        rc = sftp_reply_status(msg, SSH_FX_FAILURE, "Cannot create file");
+                        break;
+                    }
                     file_exists = true;
                 }
 
                 if (!file_exists) {
                     rc = sftp_reply_status(msg, SSH_FX_NO_SUCH_FILE, "File not found");
-                    break;
-                }
-
-                // Open file via RSP bridge
-                SftpRequest open_req;
-                open_req.type = SftpRequestType::FILE_OPEN;
-                open_req.drive = parsed.drive;
-                open_req.user = parsed.user;
-                open_req.filename = parsed.filename;
-                open_req.flags = 1;  // Write mode
-
-                req_id = SftpBridge::instance().enqueue_request(open_req);
-                auto open_reply = SftpBridge::instance().wait_for_reply(req_id, 10000);
-                if (!open_reply || open_reply->status != SftpReplyStatus::OK) {
-                    if (DEBUG_SFTP) std::cerr << "[SFTP] OPEN: file open failed for write\n";
-                    rc = sftp_reply_status(msg, SSH_FX_FAILURE, "Cannot open file");
                     break;
                 }
 
@@ -1273,14 +1297,9 @@ bool SSHSession::poll_sftp() {
                           << ", more=" << more_data << "\n";
             }
 
-            // Close file via RSP
-            SftpRequest close_req;
-            close_req.type = SftpRequestType::FILE_CLOSE;
-            close_req.drive = parsed.drive;
-            close_req.user = parsed.user;
-            close_req.filename = parsed.filename;
-            SftpBridge::instance().enqueue_request(close_req);
-            // Don't wait for close reply
+            // Close file via RSP (the whole file is cached; nothing reads
+            // it again)
+            rsp_close(parsed.drive, parsed.user, parsed.filename);
 
             if (read_error) {
                 rc = sftp_reply_status(msg, SSH_FX_FAILURE, "File read error");
