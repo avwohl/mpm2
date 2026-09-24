@@ -264,9 +264,10 @@ The emulator boots from disk sector 0 of drive A using the cold start loader.
 The HTTP server (default port 8000) provides read-only web access to MP/M II files:
 
 - `http://localhost:8000/` - List mounted drives
-- `http://localhost:8000/a/` - List all users on drive A
-- `http://localhost:8000/a.0/` - List user 0 only on drive A
-- `http://localhost:8000/a/file.txt` - Download file
+- `http://localhost:8000/a/` - List drive A, user 0 (the same as `/a.0/`)
+- `http://localhost:8000/a.3/` - List drive A, user 3
+- `http://localhost:8000/a/file.txt` - Download file (from user 0)
+- `http://localhost:8000/a.3/file.txt` - Download file from user 3
 
 URLs are case-insensitive. Directory listings show lowercase filenames.
 Text files are served with Unix line endings (CR stripped, 0x1A EOF removed).

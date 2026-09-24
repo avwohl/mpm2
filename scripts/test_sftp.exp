@@ -1,0 +1,320 @@
+#!/usr/bin/expect -f
+#
+# test_sftp.exp - files that come in over SFTP are closed behind them
+# Part of MP/M II Emulator
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Usage: ./test_sftp.exp [port] [http-port]
+#
+# The SFTP RSP opens files with the BDOS like any MP/M process, and every
+# open or make puts the file on MP/M's lock list until it is closed.  The RSP
+# never terminates, so a file it leaves open stays open to every other
+# process until the system is restarted ("Bdos Err On A: File Currently
+# Open").  This puts two files over SFTP, reads one back over SFTP and over
+# HTTP, and then uses them from a console:
+#
+#   type sftptest.txt   the uploaded file opens, and holds what was sent
+#   submit sftptest     SUBMIT opens the uploaded .SUB file and the command
+#                       in it runs.  A source-built SUBMIT once built its
+#                       command file over page zero and stopped the whole
+#                       system here.
+#
+# Then two checks of how the RSP opens files against a console's own:
+#
+#   pip from DUMP.ASM   while HTTP reads DUMP.ASM over and over.  The RSP opens
+#                       a file it reads in read-only mode, as PIP does, so the
+#                       two opens are compatible.  In MP/M's default, locked,
+#                       mode nearly every copy failed with "OPEN FILE
+#                       INCOMPATIBLE MODE".
+#   ed sftptest.txt     ED has the file open, locked: an HTTP read of it is
+#                       refused (404), and the RSP and the console carry on.
+#                       The refusal is a BDOS error, which the RSP takes as a
+#                       return code.  In the default error mode the BDOS
+#                       printed it, and V2.0's RESBDOS handed the XIOS the
+#                       RSP's whole console byte, 0F0H: the XIOS polled for
+#                       console 0F0H to be ready, holding the disk, and the
+#                       whole system stopped.
+#
+# Then a 64K file goes up and comes back over SFTP while HTTP reads DUMP.ASM
+# over and over.  The one RSP serves both, and their requests arrive
+# interleaved: when a transfer kept its file open in the RSP from one
+# request to the next, the upload's records went into DUMP.ASM, the file an
+# HTTP read had opened in between.  Both files must come through intact.
+#
+# The files go to user 0 of drive A, and the console changes to user 0 to
+# use them, whichever console the session gets.
+
+set timeout 30
+set port [lindex $argv 0]
+if {$port eq ""} {
+    set port 2222
+}
+set http_port [lindex $argv 1]
+if {$http_port eq ""} {
+    set http_port [expr {$port + 6000}]
+}
+match_max 20000
+log_user 1
+
+set prompt {\d+[A-P]>}
+set failures 0
+set text "SFTP upload check"
+
+proc fail {msg} {
+    global failures
+    puts "\n>>> FAIL: $msg"
+    incr failures
+}
+
+proc pass {msg} {
+    puts "\n>>> ok: $msg"
+}
+
+proc cmd {c} {
+    after 300
+    send -- "$c\r"
+}
+
+proc wait_prompt {what} {
+    global prompt
+    expect {
+        -re $prompt {}
+        timeout { fail "no prompt after $what"; exit 1 }
+        eof { fail "connection closed after $what"; exit 1 }
+    }
+}
+
+proc write_file {path data} {
+    set f [open $path w]
+    fconfigure $f -translation binary
+    puts -nonewline $f $data
+    close $f
+}
+
+proc read_file {path} {
+    set f [open $path r]
+    fconfigure $f -translation binary
+    set data [read $f]
+    close $f
+    return $data
+}
+
+proc sftp_batch {what lines} {
+    global dir port
+    write_file "$dir/batch" [join [concat $lines [list ""]] "\n"]
+    spawn sftp -b $dir/batch -P $port -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR user@localhost
+    expect {
+        eof {}
+        timeout { fail "sftp did not finish: $what"; exit 1 }
+    }
+    lassign [wait] pid spawn_id_ os_error status
+    if {$status != 0} {
+        fail "sftp exited with status $status: $what"
+        return 0
+    }
+    return 1
+}
+
+proc http_get {path} {
+    global http_port
+    if {[catch {exec curl -s -m 30 "http://localhost:$http_port/$path"} body]} {
+        return ""
+    }
+    return $body
+}
+
+# The HTTP status of a read; 000 if there is no answer in 10 seconds
+proc http_status {path} {
+    global http_port
+    # curl exits non-zero on a timeout, and exec then adds its own message
+    catch {exec curl -s -m 10 -o /dev/null -w %{http_code} \
+        "http://localhost:$http_port/$path"} code
+    return [string range $code 0 2]
+}
+
+# HTTP reads of a file in the background, three at a time, until stopped
+proc http_readers {path} {
+    global http_port
+    return [exec sh -c "for n in 1 2 3; do \
+        (while :; do curl -s -m 30 -o /dev/null \
+            http://localhost:$http_port/$path; done) & \
+        done; wait" &]
+}
+
+proc stop_readers {pid} {
+    catch {exec pkill -P $pid}
+    catch {exec kill $pid}
+    after 500
+    # the readers' own children, the curls in flight
+    catch {exec pkill -f "curl -s -m 30 -o /dev/null http://localhost:[set ::http_port]/"}
+}
+
+puts "=== MP/M II SFTP test ==="
+set dir [exec mktemp -d]
+write_file "$dir/sftptest.txt" "$text\r\n"
+write_file "$dir/sftptest.sub" "type sftptest.txt\r\n"
+
+# --- SFTP: put both files, and read one back
+if {[sftp_batch "put and get" [list \
+        "put $dir/sftptest.txt /A.0/SFTPTEST.TXT" \
+        "put $dir/sftptest.sub /A.0/SFTPTEST.SUB" \
+        "get /A.0/SFTPTEST.TXT $dir/back.txt"]]} {
+    pass "sftp put two files and got one back"
+}
+if {[file exists "$dir/back.txt"] &&
+    [string first "$text\r\n" [read_file "$dir/back.txt"]] == 0} {
+    pass "the file read back over SFTP holds what was put"
+} else {
+    fail "the file read back over SFTP is not what was put"
+}
+
+# --- HTTP: the other way a file is read, and closed
+if {[string first $text [http_get a.0/sftptest.txt]] >= 0} {
+    pass "the file reads back over HTTP"
+} else {
+    fail "HTTP did not return the file"
+}
+
+# --- The console: the files are closed, so they open
+spawn ssh -tt -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null user@localhost
+expect {
+    -re $prompt {}
+    timeout { puts "\n>>> TIMEOUT waiting for prompt"; exit 1 }
+    eof { puts "\n>>> Connection closed unexpectedly"; exit 1 }
+}
+
+cmd "user 0"
+expect {
+    -re {User Number = 0} {}
+    timeout { fail "user 0: no answer"; exit 1 }
+    eof { fail "user 0: connection closed"; exit 1 }
+}
+wait_prompt "user 0"
+
+cmd "type sftptest.txt"
+expect {
+    -re {File Currently Open} { fail "type: the uploaded file is still open" }
+    -ex $text { pass "type reads the uploaded file" }
+    timeout { fail "type: no answer" }
+    eof { fail "type: connection closed"; exit 1 }
+}
+wait_prompt "type"
+
+# SUBMIT prints nothing of its own; the text comes from the TYPE in the
+# .SUB file, run by the CLI once SUBMIT has written the command file.
+cmd "submit sftptest"
+expect {
+    -re {File Currently Open} { fail "submit: the uploaded .SUB file is still open" }
+    -re {no 'SUB' file present} { fail "submit: SUBMIT did not find the .SUB file" }
+    -ex $text { pass "submit ran the command in the uploaded .SUB file" }
+    timeout { fail "submit: the submitted command did not run - the system may have stopped" }
+    eof { fail "submit: connection closed - the system may have stopped"; exit 1 }
+}
+wait_prompt "submit"
+
+# --- PIP opens DUMP.ASM while HTTP reads it
+set readers [http_readers a.0/dump.asm]
+after 1000
+set copies 0
+for {set i 1} {$i <= 3} {incr i} {
+    cmd "pip sftpcopy.txt=dump.asm"
+    set error ""
+    expect {
+        -re {(ERROR[^\r\n]*)[\r\n]} { set error $expect_out(1,string); exp_continue }
+        -re $prompt {}
+        timeout { set error "no answer - the system may have stopped" }
+        eof { fail "pip: connection closed"; exit 1 }
+    }
+    if {$error eq ""} {
+        incr copies
+    } else {
+        fail "pip from a file HTTP is reading: $error"
+    }
+}
+stop_readers $readers
+if {$copies == 3} {
+    pass "pip copied a file three times while HTTP read it"
+}
+
+# --- ED has SFTPTEST.TXT open: HTTP is refused it, and everything goes on
+cmd "ed sftptest.txt"
+set editing 0
+expect {
+    -re {: *\*} { set editing 1 }
+    timeout { fail "ed: no prompt" }
+    eof { fail "ed: connection closed"; exit 1 }
+}
+if {$editing} {
+    set refused [http_status a.0/sftptest.txt]
+    set other [http_status a.0/sftptest.sub]
+    if {$refused eq "404" && $other eq "200"} {
+        pass "HTTP is refused a file ED has open, and reads another"
+    } else {
+        fail "with ED holding sftptest.txt, HTTP answered $refused for it and $other for sftptest.sub"
+    }
+    cmd "q"
+    expect {
+        -re {Q-\(Y/N\)\?} { send -- "y" }
+        timeout { fail "ed did not ask to quit - the system may have stopped" }
+        eof { fail "ed: connection closed"; exit 1 }
+    }
+    wait_prompt "ed"
+}
+
+cmd "era sftptest.*"
+wait_prompt "era"
+cmd "era sftpcopy.txt"
+wait_prompt "era"
+
+send "\r"
+after 500
+close
+wait
+
+# --- A 64K file up and back over SFTP while HTTP reads DUMP.ASM
+set big ""
+for {set i 0} {$i < 65536} {incr i} {
+    append big [format %c [expr {($i * 7 + ($i >> 8)) & 0xFF}]]
+}
+write_file "$dir/big.bin" $big
+set dump [http_get a.0/dump.asm]
+if {[string length $dump] < 1000} {
+    fail "HTTP did not return dump.asm to compare with"
+} else {
+    # HTTP reads, one after another, for as long as the transfer takes
+    set reader [exec sh -c "i=0; while \[ \$i -lt 300 \]; do \
+        curl -s -m 30 -o /dev/null http://localhost:$http_port/a.0/dump.asm; \
+        i=\$((i+1)); done" &]
+    set ok [sftp_batch "64K put and get" [list \
+        "put $dir/big.bin /A.0/SFTPBIG.BIN" \
+        "get /A.0/SFTPBIG.BIN $dir/big.back" \
+        "rm /A.0/SFTPBIG.BIN"]]
+    catch {exec kill $reader}
+    while {![catch {exec kill -0 $reader}]} {
+        after 200
+    }
+    after 500   ;# the last curl the loop started
+    set back ""
+    if {[file exists "$dir/big.back"]} {
+        set back [read_file "$dir/big.back"]
+    }
+    if {$ok && [string range $back 0 65535] eq $big} {
+        pass "a 64K file came back over SFTP as it went up, with HTTP reads in between"
+    } else {
+        fail "the 64K file did not come back over SFTP as it went up"
+    }
+    if {[http_get a.0/dump.asm] eq $dump} {
+        pass "DUMP.ASM, read over HTTP during the transfer, is unchanged"
+    } else {
+        fail "DUMP.ASM changed while HTTP read it during an SFTP transfer"
+    }
+}
+file delete -force $dir
+
+if {$failures > 0} {
+    puts "\n>>> $failures SFTP check(s) failed"
+    exit 1
+}
+puts "\n>>> All SFTP checks passed"
+exit 0

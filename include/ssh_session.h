@@ -135,7 +135,6 @@ private:
         uint32_t request_id = 0;            // Bridge request ID
         int op_type = 0;                    // SSH_FXP_* type
         void* handle = nullptr;             // Associated handle (for dir enum)
-        bool search_first = true;           // For directory enumeration
     };
     PendingSftpOp pending_sftp_;
 

@@ -391,7 +391,7 @@ void HTTPConnection::build_root_listing() {
 
 void HTTPConnection::start_dir_listing() {
     dir_entries_.clear();
-    search_first_ = true;
+    dir_skip_ = 0;
 
     // Request directory listing from Z80
     SftpRequest req;
@@ -399,7 +399,7 @@ void HTTPConnection::start_dir_listing() {
     req.drive = parsed_path_.drive;
     req.user = (parsed_path_.user >= 0) ? parsed_path_.user : 0;  // Start with user 0 for all-user search
     req.filename = "*.*";
-    req.flags = 0;  // Search first
+    req.offset = 0;  // From the first entry
 
     pending_request_id_ = SftpBridge::instance().enqueue_request(req);
     state_ = State::LISTING_DIR;
@@ -418,6 +418,7 @@ bool HTTPConnection::poll_dir_listing() {
         size_t offset = 0;
         while (offset + 32 <= reply->data.size()) {
             DirEntry entry;
+            dir_skip_++;  // Every entry the RSP sent, listed or not
 
             // Build filename
             std::string name;
@@ -458,7 +459,8 @@ bool HTTPConnection::poll_dir_listing() {
         req.drive = parsed_path_.drive;
         req.user = (parsed_path_.user >= 0) ? parsed_path_.user : 0;
         req.filename = "*.*";
-        req.flags = 1;  // Search next
+        // The RSP searches from the first entry again, past the ones sent
+        req.offset = dir_skip_;
 
         pending_request_id_ = SftpBridge::instance().enqueue_request(req);
         return true;  // Continue waiting
@@ -539,18 +541,22 @@ void HTTPConnection::build_dir_response() {
 
 void HTTPConnection::start_file_read() {
     file_data_.clear();
-    file_opened_ = false;
+    request_file_read();
+    state_ = State::READING_FILE;
+}
 
-    // Open file via RSP bridge
+// Ask the RSP for the next 1920 bytes.  Each read request opens the file,
+// reads from its offset and closes it again, so nothing is held open
+// between requests - SFTP sessions' requests come in between.
+void HTTPConnection::request_file_read() {
     SftpRequest req;
-    req.type = SftpRequestType::FILE_OPEN;
+    req.type = SftpRequestType::FILE_READ;
     req.drive = parsed_path_.drive;
     req.user = (parsed_path_.user >= 0) ? parsed_path_.user : 0;  // Default to user 0 for file access
     req.filename = parsed_path_.filename;
-    req.flags = 0;  // Read mode
+    req.offset = file_data_.size();
 
     pending_request_id_ = SftpBridge::instance().enqueue_request(req);
-    state_ = State::READING_FILE;
 }
 
 bool HTTPConnection::poll_file_read() {
@@ -559,54 +565,22 @@ bool HTTPConnection::poll_file_read() {
         return true;  // Still waiting
     }
 
-    if (!file_opened_) {
-        // This is the FILE_OPEN reply
-        if (reply->status != SftpReplyStatus::OK) {
-            build_error_response(404, "File not found");
-            state_ = State::SENDING_RESPONSE;
-            return true;
-        }
-
-        file_opened_ = true;
-
-        // Now read file content
-        SftpRequest req;
-        req.type = SftpRequestType::FILE_READ;
-        req.drive = parsed_path_.drive;
-        req.user = (parsed_path_.user >= 0) ? parsed_path_.user : 0;
-        req.filename = parsed_path_.filename;
-
-        pending_request_id_ = SftpBridge::instance().enqueue_request(req);
+    if (reply->status != SftpReplyStatus::OK && file_data_.empty()) {
+        // The first read could not open the file
+        build_error_response(404, "File not found");
+        state_ = State::SENDING_RESPONSE;
         return true;
     }
-
-    // This is a FILE_READ reply
-    bool more_data = reply->more_data;
 
     if (reply->status == SftpReplyStatus::OK) {
         // Append data
         file_data_.insert(file_data_.end(), reply->data.begin(), reply->data.end());
+
+        if (reply->more_data) {
+            request_file_read();
+            return true;
+        }
     }
-
-    if (more_data && reply->status == SftpReplyStatus::OK) {
-        // Read more
-        SftpRequest req;
-        req.type = SftpRequestType::FILE_READ;
-        req.drive = parsed_path_.drive;
-        req.user = (parsed_path_.user >= 0) ? parsed_path_.user : 0;
-        req.filename = parsed_path_.filename;
-
-        pending_request_id_ = SftpBridge::instance().enqueue_request(req);
-        return true;
-    }
-
-    // Done reading - close file (don't wait for reply)
-    SftpRequest close_req;
-    close_req.type = SftpRequestType::FILE_CLOSE;
-    close_req.drive = parsed_path_.drive;
-    close_req.user = (parsed_path_.user >= 0) ? parsed_path_.user : 0;
-    close_req.filename = parsed_path_.filename;
-    SftpBridge::instance().enqueue_request(close_req);
 
     // Build response
     build_file_response();

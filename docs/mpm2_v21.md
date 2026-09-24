@@ -41,9 +41,14 @@ binaries:
   of the `654321` placeholder the nucleus sources carry.
 * `--dri-exact` implies `--serial dri` and additionally leaves out the
   local fixes this repository carries on top of DRI's code, so that the
-  output can be compared byte for byte.  At present the only such fix is
-  the stack-pointer save and restore in `TMPSUB.ASM`, 25 bytes that DRI
-  had commented out.
+  output can be compared byte for byte, or at least does what DRI
+  shipped.  It defines `DRIEXACT` for both tools.  At present there are
+  two such fixes: the stack-pointer save and restore in `TMPSUB.ASM`, 25
+  bytes that DRI had commented out, and, in V2.1's `PIP.PLM`, MULTCOPY's
+  file-not-found test, which DRI's patch (`PIP.PRL` 1FE1) cut down to
+  the low byte of `NCOPIED` - so a copy that matched a multiple of 256
+  files ends in FILE NOT FOUND.  The default build tests the whole word,
+  as V2.0 did.
 
 ```
 python3 tools/verify_dri.py
@@ -86,10 +91,10 @@ from:
 | `PRINTER.PRL` | 23    | `UTIL5/PRINT.PLM`         | yes |
 | `SCHED.RSP`   | 1     | `UTIL2/SCRSP.PLM`         | yes |
 | `SPOOL.PRL`   | 88    | `UTIL5/MSPL.PLM`          | yes |
-| `SDIR.PRL`    | 2     | `UTIL7`                   | no, see below |
-| `SPOOL.BRS`   | 37    | `UTIL2/SPBRS.PLM`         | no, see below |
-| `PIP.PRL`     | 64    | `UTIL6`                   | no, see below |
-| `GENSYS.COM`  | 47 + 768 longer | `MPMLDR/GENSYS.PLM` | no, see below |
+| `SDIR.PRL`    | 2     | `UTIL7/DSE.PLM`, `tools/build.py` | yes, see below |
+| `SPOOL.BRS`   | 37    | `UTIL2/SPBRS.PLM`         | yes, see below |
+| `PIP.PRL`     | 64    | `UTIL6/PIP.PLM`           | yes, see below |
+| `GENSYS.COM`  | 47 + 768 longer | `MPMLDR/GENSYS.PLM`, `LDRLWR.ASM` | yes, see below |
 | `BNKBDOS.SPR` | 568   | `BNKBDOS/BNKBDOS.ASM`     | already V2.1, see below |
 | `LIB.COM`     | 2     | none (DRI tool)           | serial only |
 | `LINK.COM`    | 16    | none (DRI tool)           | n/a |
@@ -211,48 +216,43 @@ loop body is restructured as an `if`/`else` around the open.  It does
 what the patch does; it does not assemble to the same bytes, and neither
 does anything else here that is compiled rather than assembled.
 
-### SDIR, SPOOL, PIP, GENSYS - identified, not reconstructed
+### SDIR, SPOOL.BRS, PIP, GENSYS
 
-The evidence, for whoever picks this up.  Offsets are into the `.PRL`
-file, which for these is also the load address.
+These were first identified here and left for later; all four have since
+been recovered into `src/overrides`, each behind `$if MPM21`, and the
+commit that did each has the evidence in full.  Offsets are into the
+`.PRL` or `.COM` file, which for these is also the load address.
 
-`SPOOL.BRS`, 37 bytes, is the banked resident half of the spooler,
-built from `UTIL2/SPBRS.PLM`.  This repository does not build `.BRS`
-files at all (see the loose ends below), so it was left alone.
+`SDIR.PRL`, two bytes.  `23C1`, `LHLD 3BADH` becomes `LHLD 3BB1H`:
+`store$file$info` in `UTIL7/DSE.PLM` tests `last$f$i$adr` instead of
+`f$i$adr` (which is always zero there) before it adds a record, so the
+file table is bounded at last.  And header byte 5, GENMOD's extra-memory
+word, `0000` to `1000`: V2.1 asks MP/M for 4K more, room for about 180
+more records.  `tools/build.py` gives the V2.1 build the 4K and V2.0
+none.
 
-`SDIR.PRL`, two bytes:
+`SPOOL.BRS`, 37 bytes, the banked resident half of the spooler
+(`UTIL2/SPBRS.PLM`): the spooler detaches from the console of the last
+request before it waits on SPOOLQ for the next.  The build makes `.BRS`
+files now (`tools/build.py`), and `gensys.sh` puts them in every system.
 
-* header byte 5, the GENMOD minimum-buffer field, `0000` to `1000`: V2.1
-  asks MP/M for 4K more memory than its image.
-* `23C1`: `LHLD 3BADH` becomes `LHLD 3BB1H`, inside
-  `if mem16(3BB3H) >= mem16(3BADH) + 46`.  Three pointers live at
-  `3BAD`, `3BB1` and `3BB3`; the bounds check was reading the first
-  where it wanted the third's neighbour.
+`PIP.PRL`, 64 bytes in seven places, five changes: `[A]` no longer turns
+a file copy into a character copy; `[O]` counts in a file to file copy;
+a multiple-file copy without `[A]` no longer runs `archck`, and clears
+both extent bytes; `[K]` also suppresses MULTCOPY's closing new line;
+and an error no longer closes and deletes the destination's scratch
+file.  The room for the `[K]` test came from the file-not-found test
+above it, which the patch cut down to the low byte of `NCOPIED`
+(`1FE1`); the default build keeps the whole word, `--dri-exact` builds
+DRI's test.
 
-`PIP.PRL`, 64 bytes in seven places.  Two are legible:
-
-* `06E7`: `LDA 243AH` / `LXI H,2262H` becomes `LDA 2262H` /
-  `LXI H,243AH`, so `a = a or b` became `b = b or a`.
-* `0B12`: four calls are jumped over, and the twelve bytes they
-  occupied become a routine that zeroes `2270H` and `22CCH`.  Whatever
-  calls it is in the other two regions, `1FE1-1FF8` and `202E-203D`.
-
-`GENSYS.COM` is the odd one out: 8704 bytes in V2.0 and 9472 in V2.1, so
-it is a recompile, not a patch, and cannot be reconstructed from a diff.
-Its strings say what was added:
-
-```
-> *** Error Maximum Exceeded - 7 Assumed ***
-> Enable Compatibility Attributes $
-> MP/M II V2.1 System Generation
-```
-
-`Enable Compatibility Attributes` is the missing half of the CLI change
-above: it is the GENSYS question whose answer goes in
-`system$data(96)`, which is what `cliattr` tests before it copies the
-command FCB's f1'..f4' bits into `pd(1dh)`.  Until `GENSYS.PLM` is
-brought up to V2.1, a system generated here leaves that byte zero and
-the attributes stay off.
+`GENSYS.COM` is V2.0's with a 768-byte patch area, not a recompile.  It
+asks "Enable Compatibility Attributes (N) ?" (system data byte 96, which
+the V2.1 CLI's `cliattr` tests), shows a temporary or system drive P: as
+`P:` instead of `@:`, limits the user memory segments to seven, and
+closes each SPR, RSP and BRS file it has loaded.  `MPM.SYS` itself is
+generated by `tools/gensys.py`, which writes byte 96 from
+`build_all.sh --compat-attributes` (default no, as DRI's).
 
 ### BNKBDOS - the shipped source is already V2.1
 
@@ -272,11 +272,41 @@ been done.
 * `bin/dri/TMP.SPR` was this repository's own build, not Digital
   Research's - 1536 bytes where every DRI copy is 1408.  Replaced with
   `mpm2_external/mpm2dist/TMP.SPR`.
-* `SCHED.RSP`, `SPOOL.RSP` and `MPMSTAT.RSP` are built here from two
-  modules each (`*BRS.PLM` and `*RSP.PLM`).  DRI's `SCHED.SUB` builds
-  `*.RSP` from `*RSP.PLM` alone and `*.BRS`, a separate banked-RSP file
-  this repository does not produce at all, from `*BRS.PLM` plus
-  `BRSPBI.ASM`.  The merged build puts the process descriptor somewhere
-  other than the start of the image, where MP/M expects it; `SCHED`
-  reports "Resident portion of scheduler is not in memory" on both
-  releases because of it.  Not a V2.1 issue, and not fixed here.
+* `SCHED.RSP`, `SPOOL.RSP` and `MPMSTAT.RSP` were built here from two
+  modules each (`*BRS.PLM` and `*RSP.PLM`), which put the process
+  descriptor somewhere other than where MP/M looks for it.  They are now
+  built the way DRI's `SCHED.SUB` does it: `*.RSP` from `*RSP.PLM`
+  alone and a separate `*.BRS` from `*BRS.PLM` with
+  `src/brs_runtime.mac` in `BRSPBI.ASM`'s place, and `gensys.sh` loads
+  all four of DRI's resident system processes into every system.
+* SUBMIT and SPOOL (when there is no SPOOL RSP and `SPOOL.PRL` prints
+  the files itself) build their buffers from their last variable up to
+  the top of the memory segment - `rbuff` at `minimum$buffer`, `buffer` at
+  `dummy$buffer`.  That relies on Intel's LOCATE, which put the stack
+  below the data.  uplm80 puts its string constants, the procedures'
+  shared locals (`??AUTO`) and the stack after the last variable, so a
+  command file over 1K came out garbled ("Bad entry"), and the spooler
+  lost its buffer pointer, which is one of those locals, a few records
+  in.  Both overrides now put the buffer at `.MEMORY`, and
+  `tools/build.py` asks MP/M for the minimum the sources had reserved in
+  the image (400H and 80H, in the `.PRL` header).
+* ul80 0.3.48 does not relocate `__END__` in a `.PRL`: a reference to it
+  is not marked in the bit map, so `.MEMORY` is right only when the
+  program is loaded at a segment base of 0000H.  PIP, ED, SDIR, STAT,
+  SUBMIT and SPOOL use it.  Every memory segment `gensys.sh` generates
+  starts at 0000H (seven banks of 0000-BFFFH), so nothing here shows it;
+  a system with a segment based elsewhere would.  Reproduction:
+  `extrn __END__` / `ld hl,__END__` linked with `ul80 --prl` leaves the
+  bit for the high byte clear.
+* The emulator's SFTP RSP ran in the BDOS's default error mode.  A read
+  refused because a console program had the file open ("File Currently
+  Open") was then reported on the RSP's console, and V2.0's RESBDOS
+  prints a BDOS error straight through the XIOS with the process's whole
+  console byte - the RSP's is 0F0H, console 0 and list device 15.  The
+  XIOS polled device 0E0H for console 0F0H's output to be ready, which
+  it never is, inside the BDOS, and every process that touched a disk
+  stopped behind it.  V2.1's RESBDOS (`attxprint`) masks the byte and
+  prints only for a process that owns the console, so a V2.1 system
+  just lost the message.  The RSP now selects return-error mode (BDOS
+  function 45) when it starts, and opens the files it reads in
+  read-only mode.

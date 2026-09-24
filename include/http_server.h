@@ -101,8 +101,7 @@ private:
 
     // Z80 request state
     uint32_t pending_request_id_ = 0;
-    bool search_first_ = true;  // First directory search?
-    bool file_opened_ = false;  // File open request completed?
+    uint16_t dir_skip_ = 0;     // Directory entries the RSP has sent
 
     // Accumulated data
     std::vector<uint8_t> file_data_;
@@ -118,6 +117,7 @@ private:
     bool poll_dir_listing();
     void build_dir_response();
     void start_file_read();
+    void request_file_read();
     bool poll_file_read();
     void build_file_response();
     void build_error_response(int code, const std::string& message);

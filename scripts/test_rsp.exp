@@ -15,10 +15,11 @@
 #   mpmstat             the RSP's status display lists the RSPs' queues
 #   sched               SCHED.PRL finds the resident scheduler...
 #   sched <today> 00:00 ...which runs a command whose time has come
-#   abort nosuch        the ABORT RSP's own "Abort failed."
+#   abort nosuch        "Msg Qued", then the ABORT RSP's own "Abort failed."
 #   spoolq file[d]      the spooler RSP prints the file and deletes it;
 #                       with a STOPSPLR message waiting it stops at the first
-#                       line and the file stays
+#                       line and the file stays (checked once the spooler
+#                       has deleted a second file queued behind it)
 #
 # SPOOLQ is the spooler's queue: typing a queue's name at the CLI sends the
 # rest of the line to it ("Msg Qued"), which is what SPOOL.PRL does after it
@@ -26,6 +27,10 @@
 # the same way under V2.0 and V2.1 - V2.0's SPOOL.PRL rejects the [D] option.
 # There is no printer: the emulator's XIOS LIST discards what it is given, so
 # the evidence that the spooler read the file to the end is that it deleted it.
+# The spooler runs at a low priority: a deletion is waited for by asking DIR
+# every half second for up to 10 seconds, not by looking once after a fixed
+# pause, which a slow machine could fail - or pass without the spooler having
+# run at all.
 
 set timeout 30
 set port [lindex $argv 0]
@@ -123,14 +128,35 @@ if {$today ne ""} {
 }
 
 # --- ABORT: the RSP's own message.  ABORT.PRL prints the same words, so
-# the check is also that the CLI queued the line instead of loading it.
+# the CLI must have queued the line ("Msg Qued") before it counts: loaded
+# as a program, ABORT.PRL says "Abort failed." with no queue involved.
+# The RSP answers on its own, not as part of the command, so its message
+# may come after the CLI's next prompt: once the prompt is in, the answer
+# is given a few seconds more, and the prompt is not waited for again.
 cmd "abort nosuch"
+set prompted 0
 expect {
-    -re {ABORT +\.PRL} { fail "abort: ABORT.PRL ran, there is no ABORT RSP" }
-    -re {Abort failed\.} { pass "abort reaches the ABORT RSP" }
-    timeout { fail "abort: no answer from the ABORT RSP" }
+    -re {Msg Qued} {
+        expect {
+            -re {Abort failed\.} { pass "abort reaches the ABORT RSP" }
+            -re $prompt {
+                set prompted 1
+                expect {
+                    -timeout 5
+                    -re {Abort failed\.} { pass "abort reaches the ABORT RSP" }
+                    timeout { fail "abort: queued, but the ABORT RSP did not answer" }
+                }
+            }
+            timeout { fail "abort: queued, but no answer from the ABORT RSP" }
+        }
+    }
+    -re {\.PRL} { fail "abort: no ABORT queue, the CLI loaded a program" }
+    -re {Abort failed\.} { fail "abort: \"Abort failed.\" without \"Msg Qued\" - not the RSP" }
+    timeout { fail "abort: no answer" }
 }
-wait_prompt "abort"
+if {!$prompted} {
+    wait_prompt "abort"
+}
 
 # --- SPOOL and STOPSPLR
 # Send a line to a queue; true if the CLI queued it
@@ -146,42 +172,105 @@ proc queue_msg {c} {
     return $queued
 }
 
-proc spool_file_present {} {
-    global prompt
-    after 2000                  ;# the spooler runs at a low priority
-    cmd "dir spltest.txt"
+# 1 if the file is there, 0 if not, -1 if dir did not answer
+proc file_present {name} {
+    cmd "dir $name"
     expect {
-        -re {SPLTEST  TXT} { set present 1 }
         -re {File not found} { set present 0 }
+        -re "[string toupper [lindex [split $name .] 0]] +[string toupper [lindex [split $name .] 1]]" {
+            set present 1
+        }
         timeout { set present -1 }
     }
-    wait_prompt "dir"
+    wait_prompt "dir $name"
     return $present
+}
+
+# Wait up to 10 seconds for the spooler to delete a file.  It runs at a low
+# priority, so it is asked again every half second rather than once after a
+# fixed wait: a slow machine must neither fail this nor pass it untested.
+# 1 once the file is gone, 0 if it is still there, -1 if dir stops answering
+proc spooler_deletes {name} {
+    set deadline [expr {[clock milliseconds] + 10000}]
+    while 1 {
+        set present [file_present $name]
+        if {$present != 1} {
+            return [expr {$present == 0 ? 1 : -1}]
+        }
+        if {[clock milliseconds] >= $deadline} {
+            return 0
+        }
+        after 500
+    }
+}
+
+# Copy DUMP.ASM to a file for the spooler; true if the copy is there.
+# That the spooler deleted a file shows something only if the file was
+# made: PIP can fail - "OPEN FILE INCOMPATIBLE MODE" if another process
+# has DUMP.ASM open - and DIR's "File not found" would then read as the
+# spooler having finished with a file that never existed.
+proc make_file {name} {
+    global prompt
+    cmd "pip $name=dump.asm\[g0\]"
+    set error ""
+    expect {
+        -re {(ERROR[^\r\n]*)[\r\n]} { set error $expect_out(1,string); exp_continue }
+        -re $prompt {}
+        timeout { set error "no prompt" }
+        eof { fail "connection closed after pip $name"; exit 1 }
+    }
+    if {$error ne ""} {
+        fail "pip $name: $error"
+        return 0
+    }
+    switch -- [file_present $name] {
+        1 { return 1 }
+        0 { fail "pip $name: no error, but no $name either" }
+        default { fail "dir $name: no answer" }
+    }
+    return 0
 }
 
 cmd "era spltest.txt"
 wait_prompt "era"
-cmd "pip spltest.txt=dump.asm\[g0\]"
-wait_prompt "pip"
+cmd "era splmark.txt"
+wait_prompt "era"
 
-# A stop request waiting in STOPSPLR stops the next listing at its first line
-if {[queue_msg "stopsplr"] && [queue_msg "spoolq spltest.txt\[d\]"]} {
-    switch -- [spool_file_present] {
-        1 { pass "stopsplr stopped the spooler before the end of the file" }
-        0 { fail "stopsplr did not stop the spooler: it deleted the file" }
-        default { fail "dir spltest.txt: no answer" }
+# A stop request waiting in STOPSPLR stops the next listing at its first
+# line, and the file stays.  That the file is still there means something
+# only once the spooler has finished with it, so a second file goes into
+# the queue behind it: the spooler takes one request at a time, in order,
+# and when it has listed and deleted splmark.txt it is done with spltest.txt.
+if {[make_file spltest.txt] && [make_file splmark.txt] &&
+    [queue_msg "stopsplr"] && [queue_msg "spoolq spltest.txt\[d\]"] &&
+    [queue_msg "spoolq splmark.txt\[d\]"]} {
+    switch -- [spooler_deletes splmark.txt] {
+        1 {
+            switch -- [file_present spltest.txt] {
+                1 { pass "stopsplr stopped the spooler before the end of the file" }
+                0 { fail "stopsplr did not stop the spooler: it deleted the file" }
+                default { fail "dir spltest.txt: no answer" }
+            }
+        }
+        0 { fail "the spooler did not get to the second file in 10 seconds" }
+        default { fail "dir splmark.txt: no answer" }
     }
 }
 
-# Without one, the spooler prints the whole file and then deletes it
-if {[queue_msg "spoolq spltest.txt\[d\]"]} {
-    switch -- [spool_file_present] {
-        0 { pass "the spooler listed the file and deleted it" }
-        1 { fail "the spooler did not finish the file: it is still there" }
+# Without one, the spooler prints the whole file and then deletes it.
+# spltest.txt is still there if the check above passed; if it did not, it
+# is made again, so that its going away is the spooler's doing here too.
+if {([file_present spltest.txt] == 1 || [make_file spltest.txt]) &&
+    [queue_msg "spoolq spltest.txt\[d\]"]} {
+    switch -- [spooler_deletes spltest.txt] {
+        1 { pass "the spooler listed the file and deleted it" }
+        0 { fail "the spooler did not finish the file in 10 seconds: it is still there" }
         default { fail "dir spltest.txt: no answer" }
     }
 }
 cmd "era spltest.txt"
+wait_prompt "era"
+cmd "era splmark.txt"
 wait_prompt "era"
 
 send "\r"
