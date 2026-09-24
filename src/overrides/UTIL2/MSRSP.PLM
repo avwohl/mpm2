@@ -1,0 +1,46 @@
+$title('MP/M II V2.0 Status Process -  Resident Portion')
+status:
+do;
+
+$include (copyrt.lit)
+/*
+  Revised:
+    14 Sept 81  by Thomas Rolander
+*/
+
+$include (proces.lit)
+$include (queue.lit)
+
+/*
+  Status Process Data Segment
+*/
+  declare bdos$entry address
+    data (0);
+
+  /* ***** uplm80 workaround - a STRUCTURE's DATA list comes out one
+     byte per value whatever the member's type, and stops at the last
+     value instead of reserving the rest of the structure.  So the
+     descriptor is spelled out a byte at a time - the same 52 bytes: the
+     18 DRI's list gave (pl, status, priority, stkptr, name, console,
+     memseg, b), then 34 where DRI's PL/M-80 left whatever was in
+     memory - and status$pd is declared over it with AT. */
+  declare status$pd$data (52) byte
+    data (0,0,rtr$status,190,0,0,
+             'MP',0cdh /* ('M'+80h) */,'STAT',
+             0a0h /* ' '+80h */,0,0,0,0,
+             0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+             0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+             0,0);
+  declare status$pd process$descriptor public
+    at (.status$pd$data);
+  /* ***** uplm80 workaround - a string in a STRUCTURE's INITIAL list
+     is counted as one value when the values are matched to members, so
+     msglen and nmbmsgs came out a byte wide.  The name is given a
+     character at a time. */
+  declare status$cqcb structure (
+    cqueue,
+    buf (2) byte )
+    initial (0,'M','P','M','S','T','A','T',' ',2,1);
+
+end status;
+

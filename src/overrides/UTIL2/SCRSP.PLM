@@ -17,22 +17,37 @@ $include (queue.lit)
   declare os address public
     data (0);
 
-  declare sched$pd process$descriptor public
-    data (0,rtr$status,100,0,
+  /* ***** uplm80 workaround - a STRUCTURE's DATA list comes out one
+     byte per value whatever the member's type, and stops at the last
+     value instead of reserving the rest of the structure.  So the
+     descriptor is spelled out a byte at a time - the same 52 bytes: the
+     22 DRI's list gave (pl, status, priority, stkptr, name, console,
+     memseg, b, thread, disk$set$dma), then 30 where DRI's PL/M-80 left
+     whatever was in memory - and sched$pd is declared over it with AT. */
+  declare sched$pd$data (52) byte
+    data (0,0,rtr$status,100,0,0,
 $if MPM21
   /* ***** MP/M 2.1 - the high bit on the last character of the name
      marks a system process, the way Spool, MPMSTAT and Abort are
      already marked. */
              'Sc',0e8h /* 'h'+80h */,'ed  ',
-             0a0h /* ' '+80h */,0,0,0,0,0);
+             0a0h /* ' '+80h */,0,0,0,0,0,0,0,0,
 $else
-             'Sc',0e8h /* 'h'+80h */,'ed   ',0,0,0,0,0);
+             'Sc',0e8h /* 'h'+80h */,'ed   ',0,0,0,0,0,0,0,0,
 $endif
+             0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+             0,0,0,0,0,0,0,0,0,0,0,0,0,0);
+  declare sched$pd process$descriptor public
+    at (.sched$pd$data);
 
+  /* ***** uplm80 workaround - a string in a STRUCTURE's INITIAL list
+     is counted as one value when the values are matched to members, so
+     msglen and nmbmsgs came out a byte wide.  The name is given a
+     character at a time. */
   declare sched$lqcb
     structure (lqueue,
                buf (71) byte)
-    initial (0,'Sched   ',69,1);
+    initial (0,'S','c','h','e','d',' ',' ',' ',69,1);
 
 end sched;
 

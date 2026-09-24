@@ -1,6 +1,6 @@
 	;; printed at start increment every change to be sure we
 ;; get the right version
-BNK_VERSION	EQU 25
+BNK_VERSION	EQU 28
 ; bnkxios_port.asm - MP/M II BNKXIOS using I/O port dispatch
 ; Part of MP/M II Emulator
 ; SPDX-License-Identifier: GPL-3.0-or-later
@@ -21,6 +21,11 @@ BNK_VERSION	EQU 25
 
 ; I/O Ports
 XIOS_DISPATCH:  EQU     0E0H    ; XIOS dispatch (A = function)
+; The emulator hands a result back in A as part of the OUT itself.  Nothing
+; reads it back with IN A,(XIOS_DISPATCH): that returns whatever the last
+; XIOS call of any process left there, and a tick between the OUT and the
+; IN lets the dispatcher's SELMEMORY in first - READ then reported the
+; SELMEMORY function code, 33H, and the BDOS said Bad Sector.
 BANK_SELECT:    EQU     0E1H    ; Bank select (A = bank)
 
 ; XIOS function offsets (must match xios.h constants)
@@ -134,7 +139,6 @@ DO_CONST:
         ; Returns A = 0FFH if char ready, 00H if not
         LD      A, FUNC_CONST
         OUT     (XIOS_DISPATCH), A      ; Dispatch function
-        IN      A, (XIOS_DISPATCH)      ; Get result in A
         RET
 
 DO_CONIN:
@@ -157,7 +161,6 @@ DO_CONIN:
 
         LD      A, FUNC_CONIN
         OUT     (XIOS_DISPATCH), A
-        IN      A, (XIOS_DISPATCH)
         RET
 
 DO_CONOUT:
@@ -253,26 +256,41 @@ DO_SETDMA:
         OUT     (XIOS_DISPATCH), A
         RET
 
+; READ and WRITE move the record to or from the DMA address in the calling
+; process's bank.  The BNKBDOS calls them with bank 0 selected, so - as in
+; DRI's own banked XIOS - the transfer is bracketed by SWTUSER, which selects
+; the bank of the process the BDOS is working for, and SWTSYS, which puts
+; bank 0 back; the emulator moves the data in whatever bank is selected.
+; (System Implementor's Guide, SWTUSER: "to enable BIOS disk read and write
+; code to transfer data ... to/from the DMA buffer in the user's calling
+; program".)  The process may live in bank 0 itself: the banked half of a
+; resident system process, the spooler's, has its buffers there.
+
 DO_READ:
         ; Read sector - returns A = 0 success, A = 1 error
+        CALL    SWTUSER                 ; the caller's bank
         LD      A, FUNC_READ
         OUT     (XIOS_DISPATCH), A      ; Dispatch function
-        IN      A, (XIOS_DISPATCH)      ; Get result in A
+        PUSH    AF
+        CALL    SWTSYS                  ; back to bank 0
+        POP     AF
         RET
 
 DO_WRITE:
         ; Write sector - C = deblocking code
         ; Returns A = 0 success, A = 1 error
+        CALL    SWTUSER                 ; the caller's bank
         LD      A, FUNC_WRITE
         OUT     (XIOS_DISPATCH), A      ; Dispatch function
-        IN      A, (XIOS_DISPATCH)      ; Get result in A
+        PUSH    AF
+        CALL    SWTSYS                  ; back to bank 0
+        POP     AF
         RET
 
 DO_LISTST:
         ; List status - returns A = 0FFH if ready
         LD      A, FUNC_LISTST
         OUT     (XIOS_DISPATCH), A      ; Dispatch function
-        IN      A, (XIOS_DISPATCH)      ; Get result in A
         RET
 
 DO_SECTRAN:
@@ -298,7 +316,6 @@ DO_POLLDEV:
         ; Returns A = 0FFH if ready, 00H if not
         LD      A, FUNC_POLLDEV
         OUT     (XIOS_DISPATCH), A      ; Dispatch function
-        IN      A, (XIOS_DISPATCH)      ; Get result in A
         RET
 
 DO_STARTCLK:
@@ -333,7 +350,6 @@ DO_MAXCON:
         ; DEBUG: Use FUNC_MAXCON to let emulator trace the call
         LD      A, FUNC_MAXCON
         OUT     (XIOS_DISPATCH), A
-        IN      A, (XIOS_DISPATCH)      ; Get result from emulator
         RET
 
 DO_IDLE:
@@ -511,7 +527,7 @@ DPH0:
         DW      0, 0, 0         ; Scratch area
         DW      DIRBUF          ; DIRBUF address
         DW      DPB_8MB         ; DPB address
-        DW      CSV0            ; CSV (provide buffer even with CKS=0)
+        DW      CSV0            ; CSV (unused while CKS=0, see CSV0)
         DW      ALV0            ; ALV address
 
 ; DPH for drive B
@@ -659,80 +675,32 @@ ALV3:
         DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 240
         DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 256
 
-; CSV0: 256 bytes - Checksum vector drive A
+; CSV0-CSV3: checksum vectors, 16 bytes each.  A checksum vector holds
+; CKS bytes, and DPB_8MB - the only DPB the DPHs use - has CKS=0: a fixed
+; disk is never checked for a media change, so the BDOS never touches
+; them.  16 bytes is DPB_SSSD's CKS, the most any DPB here asks for.
+;
+; They were 256 bytes each.  The 960 bytes that saves are what lets DRI's
+; four resident system processes (ABORT, MPMSTAT, SCHED, SPOOL) fit in
+; common memory next to SFTP: GENSYS loads the RSPs between the XDOS and
+; this module, and GENSYS fails if COMMONBASE ends up below C000H.
+; The ALVs cannot move out of common memory instead - BDOS function 27
+; hands a program the ALV's address to read from its own bank (STAT
+; does) - and the DPHs, the DPBs and DIRBUF must stay there too
+; (MP/M II System Implementor's Guide, section 2.6).
 CSV0:
         DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 16
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 32
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 48
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 64
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 80
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 96
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 112
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 128
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 144
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 160
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 176
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 192
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 208
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 224
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 240
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 256
 
-; CSV1: 256 bytes - Checksum vector drive B
+; CSV1: 16 bytes - Checksum vector drive B
 CSV1:
         DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 16
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 32
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 48
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 64
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 80
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 96
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 112
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 128
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 144
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 160
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 176
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 192
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 208
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 224
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 240
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 256
 
-; CSV2: 256 bytes - Checksum vector drive C
+; CSV2: 16 bytes - Checksum vector drive C
 CSV2:
         DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 16
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 32
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 48
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 64
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 80
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 96
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 112
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 128
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 144
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 160
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 176
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 192
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 208
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 224
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 240
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 256
 
-; CSV3: 256 bytes - Checksum vector drive D
+; CSV3: 16 bytes - Checksum vector drive D
 CSV3:
         DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 16
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 32
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 48
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 64
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 80
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 96
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 112
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 128
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 144
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 160
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 176
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 192
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 208
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 224
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 240
-        DB      0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0  ; 256
 
         END

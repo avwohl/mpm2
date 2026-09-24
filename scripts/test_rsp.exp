@@ -1,0 +1,197 @@
+#!/usr/bin/expect -f
+#
+# test_rsp.exp - check DRI's resident system processes over SSH
+# Part of MP/M II Emulator
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Usage: ./test_rsp.exp [port]
+#
+# A generated system carries DRI's four resident system processes, ABORT,
+# MPMSTAT, SCHED and SPOOL (scripts/gensys.sh).  Each check below needs the
+# resident process itself, not the transient of the same name: with the RSP
+# missing, SCHED.PRL answers "Resident portion of scheduler is not in
+# memory", ABORT.PRL does the abort itself, and "spoolq" is not a command.
+#
+#   mpmstat             the RSP's status display lists the RSPs' queues
+#   sched               SCHED.PRL finds the resident scheduler...
+#   sched <today> 00:00 ...which runs a command whose time has come
+#   abort nosuch        the ABORT RSP's own "Abort failed."
+#   spoolq file[d]      the spooler RSP prints the file and deletes it;
+#                       with a STOPSPLR message waiting it stops at the first
+#                       line and the file stays
+#
+# SPOOLQ is the spooler's queue: typing a queue's name at the CLI sends the
+# rest of the line to it ("Msg Qued"), which is what SPOOL.PRL does after it
+# has checked the files.  Going straight to the queue tests the spooler RSP
+# the same way under V2.0 and V2.1 - V2.0's SPOOL.PRL rejects the [D] option.
+# There is no printer: the emulator's XIOS LIST discards what it is given, so
+# the evidence that the spooler read the file to the end is that it deleted it.
+
+set timeout 30
+set port [lindex $argv 0]
+if {$port eq ""} {
+    set port 2222
+}
+match_max 20000
+log_user 1
+
+set prompt {\d+[A-P]>}
+set failures 0
+
+proc fail {msg} {
+    global failures
+    puts "\n>>> FAIL: $msg"
+    incr failures
+}
+
+proc pass {msg} {
+    puts "\n>>> ok: $msg"
+}
+
+# Send a command after letting the console settle (see test_ssh.exp)
+proc cmd {c} {
+    after 300
+    send -- "$c\r"
+}
+
+proc wait_prompt {what} {
+    global prompt
+    expect {
+        -re $prompt {}
+        timeout { fail "no prompt after $what" }
+        eof { fail "connection closed after $what"; exit 1 }
+    }
+}
+
+puts "=== MP/M II resident system process test ==="
+spawn ssh -tt -p $port -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null user@localhost
+expect {
+    -re $prompt {}
+    timeout { puts "\n>>> TIMEOUT waiting for prompt"; exit 1 }
+    eof { puts "\n>>> Connection closed unexpectedly"; exit 1 }
+}
+
+# --- MPMSTAT: the display comes from the RSP, after CLI's "Msg Qued"
+cmd "mpmstat"
+expect {
+    -re {Status Display(.*)Memory Allocation:} {
+        set display $expect_out(1,string)
+        if {[regexp {Queue\(s\):(.*?)Process\(es\) Attached} $display -> queues]} {
+            foreach q {ABORT MPMSTAT Sched SPOOLQ STOPSPLR} {
+                if {[regexp "\\m$q\\M" $queues]} {
+                    pass "mpmstat lists queue $q"
+                } else {
+                    fail "mpmstat does not list queue $q"
+                }
+            }
+        } else {
+            fail "mpmstat display has no queue list"
+        }
+    }
+    -re {Msg Qued} { exp_continue }
+    timeout { fail "mpmstat printed no status display" }
+}
+wait_prompt "mpmstat"
+
+# --- SCHED: the transient finds the resident scheduler
+cmd "sched"
+expect {
+    -re {Resident portion of scheduler is not in memory} {
+        fail "sched: resident portion of scheduler is not in memory"
+    }
+    -re {Illegal time/date specification} { pass "sched finds the resident scheduler" }
+    timeout { fail "sched: no answer" }
+}
+wait_prompt "sched"
+
+# ...and the scheduler runs a command that is already due
+set today ""
+cmd "tod"
+expect {
+    -re {(\d\d/\d\d/\d\d) \d\d:\d\d:\d\d} { set today $expect_out(1,string) }
+    timeout { fail "tod: no date" }
+}
+wait_prompt "tod"
+if {$today ne ""} {
+    cmd "sched $today 00:00 user"
+    expect {
+        -re {User Number = } { pass "sched ran a scheduled command" }
+        -re {Resident portion} { fail "sched: resident portion not in memory" }
+        timeout { fail "sched: the scheduled command did not run" }
+    }
+    wait_prompt "scheduled command"
+}
+
+# --- ABORT: the RSP's own message.  ABORT.PRL prints the same words, so
+# the check is also that the CLI queued the line instead of loading it.
+cmd "abort nosuch"
+expect {
+    -re {ABORT +\.PRL} { fail "abort: ABORT.PRL ran, there is no ABORT RSP" }
+    -re {Abort failed\.} { pass "abort reaches the ABORT RSP" }
+    timeout { fail "abort: no answer from the ABORT RSP" }
+}
+wait_prompt "abort"
+
+# --- SPOOL and STOPSPLR
+# Send a line to a queue; true if the CLI queued it
+proc queue_msg {c} {
+    cmd $c
+    set queued 0
+    expect {
+        -re {Msg Qued} { set queued 1 }
+        -re {\.PRL} { fail "$c: no queue, the CLI loaded a program" }
+        timeout { fail "$c: no answer" }
+    }
+    wait_prompt $c
+    return $queued
+}
+
+proc spool_file_present {} {
+    global prompt
+    after 2000                  ;# the spooler runs at a low priority
+    cmd "dir spltest.txt"
+    expect {
+        -re {SPLTEST  TXT} { set present 1 }
+        -re {File not found} { set present 0 }
+        timeout { set present -1 }
+    }
+    wait_prompt "dir"
+    return $present
+}
+
+cmd "era spltest.txt"
+wait_prompt "era"
+cmd "pip spltest.txt=dump.asm\[g0\]"
+wait_prompt "pip"
+
+# A stop request waiting in STOPSPLR stops the next listing at its first line
+if {[queue_msg "stopsplr"] && [queue_msg "spoolq spltest.txt\[d\]"]} {
+    switch -- [spool_file_present] {
+        1 { pass "stopsplr stopped the spooler before the end of the file" }
+        0 { fail "stopsplr did not stop the spooler: it deleted the file" }
+        default { fail "dir spltest.txt: no answer" }
+    }
+}
+
+# Without one, the spooler prints the whole file and then deletes it
+if {[queue_msg "spoolq spltest.txt\[d\]"]} {
+    switch -- [spool_file_present] {
+        0 { pass "the spooler listed the file and deleted it" }
+        1 { fail "the spooler did not finish the file: it is still there" }
+        default { fail "dir spltest.txt: no answer" }
+    }
+}
+cmd "era spltest.txt"
+wait_prompt "era"
+
+send "\r"
+after 500
+close
+wait
+
+if {$failures > 0} {
+    puts "\n>>> $failures RSP check(s) failed"
+    exit 1
+}
+puts "\n>>> All RSP checks passed"
+exit 0

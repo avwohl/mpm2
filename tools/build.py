@@ -6,7 +6,7 @@ Builds MP/M II from source using:
 - um80: Assembler (.ASM/.MAC -> .REL)
 - ul80: Linker (.REL -> .COM/.PRL)
 - cpmemu + PLM80: PL/M compiler (.PLM -> .REL) [via CP/M emulator]
-- GENMOD: Creates relocatable files (.PRL/.RSP/.SPR)
+- GENMOD: Creates relocatable files (.PRL/.RSP/.BRS/.SPR)
 
 Usage:
     python build.py [--clean] [--verbose] [target...]
@@ -54,6 +54,11 @@ CPM_RUNTIME_REL = BUILD_DIR / "cpm_runtime.rel"
 MPM_RUNTIME_SRCS = [PROJECT_ROOT / "src" / "mpm_runtime.mac",
                     PROJECT_ROOT / "src" / "mpm_pagezero.mac"]
 
+# The banked half of a resident system process has no page zero of its own and
+# reaches the BDOS through the .RSP instead: DRI linked each one with
+# BRSPBI.ASM, which this is for uplm80's conventions.
+BRS_RUNTIME_SRCS = [PROJECT_ROOT / "src" / "brs_runtime.mac"]
+
 # Include paths for assembler
 INCLUDE_PATHS = [
     SRC_ROOT / "UTIL8",  # .LIT include files
@@ -68,7 +73,7 @@ INCLUDE_PATHS = [
 class BuildTarget:
     """Defines a build target"""
     name: str                    # Output filename (without extension)
-    output_type: str             # 'com', 'prl', 'spr', 'rsp'
+    output_type: str             # 'com', 'prl', 'spr', 'rsp', 'brs'
     sources: list                # List of source files (relative to SRC_ROOT)
     directory: str               # Source directory under SRC_ROOT
     origin: Optional[str] = None # Link origin (hex), None for default 0x100
@@ -257,14 +262,37 @@ BNKBDOS_TARGETS = [
 ]
 
 # ============================================================================
-# UTIL2 - RSP Modules
+# UTIL2 - Resident System Processes
 # ============================================================================
+# A resident system process is two files, built separately (UTIL2/SCHED.SUB,
+# SPOOL.SUB, MPMSTAT.SUB):
+#
+#   xx.RSP  from xxRSP.PLM alone, located at 0, code then data.  GENSYS puts it
+#           in common memory.  It is the process descriptor and its queues and
+#           nothing else: offset 0 is the word MP/M sets to its BDOS entry when
+#           it creates the process, the descriptor starts at offset 2 and the
+#           queue follows it at offset 2+52.
+#   xx.BRS  from xxBRS.PLM + BRSPBI + PLM80.LIB, also located at 0.  GENSYS
+#           puts it in bank 0.  Offset 0 is OS, which GENSYS sets to the .RSP's
+#           base, offset 2 the initial stack pointer, offset 4 the process
+#           name; the code follows.  The BRS finds its descriptor at OS+2.
+#           Here brs_runtime.mac stands in for BRSPBI, and uplm80 puts the
+#           PLM80.LIB routines it needs into the module itself.  uplm80 also
+#           gives the module its own program entry and a 512-byte stack; MP/M
+#           never runs them - it enters the process at the address the stack
+#           pointer word points at - so they cost bank-0 memory and no more.
+#
+# ABORT.RSP is one assembler module with no banked half (RMAC, `link
+# abort[or]').  None of the .RSPs links a runtime: DRI's didn't, and they call
+# nothing.  MSCMN.PLM is $INCLUDE'd by MSBRS.PLM, not compiled separately.
 UTIL2_RSP_TARGETS = [
-    # MSCMN.PLM is $INCLUDE'd by MSBRS.PLM, not compiled separately
-    BuildTarget("MPMSTAT", "rsp", ["MSBRS.PLM", "MSRSP.PLM"], "UTIL2"),
-    BuildTarget("SCHED", "rsp", ["SCBRS.PLM", "SCRSP.PLM"], "UTIL2"),
-    BuildTarget("SPOOL", "rsp", ["SPBRS.PLM", "SPRSP.PLM"], "UTIL2"),
-    BuildTarget("ABORT", "rsp", ["ABORT.ASM"], "UTIL2"),
+    BuildTarget("MPMSTAT", "rsp", ["MSRSP.PLM"], "UTIL2", skip_runtime=True),
+    BuildTarget("MPMSTAT", "brs", ["MSBRS.PLM"], "UTIL2"),
+    BuildTarget("SCHED", "rsp", ["SCRSP.PLM"], "UTIL2", skip_runtime=True),
+    BuildTarget("SCHED", "brs", ["SCBRS.PLM"], "UTIL2"),
+    BuildTarget("SPOOL", "rsp", ["SPRSP.PLM"], "UTIL2", skip_runtime=True),
+    BuildTarget("SPOOL", "brs", ["SPBRS.PLM"], "UTIL2"),
+    BuildTarget("ABORT", "rsp", ["ABORT.ASM"], "UTIL2", skip_runtime=True),
 ]
 
 # All targets
@@ -365,7 +393,8 @@ class Builder:
 
         return self.run(cmd)
 
-    def compile_plm(self, plm_file: Path, rel_file: Path, mode: str = "cpm") -> bool:
+    def compile_plm(self, plm_file: Path, rel_file: Path, mode: str = "cpm",
+                    src_dir: Optional[Path] = None) -> bool:
         """Compile a .PLM file to .REL using uplm80 + um80
 
         uplm80 compiles .PLM -> .MAC (assembly)
@@ -373,13 +402,21 @@ class Builder:
 
         Args:
             mode: "cpm" (default) or "bare" for bare-metal startup
+            src_dir: the DRI directory the source comes from.  An override
+                in src/overrides is compiled from there, so its own
+                directory no longer holds the files it $INCLUDEs -
+                UTIL2/MSBRS.PLM includes MSCMN.PLM - and they are looked
+                for in the original directory next.
         """
         # Generate intermediate .MAC file
         mac_file = self.build_dir / (plm_file.stem + ".MAC")
 
         # Step 1: Compile PLM to MAC
         # Add include path for .LIT files
-        cmd = [UPLM80, "-I", str(SRC_ROOT / "UTIL8")]
+        cmd = [UPLM80]
+        if src_dir is not None and src_dir != plm_file.parent:
+            cmd.extend(["-I", str(src_dir)])
+        cmd.extend(["-I", str(SRC_ROOT / "UTIL8")])
         cmd.extend(self.define_args())
         if mode != "cpm":
             cmd.extend(["--mode", mode])
@@ -395,6 +432,8 @@ class Builder:
         """Runtime modules to link into this target."""
         if target.output_type == "prl":
             return MPM_RUNTIME_SRCS
+        if target.output_type == "brs":
+            return BRS_RUNTIME_SRCS
         return [CPM_RUNTIME_SRC]
 
     @staticmethod
@@ -403,10 +442,12 @@ class Builder:
 
         A .PRL transient defaults to MP/M mode so the compiler emits page-zero
         references (the BDOS entry, the stack pointer taken from 0006H, the
-        warm-boot jump) as relocatable symbols rather than literals.  A target
-        that asks for a mode explicitly keeps it.
+        warm-boot jump) as relocatable symbols rather than literals.  A .BRS
+        needs the same, for a different reason: it has no page zero at all,
+        and ??BDOS has to resolve to brs_runtime.mac's jump through the .RSP.
+        A target that asks for a mode explicitly keeps it.
         """
-        if target.output_type == "prl" and target.plm_mode == "cpm":
+        if target.output_type in ("prl", "brs") and target.plm_mode == "cpm":
             return "mpm"
         return target.plm_mode
 
@@ -420,7 +461,7 @@ class Builder:
             # relocator only adds the segment's base page, so the image is
             # linked at 0100H and the extra page comes from the link.
             cmd.append("--prl")
-        elif output_type in ("rsp", "spr"):
+        elif output_type in ("rsp", "brs", "spr"):
             # System pages are loaded at the segment base itself: linked at 0.
             cmd.append("--spr")
 
@@ -506,7 +547,8 @@ class Builder:
                     else:
                         all_success = False
                 elif src.upper().endswith(".PLM"):
-                    if self.compile_plm(src_path, rel_path, self.plm_mode(target)):
+                    if self.compile_plm(src_path, rel_path, self.plm_mode(target),
+                                        src_dir):
                         rel_files.append(rel_path)
                     else:
                         all_success = False
