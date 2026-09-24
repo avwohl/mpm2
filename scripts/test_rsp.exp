@@ -130,12 +130,23 @@ if {$today ne ""} {
 # --- ABORT: the RSP's own message.  ABORT.PRL prints the same words, so
 # the CLI must have queued the line ("Msg Qued") before it counts: loaded
 # as a program, ABORT.PRL says "Abort failed." with no queue involved.
+# The RSP answers on its own, not as part of the command, so its message
+# may come after the CLI's next prompt: once the prompt is in, the answer
+# is given a few seconds more, and the prompt is not waited for again.
 cmd "abort nosuch"
+set prompted 0
 expect {
     -re {Msg Qued} {
         expect {
             -re {Abort failed\.} { pass "abort reaches the ABORT RSP" }
-            -re $prompt { fail "abort: queued, but the ABORT RSP did not answer" }
+            -re $prompt {
+                set prompted 1
+                expect {
+                    -timeout 5
+                    -re {Abort failed\.} { pass "abort reaches the ABORT RSP" }
+                    timeout { fail "abort: queued, but the ABORT RSP did not answer" }
+                }
+            }
             timeout { fail "abort: queued, but no answer from the ABORT RSP" }
         }
     }
@@ -143,7 +154,9 @@ expect {
     -re {Abort failed\.} { fail "abort: \"Abort failed.\" without \"Msg Qued\" - not the RSP" }
     timeout { fail "abort: no answer" }
 }
-wait_prompt "abort"
+if {!$prompted} {
+    wait_prompt "abort"
+}
 
 # --- SPOOL and STOPSPLR
 # Send a line to a queue; true if the CLI queued it
@@ -191,21 +204,45 @@ proc spooler_deletes {name} {
     }
 }
 
+# Copy DUMP.ASM to a file for the spooler; true if the copy is there.
+# That the spooler deleted a file shows something only if the file was
+# made: PIP can fail - "OPEN FILE INCOMPATIBLE MODE" if another process
+# has DUMP.ASM open - and DIR's "File not found" would then read as the
+# spooler having finished with a file that never existed.
+proc make_file {name} {
+    global prompt
+    cmd "pip $name=dump.asm\[g0\]"
+    set error ""
+    expect {
+        -re {(ERROR[^\r\n]*)[\r\n]} { set error $expect_out(1,string); exp_continue }
+        -re $prompt {}
+        timeout { set error "no prompt" }
+        eof { fail "connection closed after pip $name"; exit 1 }
+    }
+    if {$error ne ""} {
+        fail "pip $name: $error"
+        return 0
+    }
+    switch -- [file_present $name] {
+        1 { return 1 }
+        0 { fail "pip $name: no error, but no $name either" }
+        default { fail "dir $name: no answer" }
+    }
+    return 0
+}
+
 cmd "era spltest.txt"
 wait_prompt "era"
 cmd "era splmark.txt"
 wait_prompt "era"
-cmd "pip spltest.txt=dump.asm\[g0\]"
-wait_prompt "pip"
-cmd "pip splmark.txt=dump.asm\[g0\]"
-wait_prompt "pip"
 
 # A stop request waiting in STOPSPLR stops the next listing at its first
 # line, and the file stays.  That the file is still there means something
 # only once the spooler has finished with it, so a second file goes into
 # the queue behind it: the spooler takes one request at a time, in order,
 # and when it has listed and deleted splmark.txt it is done with spltest.txt.
-if {[queue_msg "stopsplr"] && [queue_msg "spoolq spltest.txt\[d\]"] &&
+if {[make_file spltest.txt] && [make_file splmark.txt] &&
+    [queue_msg "stopsplr"] && [queue_msg "spoolq spltest.txt\[d\]"] &&
     [queue_msg "spoolq splmark.txt\[d\]"]} {
     switch -- [spooler_deletes splmark.txt] {
         1 {
@@ -220,8 +257,11 @@ if {[queue_msg "stopsplr"] && [queue_msg "spoolq spltest.txt\[d\]"] &&
     }
 }
 
-# Without one, the spooler prints the whole file and then deletes it
-if {[queue_msg "spoolq spltest.txt\[d\]"]} {
+# Without one, the spooler prints the whole file and then deletes it.
+# spltest.txt is still there if the check above passed; if it did not, it
+# is made again, so that its going away is the spooler's doing here too.
+if {([file_present spltest.txt] == 1 || [make_file spltest.txt]) &&
+    [queue_msg "spoolq spltest.txt\[d\]"]} {
     switch -- [spooler_deletes spltest.txt] {
         1 { pass "the spooler listed the file and deleted it" }
         0 { fail "the spooler did not finish the file in 10 seconds: it is still there" }
