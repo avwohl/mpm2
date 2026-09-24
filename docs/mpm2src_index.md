@@ -104,9 +104,14 @@ Source files from `mpm2_external/mpm2src/` - the original Digital Research MP/M 
 | AS4SEAR.ASM | ASM.PRL | ASM symbol search |
 | AS5OPER.ASM | ASM.PRL | ASM operand processor |
 | AS6MAIN.ASM | ASM.PRL | ASM main program |
-| DDT0MOV.ASM | RDT.PRL | DDT move module |
-| DDT1ASM.ASM | RDT.PRL | DDT inline assembler/disassembler |
-| DDT2MON.ASM | RDT.PRL | DDT debugger monitor (DEMON) |
+| DDT0MOV.ASM | RDT.PRL, DDT.COM | DDT relocator - moves the debugger under the BDOS |
+| DDT1ASM.ASM | RDT.PRL, DDT.COM | DDT inline assembler/disassembler |
+| DDT2MON.ASM | RDT.PRL, DDT.COM | DDT debugger monitor (DEMON) |
+
+None of these is linked: `ASM.SUB` and `DDT.SUB` assemble each module twice
+with MAC, the second time 100H higher (`$+R`), and GENMOD makes the `.PRL`;
+`DDT.COM` is `RDT.PRL` through PRLCOM.  See docs/mpm2_v21.md, "ASM, RDT and
+DDT".
 
 ---
 

@@ -157,6 +157,13 @@ The source build system supports local modifications in `src/overrides/` that ta
 precedence over the original source. For example, the MPMLDR has its serial number
 check disabled in `src/overrides/MPMLDR/MPMLDR.PLM`.
 
+The assembler (`ASM.PRL`) and the debugger (`RDT.PRL`, `DDT.COM`) are not
+linked: DRI built them with MAC and GENMOD (`UTIL1/ASM.SUB`, `DDT.SUB`), each
+module assembled twice, the second time 100H higher, and GENMOD taking the
+relocation bits from the bytes that differ. The build does the same - `um80
+--aseg` for the two assemblies, and `tools/genmod.py` for GENMOD, GENHEX and
+PRLCOM.
+
 With `--tree=src`, the entire MP/M II operating system is built from source. Only 4
 development tools are binary-only (no source available):
 
@@ -187,7 +194,10 @@ python3 tools/verify_dri.py                       # both, against DRI's binaries
 ```
 
 All four nucleus SPRs — XDOS, BNKXDOS, RESBDOS and TMP — come back byte for
-byte identical to Digital Research's own V2.0 and V2.1 binaries. See
+byte identical to Digital Research's own V2.0 and V2.1 binaries, and so do
+the debugger, `RDT.PRL` and `DDT.COM`, and the assembler, `ASM.PRL`, but for
+34 (V2.0) or 11 (V2.1) bytes that no source sets and GENMOD took from the
+memory the program before it had left. See
 [docs/mpm2_v21.md](docs/mpm2_v21.md) for what changed between the releases
 and what is still outstanding.
 
@@ -214,7 +224,7 @@ XDOS never reads the byte, and `gensys.py` leaves it zero there with a note.
 | `--version=2.0\|2.1` | Release to build from source (default 2.0); `--tree=src` only |
 | `--compat-attributes[=yes\|no]` | Answer to V2.1 GENSYS's "Enable Compatibility Attributes" (default no) |
 | `--serial=none\|dri` | Serial number in a source-built nucleus: the sources' `654321` placeholder (default) or the one on DRI's master; `--tree=src` only |
-| `--dri-exact` | Build what DRI shipped: DRI's serial number, without the local fixes `src/overrides` keeps behind `DRIEXACT`; `--tree=src` only |
+| `--dri-exact` | Build what DRI shipped: DRI's serial number, without the local fixes `src/overrides` keeps behind `DRIEXACT`, and with what DRI's GENMOD found in memory in the bytes of ASM, RDT and DDT no source sets; `--tree=src` only |
 
 ### Modern GENSYS
 
@@ -475,8 +485,9 @@ The SSH port is `PORT` (default 2222) and the HTTP port `HTTP_PORT` (default
 `PORT` + 6000), so two checkouts can run their tests at once on different
 ports.  Logs go to `build/mpm2_test.log` and `build/mpm2_src_build.log`.
 
-`python3 tools/verify_dri.py` builds the nucleus of both releases with
-`--dri-exact` and compares it with Digital Research's binaries.
+`python3 tools/verify_dri.py` builds the nucleus, the assembler and the
+debugger of both releases with `--dri-exact` and compares them with Digital
+Research's binaries.
 
 ## Access Logging
 
