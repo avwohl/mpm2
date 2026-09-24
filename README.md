@@ -385,6 +385,12 @@ SFTP operations are handled by an RSP (Resident System Process) running inside M
   offset and closes it again, and nothing is left open in between.  SFTP
   sessions and HTTP clients can use it at the same time.
 - A download reads the whole file through the RSP when the client opens it.
+  The RSP opens a file it reads in read-only mode, as TYPE and PIP do, so a
+  console program reading the same file is not refused.  A file a console
+  program has open in locked mode (ED's file, say) cannot be read until it
+  is closed: SFTP reports it missing, HTTP answers 404.
+- The RSP runs in the BDOS's return-error mode: an error comes back to it
+  as a status and is never printed on a console.
 - An upload creates the file when the client opens it (`put` replaces one of
   the same name), and holds what the client writes until the client closes
   it, when it is written.  `put` returns only once it is all on the disk and
@@ -458,9 +464,9 @@ PORT=2311 ./scripts/run_tests.sh all                   # SSH on 2311, HTTP on 83
 |------|--------|
 | `basic` | `dir a:` over SSH |
 | `stat` | `stat` and `stat a:` |
-| `rsp` | `scripts/test_rsp.exp`: the resident system processes - MPMSTAT lists their queues, SCHED runs a command that is due, ABORT answers through its queue, SPOOL lists and deletes a file and STOPSPLR stops it |
+| `rsp` | `scripts/test_rsp.exp`: the resident system processes - MPMSTAT lists their queues, SCHED runs a command that is due, ABORT answers through its queue, SPOOL lists and deletes a file (one PIP made, checked with DIR first) and STOPSPLR stops it |
 | `http` | a file read over HTTP, through the SFTP RSP |
-| `sftp` | `scripts/test_sftp.exp`: files put over SFTP read back over SFTP and HTTP, then open from a console - `type` one, `submit` the other; and a 64K file goes up and comes back intact while HTTP reads another file, which stays intact too |
+| `sftp` | `scripts/test_sftp.exp`: files put over SFTP read back over SFTP and HTTP, then open from a console - `type` one, `submit` the other; `pip` copies a file HTTP is reading; HTTP is refused a file `ed` has open, and the system carries on; and a 64K file goes up and comes back intact while HTTP reads another file, which stays intact too |
 | `all` | all of the above |
 | `src` | `build_all.sh --tree=src`, then `basic`, `rsp`, `http` and `sftp` |
 | `interactive` | an SSH session to type at |
@@ -519,7 +525,7 @@ mpm2/
 │   │   ├── BNKBDOS/      # Banked BDOS
 │   │   ├── MPMLDR/       # MPMLDR with disabled serial check, GENSYS V2.1
 │   │   ├── NUCLEUS/      # Kernel source overrides
-│   │   └── UTIL2..UTIL7/ # RSPs and transients
+│   │   └── UTIL2, UTIL4..UTIL7/ # RSPs and transients
 │   └── cpm_runtime.mac   # Runtime support for PL/M programs
 ├── tools/
 │   ├── build.py          # Source build script (Python)

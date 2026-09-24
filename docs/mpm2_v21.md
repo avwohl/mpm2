@@ -279,3 +279,34 @@ been done.
   alone and a separate `*.BRS` from `*BRS.PLM` with
   `src/brs_runtime.mac` in `BRSPBI.ASM`'s place, and `gensys.sh` loads
   all four of DRI's resident system processes into every system.
+* SUBMIT and SPOOL (when there is no SPOOL RSP and `SPOOL.PRL` prints
+  the files itself) build their buffers from their last variable up to
+  the top of the memory segment - `rbuff` at `minimum$buffer`, `buffer` at
+  `dummy$buffer`.  That relies on Intel's LOCATE, which put the stack
+  below the data.  uplm80 puts its string constants, the procedures'
+  shared locals (`??AUTO`) and the stack after the last variable, so a
+  command file over 1K came out garbled ("Bad entry"), and the spooler
+  lost its buffer pointer, which is one of those locals, a few records
+  in.  Both overrides now put the buffer at `.MEMORY`, and
+  `tools/build.py` asks MP/M for the minimum the sources had reserved in
+  the image (400H and 80H, in the `.PRL` header).
+* ul80 0.3.48 does not relocate `__END__` in a `.PRL`: a reference to it
+  is not marked in the bit map, so `.MEMORY` is right only when the
+  program is loaded at a segment base of 0000H.  PIP, ED, SDIR, STAT,
+  SUBMIT and SPOOL use it.  Every memory segment `gensys.sh` generates
+  starts at 0000H (seven banks of 0000-BFFFH), so nothing here shows it;
+  a system with a segment based elsewhere would.  Reproduction:
+  `extrn __END__` / `ld hl,__END__` linked with `ul80 --prl` leaves the
+  bit for the high byte clear.
+* The emulator's SFTP RSP ran in the BDOS's default error mode.  A read
+  refused because a console program had the file open ("File Currently
+  Open") was then reported on the RSP's console, and V2.0's RESBDOS
+  prints a BDOS error straight through the XIOS with the process's whole
+  console byte - the RSP's is 0F0H, console 0 and list device 15.  The
+  XIOS polled device 0E0H for console 0F0H's output to be ready, which
+  it never is, inside the BDOS, and every process that touched a disk
+  stopped behind it.  V2.1's RESBDOS (`attxprint`) masks the byte and
+  prints only for a process that owns the console, so a V2.1 system
+  just lost the message.  The RSP now selects return-error mode (BDOS
+  function 45) when it starts, and opens the files it reads in
+  read-only mode.
