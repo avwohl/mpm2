@@ -1619,13 +1619,29 @@ $endif
         CALL SETCUSER;
         /* FILE CONTROL BLOCK IN BUFFER */
         IF DCNT = 255 THEN
+$if MPM21
+$if DRIEXACT
+            /* ***** MP/M 2.1 - the room for the [K] test below came from
+               this IF: DRI's patch compares only the low byte of NCOPIED
+               with zero (PIP.PRL 1FE1, MVI A,0 / LXI H,NCOPIED / CMP M
+               where V2.0 called its 16-bit compare), so a copy that had
+               matched a multiple of 256 files ended in FILE NOT FOUND.
+               --dri-exact builds what DRI shipped; otherwise the whole
+               word is tested, as in V2.0. */
+            DO; IF LOW(NCOPIED) = 0 THEN
+$else
             DO; IF NCOPIED = 0 THEN
+$endif
+$else
+            DO; IF NCOPIED = 0 THEN
+$endif
                 call error(10,0,0,.searfcb);  /* file not found */
 $if MPM21
             /* ***** MP/M 2.1 - [K] also suppresses the closing new
                line (PIP.PRL 1FF4).  To find the room the patch tests
                only the low byte of NCOPIED in the IF above, which
-               differs from this only after a multiple of 256 files. */
+               differs from this only after a multiple of 256 files -
+               this source keeps the whole word unless DRIEXACT. */
             if not kilds then
                 CALL CRLF;
 $else

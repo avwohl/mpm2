@@ -41,9 +41,14 @@ binaries:
   of the `654321` placeholder the nucleus sources carry.
 * `--dri-exact` implies `--serial dri` and additionally leaves out the
   local fixes this repository carries on top of DRI's code, so that the
-  output can be compared byte for byte.  At present the only such fix is
-  the stack-pointer save and restore in `TMPSUB.ASM`, 25 bytes that DRI
-  had commented out.
+  output can be compared byte for byte, or at least does what DRI
+  shipped.  It defines `DRIEXACT` for both tools.  At present there are
+  two such fixes: the stack-pointer save and restore in `TMPSUB.ASM`, 25
+  bytes that DRI had commented out, and, in V2.1's `PIP.PLM`, MULTCOPY's
+  file-not-found test, which DRI's patch (`PIP.PRL` 1FE1) cut down to
+  the low byte of `NCOPIED` - so a copy that matched a multiple of 256
+  files ends in FILE NOT FOUND.  The default build tests the whole word,
+  as V2.0 did.
 
 ```
 python3 tools/verify_dri.py
