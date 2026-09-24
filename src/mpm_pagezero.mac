@@ -21,17 +21,23 @@ BDISK   equ     0004H           ; Current disk (alternate name)
 BDOS    equ     0005H           ; BDOS/XDOS entry point
 MAXB    equ     0006H           ; Top of memory address (in BDOS jump)
 WBOOT   equ     0038H           ; Warm boot vector
-CMDRV   equ     005CH           ; Command drive (byte before FCB)
 FCB     equ     005CH           ; Default FCB (36 bytes)
 FCB16   equ     006CH           ; Second FCB
 BUFF    equ     0080H           ; DMA buffer (alternate name)
 TBUFF   equ     0080H           ; Default DMA buffer (128 bytes)
 
-; Command tail info (used by uplm80)
-PASS0   equ     0080H           ; Parsed param 0 pointer
-LEN0    equ     0080H           ; Length of param 0
-PASS1   equ     0082H           ; Parsed param 1 pointer
-LEN1    equ     0082H           ; Length of param 1
+; The command drive and the two password fields MP/M's CLI fills in for a
+; transient: 0050H the drive the command came from, 0051H/0053H the address
+; and length of the first file's password, 0054H/0056H the second's.  These
+; are DRI's own values, from PLM_WORK/X0100.ASM.  MP/M II's CLI zeroes
+; 0051H-0056H (NUCLEUS/CLI.ASM, "tptpw"/"tnpw"), so ED, TYPE and ERAQ -
+; which test `len0 <> 0' - never take their password path.  With LEN0 at
+; 0080H, the command tail's length, they took it whenever a file was named.
+CMDRV   equ     0050H           ; Command drive
+PASS0   equ     0051H           ; First password's address
+LEN0    equ     0053H           ; First password's length
+PASS1   equ     0054H           ; Second password's address
+LEN1    equ     0056H           ; Second password's length
 
 ; The compiler's own page-zero references.  uplm80 emits these names, with its
 ; reserved `??' prefix, for the BDOS entry, the stack top and the warm-boot
