@@ -283,6 +283,7 @@ class Builder:
         self.output_dir = OUTPUT_DIR
         # Conditional-assembly symbols, e.g. MPM21 for the V2.1 sources.
         self.defines = list(defines or [])
+        self.runtimes_built = set()
 
     def define_args(self, flag="-D"):
         out = []
@@ -513,11 +514,15 @@ class Builder:
         if not target.skip_runtime:
             for src in self.runtime_sources(target):
                 rel = BUILD_DIR / (src.stem + ".rel")
-                if not rel.exists():
+                # Assembled once per run, not once per checkout: a .rel left
+                # over from an earlier build would otherwise be linked after
+                # its source had changed, and nothing would say so.
+                if src not in self.runtimes_built:
                     self.debug(f"Building runtime library {src.name}...")
                     if not self.assemble(src, rel):
                         self.log(f"  ERROR: Failed to build {src.name}")
                         return False
+                    self.runtimes_built.add(src)
                 rel_files.append(rel)
 
         # Link
