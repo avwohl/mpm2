@@ -80,6 +80,7 @@ class BuildTarget:
                                  # storage the program places at .MEMORY.  DRI
                                  # passed this to GENMOD: `genmod ed.hex
                                  # xed.prl $1000'.
+    prl_extra_v21: Optional[str] = None  # The V2.1 figure, where V2.1 changed it.
     skip_runtime: bool = False   # If True, don't link with cpm_runtime
     post_build: Optional[str] = None  # Special post-build action (e.g., "mpmldr")
 
@@ -166,11 +167,15 @@ UTIL1_TARGETS = [
 # ============================================================================
 # UTIL7 - SDIR (Super Directory - multi-module PL/M)
 # ============================================================================
+# V2.0's SDIR.SUB ran `genmod d.hex xsdir.prl' with no third argument, and both
+# V2.0 binaries ask for 0000H; V2.1's asks for 1000H (PRL header bytes 4-5).
+# That is half of V2.1's fix to the file table's bounds check - see
+# src/overrides/UTIL7/DSE.PLM.
 UTIL7_TARGETS = [
     BuildTarget("SDIR", "prl", [
         "DM.PLM", "SN.PLM", "DSE.PLM", "DSH.PLM",
         "DSO.PLM", "DA.PLM", "DP.PLM", "DTS.PLM"
-    ], "UTIL7", prl_extra="1000"),
+    ], "UTIL7", prl_extra="0", prl_extra_v21="1000"),
 ]
 
 # ============================================================================
@@ -522,8 +527,11 @@ class Builder:
 
         # Link
         output_file = self.output_dir / f"{target.name}.{target.output_type.upper()}"
+        extra = target.prl_extra
+        if target.prl_extra_v21 is not None and "MPM21" in self.defines:
+            extra = target.prl_extra_v21
         if not self.link(rel_files, output_file, target.output_type, target.origin,
-                         target.prl_extra):
+                         extra):
             return False
 
         # Handle post-build actions
