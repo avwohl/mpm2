@@ -226,7 +226,8 @@ MPMLDR_TARGETS = [
     # - Uses --mode bare for proper stack initialization
     # - Uses modified LDMONX.ASM wrapper for BDOS calls
     # - Doesn't link with cpm_runtime
-    # - Post-build combines with LDRBDOS binary
+    # - Post-build puts LDRBDOS and LDRBIOS after it, as MPMLDR.SUB did
+    #   (post_build_mpmldr)
     BuildTarget("MPMLDR", "com", ["MPMLDR.PLM", "LDMONX.ASM"], "MPMLDR",
                 plm_mode="bare", skip_runtime=True, post_build="mpmldr"),
     # DRI: `link gensys.obj,ldrlwr.obj,x0100.obj,plm80.lib' (GENSYS.SUB).
@@ -241,17 +242,12 @@ MPMLDR_TARGETS = [
                 skip_runtime=True),
 ]
 
-# LDRBDOS, the loader's BDOS at 0D00H, is taken from DRI's MPMLDR.COM (it is
-# the same in V2.0 and V2.1) rather than assembled from MPMLDR/LDRBDOS.ASM,
-# which um80 0.3.50 cannot assemble as MAC did.  Its register aliases are
-# EQUs whose names are not in column 1 (`<tab>arech  equ b! arecl  equ c'),
-# which um80 rejects; used as a register pair an alias comes out wrong
-# (`crech equ d' then `push crech' is PUSH H); and it spells some names two
-# ways (`call seek$dir' for `seekdir:'), which MAC, ignoring the `$', takes
-# for one.  With those three put right by hand um80 assembles it to DRI's
-# 0D00H-164CH byte for byte.
-LDRBDOS_BIN = BUILD_DIR / "MPMLDR" / "ldrbdos.bin"
-DRI_MPMLDR = SRC_ROOT / "MPMLDR" / "MPMLDR.COM"
+# The loader's BDOS (ORG 0D00H) and the skeleton of its BIOS (ORG 1700H),
+# MAC sources that MPMLDR.SUB assembled and loaded into MPMLDR.COM after the
+# PL/M loader; the same in V2.0 and V2.1.  At boot the emulator's own LDRBIOS
+# (asm/ldrbios.asm) is loaded over the skeleton.
+MPMLDR_MAC_SOURCES = ["LDRBDOS.ASM", "LDRBIOS.ASM"]
+LDRBDOS_ORG = 0x0D00            # the linked loader has to end below it
 
 # ============================================================================
 # NUCLEUS - Kernel SPR files
@@ -766,74 +762,58 @@ class Builder:
 
         # Handle post-build actions
         if target.post_build == "mpmldr":
-            if not self.post_build_mpmldr(output_file):
+            if not self.post_build_mpmldr(target, output_file):
                 return False
 
         self.log(f"  Created {output_file}")
         return all_success
 
-    def post_build_mpmldr(self, output_file: Path) -> bool:
+    def post_build_mpmldr(self, target: BuildTarget, output_file: Path) -> bool:
+        """MPMLDR.COM as MPMLDR.SUB made it.
+
+        `pip mpmldr.hex=impmldr.hex[I],ldrbdos.hex[I],ldrbios.hex[H]' and
+        `load mpmldr': the linked loader at 0100H, and LDRBDOS.ASM and
+        LDRBIOS.ASM at their own ORGs, each assembled as MAC assembles it
+        (um80 --dri --aseg).  LOAD wrote memory from 0100H to the end of
+        the record that holds the last byte loaded, and a byte no HEX
+        record loads kept whatever was in memory.  In DRI's file those are
+        LDRBDOS's DS areas at 0E8CH-0EBDH and 0EC0H-0EC3H and, from 164DH
+        up to LDRBIOS at 1700H, its variables and the gap after them; here
+        they are zero.  Every byte a statement loads is DRI's
+        (tools/verify_dri.py).  MPMLDR.linked is the loader alone.
         """
-        Post-build step for MPMLDR: combine with LDRBDOS binary.
-
-        MPMLDR memory map:
-        - 0x100: Main loader code (from PLM/ASM)
-        - 0xD00: LDRBDOS (extracted from DRI MPMLDR.COM)
-        - 0x1700: LDRBIOS (loaded at runtime by boot loader)
-
-        LDRBDOS is extracted from DRI's MPMLDR.COM instead of built from
-        LDRBDOS.ASM, which um80 cannot assemble yet (see LDRBDOS_BIN).
-        """
-        # Create MPMLDR build directory if needed
-        mpmldr_build_dir = self.build_dir / "MPMLDR"
-        mpmldr_build_dir.mkdir(parents=True, exist_ok=True)
-
-        # Extract LDRBDOS from DRI's MPMLDR.COM if not already done
-        if not LDRBDOS_BIN.exists():
-            self.debug("Extracting LDRBDOS from DRI MPMLDR.COM...")
-            if not DRI_MPMLDR.exists():
-                self.log(f"  ERROR: DRI MPMLDR.COM not found: {DRI_MPMLDR}")
+        image = bytearray(output_file.read_bytes())
+        shutil.copy(output_file, output_file.with_suffix(".linked"))
+        if 0x100 + len(image) > LDRBDOS_ORG:
+            self.log(f"  ERROR: the loader runs to {0x100 + len(image) - 1:04X}H, "
+                     f"into LDRBDOS at {LDRBDOS_ORG:04X}H")
+            return False
+        loaded = set()
+        for src in MPMLDR_MAC_SOURCES:
+            path = self.find_source(target, src)
+            if path is None:
                 return False
-
-            # Read DRI MPMLDR.COM and extract LDRBDOS (at offset 0xC00, length 0xA80)
-            # The binary loads at 0x100, so LDRBDOS at 0xD00 is at file offset 0xC00
+            rel = self.build_dir / (Path(src).stem + ".REL")
+            if not self.assemble(path, rel, absolute=True, dri=True):
+                return False
             try:
-                with open(DRI_MPMLDR, 'rb') as f:
-                    data = f.read()
-                # LDRBDOS is at 0xD00 in memory, file starts at 0x100, so offset = 0xD00 - 0x100 = 0xC00
-                ldrbdos_offset = 0xD00 - 0x100
-                ldrbdos_size = 0xA80  # Size extracted during investigation
-                ldrbdos_data = data[ldrbdos_offset:ldrbdos_offset + ldrbdos_size]
-                with open(LDRBDOS_BIN, 'wb') as f:
-                    f.write(ldrbdos_data)
-                self.debug(f"Extracted {len(ldrbdos_data)} bytes of LDRBDOS")
-            except Exception as e:
-                self.log(f"  ERROR: Failed to extract LDRBDOS: {e}")
+                data = genmod.rel_bytes(rel)
+            except genmod.GenmodError as e:
+                self.log(f"  ERROR: {e}")
                 return False
-
-        # Use dri_patch tool to combine main code with LDRBDOS
-        dri_patch = Path(__file__).parent / "dri_patch.py"
-        if not dri_patch.exists():
-            self.log(f"  ERROR: dri_patch tool not found: {dri_patch}")
-            return False
-
-        # Create a backup of the original linked output
-        linked_output = output_file.with_suffix('.linked')
-        shutil.copy(output_file, linked_output)
-
-        # Combine: base at 0x100, LDRBDOS at 0xD00
-        cmd = [
-            "python3", str(dri_patch),
-            "--base", f"{linked_output}@0x100",
-            "--patch", f"0xD00:{LDRBDOS_BIN}",
-            "-o", str(output_file)
-        ]
-
-        if not self.run(cmd):
-            self.log("  ERROR: Failed to combine MPMLDR with LDRBDOS")
-            return False
-
-        self.debug("Combined MPMLDR with LDRBDOS")
+            for addr, byte in data:
+                if addr < LDRBDOS_ORG or addr in loaded:
+                    self.log(f"  ERROR: {src} loads {addr:04X}H, which "
+                             "something before it has loaded")
+                    return False
+                loaded.add(addr)
+                offset = addr - 0x100
+                if offset >= len(image):
+                    image.extend(bytes(offset + 1 - len(image)))
+                image[offset] = byte
+        image.extend(bytes(-len(image) % 128))      # whole records, as LOAD wrote
+        output_file.write_bytes(image)
+        self.debug(f"MPMLDR.COM: 0100H-{0x100 + len(image) - 1:04X}H")
         return True
 
     def build_all(self, targets=None):

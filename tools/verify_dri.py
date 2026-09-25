@@ -20,6 +20,10 @@ UNSET below.  The two masters carry the same three files.  (The copies
 next to their sources in mpm2src/UTIL1 are a later rebuild that was never
 shipped, and are not a reference; see docs/mpm2_v21.md, "ASM, RDT and
 DDT".)
+
+Of MPMLDR.COM only the part MAC assembled is compared (PART below): the
+loader's BDOS and the skeleton of its BIOS.  The rest is PL/M, and uplm80
+does not compile to PL/M-80's bytes.
 """
 import argparse
 import pathlib
@@ -42,10 +46,11 @@ TARGETS = [
     ("ASM", "ASM.PRL"),
     ("RDT", "RDT.PRL"),
     ("DDT", "DDT.COM"),
+    ("MPMLDR", "MPMLDR.COM"),
 ]
 
-# Bytes of a GENMOD'd program that no source sets and that the build cannot
-# reproduce, as offsets into the file.  A DS area, or the gap before a
+# Bytes that no source sets and that the build cannot reproduce, as offsets
+# into the file.  In a GENMOD'd program a DS area, or the gap before a
 # module's ORG, keeps whatever the program before GENMOD left in memory -
 # MAC.COM, which build.py --dri-exact loads there (genmod_memory): that
 # accounts for every such byte of RDT.PRL and DDT.COM.  What MAC changed
@@ -53,8 +58,22 @@ TARGETS = [
 # as MAC leaves them after assembling AS3SYM.  The same in both releases,
 # since both masters carry the same file.  See docs/mpm2_v21.md, "ASM, RDT
 # and DDT".
+#
+# MPMLDR.COM was put together by LOAD (MPMLDR/MPMLDR.SUB), which kept what
+# was in memory wherever no HEX record loads a byte: LDRBDOS's DS areas at
+# 0E8CH-0EBDH and 0EC0H-0EC3H, and 164DH-16FFH, its variables and the gap
+# after them up to LDRBIOS at 1700H.  The build has zeros there.
 UNSET = {
     "ASM.PRL": "0BC9 0BD8-0BD9 0C0C-0C0E 0C17-0C18 0C21-0C23",
+    "MPMLDR.COM": "0D8C-0DBD 0DC0-0DC3 154D-15FF",
+}
+
+# Files of which only part is DRI's assembler source, as file offsets.
+# MPMLDR.COM is the PL/M loader (MPMLDR.PLM, LDMONX.ASM) up to 0D00H, then
+# LDRBDOS.ASM (0D00H-164CH) and LDRBIOS.ASM (1700H-1742H), which MAC
+# assembled, to the end of the file at 177FH.
+PART = {
+    "MPMLDR.COM": "0C00-167F",
 }
 
 
@@ -99,7 +118,8 @@ def compare_file(ref, built):
     if len(a) != len(b):
         return f"length {len(a)} vs {len(b)}"
     unset = offsets(UNSET.get(ref.name, ""))
-    bad = [i for i in range(len(a)) if a[i] != b[i] and i not in unset]
+    part = offsets(PART[ref.name]) if ref.name in PART else range(len(a))
+    bad = [i for i in part if a[i] != b[i] and i not in unset]
     if bad:
         return (f"{len(bad)} bytes differ, first at "
                 + " ".join(f"{i:04X}" for i in bad[:8]))
@@ -123,6 +143,8 @@ def run(version, keep=None):
         why = compare(ref, built) if built.exists() else "not built"
         if why is None:
             why = "identical to DRI " + version
+            if name in PART:
+                why += " in " + PART[name]
             unset = offsets(UNSET.get(name, ""))
             if unset:
                 why += f" but for {len(unset)} bytes no source sets"
