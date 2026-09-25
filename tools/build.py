@@ -137,16 +137,11 @@ UTIL4_TARGETS = [
 UTIL5_TARGETS = [
     BuildTarget("ABORT", "prl", ["ABORT.PLM"], "UTIL5"),
     BuildTarget("TOD", "prl", ["TOD.PLM"], "UTIL5"),
-    # SUBMIT and SPOOL build their buffers at .MEMORY, up to the top of the
-    # memory segment (see the overrides).  DRI's sources reserved the minimum
-    # in the image - SUBMIT a 1024-byte minimum$buffer, SPOOL a 128-byte
-    # dummy$buffer, each the last variable - and the extra memory asked for
-    # here keeps that minimum now that the buffer starts past the image.
-    BuildTarget("SUBMIT", "prl", ["SUB.PLM"], "UTIL5", prl_extra="400"),  # SUB.PLM -> SUBMIT.PRL
+    BuildTarget("SUBMIT", "prl", ["SUB.PLM"], "UTIL5"),          # SUB.PLM -> SUBMIT.PRL
     BuildTarget("PRINTER", "prl", ["PRINT.PLM"], "UTIL5"),       # PRINT.PLM -> PRINTER.PRL
     BuildTarget("SCHED", "prl", ["MSCHD.PLM"], "UTIL5"),         # MSCHD.PLM -> SCHED.PRL
     BuildTarget("MPMSTAT", "prl", ["MSTS.PLM"], "UTIL5"),        # MSTS.PLM -> MPMSTAT.PRL
-    BuildTarget("SPOOL", "prl", ["MSPL.PLM"], "UTIL5", prl_extra="80"),   # MSPL.PLM -> SPOOL.PRL
+    BuildTarget("SPOOL", "prl", ["MSPL.PLM"], "UTIL5"),          # MSPL.PLM -> SPOOL.PRL
     BuildTarget("STOPSPLR", "prl", ["STPSP.PLM"], "UTIL5"),      # STPSP.PLM -> STOPSPLR.PRL
     BuildTarget("DSKRESET", "prl", ["DRST.PLM"], "UTIL5"),       # DRST.PLM -> DSKRESET.PRL
     BuildTarget("CONSOLE", "prl", ["CNS.PLM"], "UTIL5"),         # CNS.PLM -> CONSOLE.PRL

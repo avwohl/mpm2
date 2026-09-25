@@ -375,14 +375,14 @@ breakpoint vector through the system data page.
 * SUBMIT and SPOOL (when there is no SPOOL RSP and `SPOOL.PRL` prints
   the files itself) build their buffers from their last variable up to
   the top of the memory segment - `rbuff` at `minimum$buffer`, `buffer` at
-  `dummy$buffer`.  That relies on Intel's LOCATE, which put the stack
-  below the data.  uplm80 puts its string constants, the procedures'
-  shared locals (`??AUTO`) and the stack after the last variable, so a
-  command file over 1K came out garbled ("Bad entry"), and the spooler
-  lost its buffer pointer, which is one of those locals, a few records
-  in.  Both overrides now put the buffer at `.MEMORY`, and
-  `tools/build.py` asks MP/M for the minimum the sources had reserved in
-  the image (400H and 80H, in the `.PRL` header).
+  `dummy$buffer`.  That relies on Intel's layout, which put the stack
+  below the data and nothing after the last variable.  uplm80 up to 0.3.6
+  put its string constants, the procedures' shared locals (`??AUTO`) and
+  the stack after the last variable, so a command file over 1K came out
+  garbled ("Bad entry"), and the spooler lost its buffer pointer, which
+  is one of those locals, a few records in; for a while the overrides
+  moved both buffers to `.MEMORY`.  uplm80 0.3.7 lays a program out as
+  Intel's PL/M-80 does, variables last, and both build from DRI's text.
 * ul80 0.3.48 does not relocate `__END__` in a `.PRL`: a reference to it
   is not marked in the bit map, so `.MEMORY` is right only when the
   program is loaded at a segment base of 0000H.  PIP, ED, SDIR, STAT,

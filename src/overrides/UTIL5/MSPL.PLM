@@ -237,18 +237,8 @@ $endif
 
   declare reserved$for$disk (3) byte;
   declare dummy$buffer (128) byte;
-  /* ***** uplm80 workaround - DRI's buffer is AT (.dummy$buffer), the
-     last variable, and the records of the file being printed are read
-     into it as far up as maxb, the top of the memory segment (nmbufs
-     below).  Intel's LOCATE put the stack below the data, so everything
-     past dummy$buffer was free.  uplm80 puts its string constants, the
-     procedures' ??AUTO locals and the stack after the last variable, and
-     the second record of the file went over them.  .memory, the linker's
-     __END__, is the first byte after all of that.  dummy$buffer is still
-     where the [D] option is parsed to; the 128 bytes it gave the buffer
-     are asked for past the image instead (tools/build.py). */
   declare buffer (1) structure (
-    char (128) byte) at (.memory);
+    char (128) byte) at (.dummy$buffer);
 
   declare last$dseg$byte byte
     initial (0);
