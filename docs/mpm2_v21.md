@@ -55,8 +55,9 @@ binaries:
 python3 tools/verify_dri.py
 ```
 
-builds both releases with `--dri-exact` and compares the nucleus and
-UTIL1's assembler and debugger against the matching reference:
+builds both releases with `--dri-exact` and compares the nucleus,
+UTIL1's assembler and debugger, and the loader's BDOS and BIOS in
+`MPMLDR.COM` against the matching reference:
 
 ```
 MP/M II V2.0:
@@ -67,6 +68,7 @@ MP/M II V2.0:
   ASM.PRL      identical to DRI 2.0 but for 11 bytes no source sets
   RDT.PRL      identical to DRI 2.0
   DDT.COM      identical to DRI 2.0
+  MPMLDR.COM   identical to DRI 2.0 in 0C00-167F but for 233 bytes no source sets
 MP/M II V2.1:
   XDOS.SPR     identical to DRI 2.1
   BNKXDOS.SPR  identical to DRI 2.1
@@ -75,6 +77,7 @@ MP/M II V2.1:
   ASM.PRL      identical to DRI 2.1 but for 11 bytes no source sets
   RDT.PRL      identical to DRI 2.1
   DDT.COM      identical to DRI 2.1
+  MPMLDR.COM   identical to DRI 2.1 in 0C00-167F but for 233 bytes no source sets
 ```
 
 For an `.SPR` the comparison covers the program image and the
@@ -85,7 +88,9 @@ and `DDT.COM` are compared whole, header and bitmap included; the bytes
 of `ASM.PRL` it lets through are explained under
 [ASM, RDT and DDT](#asm-rdt-and-ddt---no-change).  `CONTROL` and
 `mpm2dist` carry the same three files, so the V2.0 and V2.1 references
-for them are one and the same.
+for them are one and the same.  Of `MPMLDR.COM` only the part DRI
+assembled with MAC is compared, file offsets 0C00-167F (0D00H-177FH);
+the rest is PL/M (see below).
 
 ## What changed between the releases
 
@@ -129,6 +134,17 @@ nucleus is all assembler, which is why it can be compared byte for byte.
 `mpm2src/UTIL1`, which neither master carries, differ from it, but only
 in bytes no source sets; see
 [ASM, RDT and DDT](#asm-rdt-and-ddt---no-change).
+
+The table's three `MPMLDR.COM` bytes are its banner and serial number,
+in the PL/M loader.  The rest of the file, 0D00H-177FH, is the loader's
+BDOS and the skeleton of its BIOS, MAC sources (`MPMLDR/LDRBDOS.ASM`,
+`LDRBIOS.ASM`) that are the same in both releases.  `MPMLDR.SUB`
+assembled them and LOADed them after the loader, and the build does the
+same with `um80 --dri --aseg`.  `verify_dri.py` compares that part of the
+file: every byte a statement loads is DRI's, and the 233 that none does
+- LDRBDOS's DS areas at 0E8CH-0EBDH and 0EC0H-0EC3H, and 164DH-16FFH,
+its variables and the gap up to LDRBIOS - hold what was in LOAD's
+memory in DRI's file and are zero in the build.
 
 ## The nucleus changes
 
@@ -635,11 +651,10 @@ a byte that is zero in the second copy.
 assembles each module as it is and a copy with every ORG 100H higher,
 and `tools/genmod.py` does what GENMOD, GENHEX and PRLCOM did.  Under
 cpmemu, DRI's own `MAC.COM` gives the same HEX records for all ten
-modules both ways.  `genmod.py` refuses the two kinds of ORG that um80
-does not assemble as MAC does, in either copy, rather than let them
-through: an ORG in column 1, which MAC takes for an ORG and um80 does
-not, and a label on an ORG line, which MAC sets to the new location
-and um80 to the old.  None of the ten modules has either.
+modules both ways.  `genmod.py` refuses the kind of ORG that um80 does
+not assemble as MAC does, in either copy, rather than let it through: a
+label on an ORG line, which MAC sets to the new location and um80 to
+the old.  None of the ten modules has one.
 
 The code is the same in V2.0 and V2.1, and so are the files: the V2.0
 master (`CONTROL`) and V2.1 (`mpm2dist`) carry byte for byte the same

@@ -111,16 +111,15 @@ inside MP/M, and neither is part of the host build.
 
 ## LDRBDOS (Loader BDOS)
 
-The loader's BDOS (LDRBDOS) is not assembled from DRI's `MPMLDR/LDRBDOS.ASM`,
-which um80 cannot yet assemble as DRI's MAC did. It is extracted from DRI's
-pre-built MPMLDR.COM at file offset 0xC00 (2,688 bytes); it is the same in V2.0
-and V2.1.
-
-This extraction happens in `tools/build.py` during the MPMLDR build:
-```python
-# LDRBDOS at memory 0xD00, file offset 0xC00
-ldrbdos_data = dri_mpmldr[0xC00:0xC00 + 0xA80]
-```
+The loader's BDOS is assembled from DRI's `MPMLDR/LDRBDOS.ASM`, and the
+skeleton loader BIOS DRI put at 1700H from `MPMLDR/LDRBIOS.ASM`, both with
+`um80 --dri --aseg`, as MAC assembled them; they are the same in V2.0 and
+V2.1. `tools/build.py` puts `MPMLDR.COM` together the way DRI's `MPMLDR.SUB`
+did: the linked PL/M loader at 0100H, LDRBDOS at 0D00H and LDRBIOS at 1700H,
+to the end of the last 128-byte record. Every byte a statement loads is
+DRI's (`tools/verify_dri.py`); the DS areas and the gap before LDRBIOS, where
+DRI's file has whatever LOAD found in memory, are zero. At boot the
+emulator's own LDRBIOS (`asm/ldrbios.asm`) is loaded over the skeleton.
 
 ## Macro Libraries and Documentation
 
@@ -155,7 +154,6 @@ These reference files are always copied from `bin/dri/` regardless of build tree
 
 4. **System generation** (`gensys.sh`):
    - Uses `tools/gensys.py` on the host (see above)
-   - Extracts LDRBDOS from DRI's MPMLDR.COM
    - Generates MPM.SYS
 
 ## What IS Built from Source
@@ -165,13 +163,12 @@ With `--tree=src`, these are compiled from `mpm2_external/mpm2src/`:
 - All PRL utilities (DIR, STAT, PIP, TYPE, ERA, REN, etc.)
 - All SPR system components (BNKBDOS, BNKXDOS, RESBDOS, XDOS, etc.)
 - The resident system processes: ABORT.RSP, and MPMSTAT, SCHED and SPOOL each as an `.RSP` and a `.BRS`
-- MPMLDR (with serial check disabled via src/overrides/)
+- MPMLDR (with serial check disabled via src/overrides/), with the loader's
+  BDOS and skeleton BIOS assembled from DRI's `LDRBDOS.ASM` and `LDRBIOS.ASM`
 - Development tools: ASM, RDT and DDT (assembled twice and put together by `tools/genmod.py`, as DRI did with MAC and GENMOD), GENHEX, GENMOD, GENSYS (GENSYS is built for use inside MP/M; the host build uses `tools/gensys.py`)
 
 Source overrides in `src/overrides/` customize:
 - MPMLDR - Serial number check disabled
-- BNKBDOS - the names DRI's text spells both with and without a `$`, which
-  RMAC reads as one name and um80 does not
 - NUCLEUS components
 - The V2.1 changes, behind `MPM21`, in the nucleus, MPMLDR, GENSYS and the
   UTIL2, UTIL4, UTIL5, UTIL6 and UTIL7 utilities

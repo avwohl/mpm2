@@ -18,7 +18,7 @@ on the way the emulator's disk transfers, its XIOS results and SFTP and HTTP
 file access were put right.
 
 This release needs uplm80 0.3.7 or later, upeepz80 0.2.5 or later,
-um80_and_friends 0.3.50 or later and cpmemu 4.10.0. uplm80 and upeepz80
+um80_and_friends 0.3.51 or later and cpmemu 4.10.0. uplm80 and upeepz80
 compile the SFTP resident system process in every build, as well as the
 utilities of a `--tree=src` build; um80 and ul80 assemble and link the XIOS,
 the loader BIOS and the whole of a `--tree=src` build; cpmemu provides the
@@ -34,12 +34,15 @@ image. What the older releases get wrong here:
   `AT (.external - 1)` as the location counter, and put its stack and shared
   locals after the last variable, which SUBMIT and SPOOL use as the start of a
   buffer. The source build now compiles all of that code as DRI wrote it.
-- um80 before 0.3.50 cannot cut PUBLIC and EXTRN names to six characters
-  (`-t`), as RMAC does; the nucleus does not link without it. Before 0.3.49 it
-  assembled `LOW()` of a relocatable address as an absolute byte, read a
-  forward `EQU` of a later label as 0, and kept only the last of two constants
-  added to an external; ul80 before 0.3.49 left references to `__END__`, PL/M's
-  `.MEMORY`, out of a `.PRL`'s relocation bit map.
+- um80 before 0.3.51 has no `--dri`, with which the source build reads every
+  one of DRI's assembler sources as MAC and RMAC read it, and ul80 before
+  0.3.51 no `--fatal-mult-def`, which every build's SPR and PRL links pass (see
+  Changed). um80 before 0.3.50 cannot cut PUBLIC and EXTRN names to six
+  characters (`-t`), as RMAC does; the nucleus does not link without it. Before
+  0.3.49 it assembled `LOW()` of a relocatable address as an absolute byte,
+  read a forward `EQU` of a later label as 0, and kept only the last of two
+  constants added to an external; ul80 before 0.3.49 left references to
+  `__END__`, PL/M's `.MEMORY`, out of a `.PRL`'s relocation bit map.
 - upeepz80 before 0.2.5 made rewrites that changed a register or a flag that
   was read afterwards.
 - cpmemu's `cpm_disk.py` before 4.10.0 fails with `UnicodeDecodeError` on
@@ -69,7 +72,8 @@ describes every change and the evidence for it.
 - `tools/verify_dri.py` builds both releases with `--dri-exact` and compares
   them with DRI's binaries. XDOS.SPR, BNKXDOS.SPR, RESBDOS.SPR and TMP.SPR
   come back byte for byte identical in both releases, and so do RDT.PRL and
-  DDT.COM; ASM.PRL does but for 11 bytes no source sets (see Fixed).
+  DDT.COM; ASM.PRL does but for 11 bytes no source sets (see Fixed), and the
+  part of MPMLDR.COM that DRI assembled with MAC but for 233 (see Changed).
 - The nucleus changes, one line each: the MX queues a process owns are
   released on its way out through XDOS rather than in the dispatcher;
   `pd(1dh)` carries the F1'-F4' attributes of the command's file; a process's
@@ -197,9 +201,11 @@ program's load line and then dropped the session, whatever the program was.
 More of the source build is DRI's own text. SUBMIT (`UTIL5/SUB.PLM`), the
 banked halves of the scheduler and MPMSTAT (`UTIL2/SCBRS.PLM`, `MSBRS.PLM`) and
 the resident halves of the spooler and MPMSTAT (`UTIL2/SPRSP.PLM`, `MSRSP.PLM`)
-build from DRI's files as they stand. The overrides that are left carry the
-V2.1 reconstruction, a few local fixes, and what the toolchain still needs (see
-Known issues):
+build from DRI's files as they stand, and so do BNKBDOS, `NUCLEUS/MEMMGR.ASM`
+and the loader's BDOS (see below). The overrides that are left carry the V2.1
+reconstruction, the serial number, a few local fixes, and
+`MPMLDR/LDMONX.ASM`, which uplm80's calling convention needs (see Known
+issues):
 
 - The ones that carry the V2.1 reconstruction are DRI's text apart from their
   V2.1 changes: `SPBRS.PLM` has DRI's `restarts` stack and its `DO` loop,
@@ -214,10 +220,15 @@ Known issues):
   are gone, and the V2.1 patch area enters CLI at `prbrls`, which does not
   collide with CLBDOS's `printb` at six characters.
 - A `$` inside a name or a binary constant is DRI's spelling again —
-  `BNKXDOS.ASM`'s `pw$fld`, `CLI.ASM`'s `0001$1111b` — except in the 28 names
-  DRI's text spells two ways, which RMAC takes for one name since it ignores
-  the `$`, and um80 does not: `MPM.ASM` stores to `nmb$lst`, which `DATAPG.ASM`
-  defines as `nmblst`, and 23 of them are in `BNKBDOS.ASM`.
+  `BNKXDOS.ASM`'s `pw$fld`, `CLI.ASM`'s `0001$1111b` — and that includes the
+  28 names DRI's text spells two ways, which RMAC takes for one name since it
+  ignores the `$`: `MPM.ASM` stores to `nmb$lst`, which `DATAPG.ASM` defines
+  as `nmblst`, `CLI.ASM` calls `open$test` and defines `opentest`, and 23 of
+  them are in `BNKBDOS.ASM`. um80 0.3.51 ignores the `$` too, with `--dri`
+  (see below), so the override of `BNKBDOS.ASM`, which spelled each of its 23
+  one way, is gone, and so is `MEMMGR.ASM`'s, which wrote six line ends of CR
+  and 8AH, a line feed with the parity bit set, as CR LF: um80 0.3.51 clears
+  bit 7 of a source byte. `CONBDOS.ASM`'s `patch$size` has its `$` back too.
   `NUCLEUS/BNKBDOS1.ASM` and `BDOS30.ASM`, `$`-stripped copies that nothing
   built, and a copy of `MPMLDR/LDRBDOS.ASM` identical to DRI's are gone.
 - XDOS, BNKXDOS, RESBDOS and TMP are still identical to DRI's in both
@@ -226,6 +237,55 @@ Known issues):
   V2.0 and V2.1. SUBMIT.PRL and SPOOL.PRL ask MP/M for no extra memory, as
   DRI's do: each program's buffer starts at one of its last variables and runs
   on to the top of its memory segment.
+
+`tools/build.py` assembles every one of DRI's assembler sources with um80
+0.3.51's `--dri`, which reads it as MAC and RMAC do where they differ from
+MACRO-80: a `$` inside a name is ignored, the first word of a statement is a
+label without a colon when it is no instruction or directive
+(`UTIL3/GENHEX.ASM`'s `OBP DS 1`), `PUSH A` is `PUSH PSW` (`RESBDOS1.ASM`,
+`BNKBDOS.ASM`), and a line that starts with `*` is a comment. Without it um80
+0.3.51 reads a source as MACRO-80 does, and GENHEX, RESBDOS and BNKBDOS do
+not assemble. The runtimes in `src/`, what uplm80 writes and the emulator's
+own `asm/*.asm` are MACRO-80 text and are read that way. `tools/v21/where.py`
+and `syms.py` pass `--dri` too, so `PRISTINE=1` works for every target.
+With all of that, every target but GENSYS.COM and MPMLDR.COM (below) is byte
+for byte what the same tree built with um80/ul80 0.3.50 and the overrides
+this release removes, in V2.0 and V2.1, with and without `--dri-exact`.
+
+The loader's BDOS is assembled from DRI's `MPMLDR/LDRBDOS.ASM` instead of
+being copied out of DRI's `MPMLDR.COM`; um80 0.3.50 could not assemble it as
+MAC does. `MPMLDR.COM` is put together the way `MPMLDR.SUB` did it: the PL/M
+loader at 0100H, `LDRBDOS.ASM` at its ORG 0D00H and `LDRBIOS.ASM`, DRI's
+skeleton loader BIOS, at 1700H, each assembled with `--dri --aseg`, to the
+end of the 128-byte record LOAD wrote last. Every byte a statement loads is
+DRI's, in V2.0 and V2.1. The 233 bytes none loads — LDRBDOS's DS areas at
+0E8CH-0EBDH and 0EC0H-0EC3H, and 164DH-16FFH, its variables and the gap up to
+LDRBIOS — hold whatever was in memory in DRI's file, and are zero here; 226 of
+them differ. `tools/verify_dri.py` compares 0D00H-177FH of `MPMLDR.COM` with
+DRI's and reports those 233 as bytes no source sets. At boot the emulator's
+own LDRBIOS is loaded over the skeleton, as before.
+
+Every link `tools/build.py` makes, and the emulator's BNKXIOS, SFTP.RSP and
+SFTP.BRS links, pass ul80's `--fatal-mult-def`: a global two modules define
+stops the link. LINK-80, and ul80 without the flag, warn, use the first
+definition and write the program, which is how an exported `PRINTBrlsfile`
+in CLI, six characters of which are `PRINTB`, once took CLI's and ATTACH's
+calls to CLBDOS's `printb` (see above). GENSYS was the one link with such a
+name: `X0100.ASM` and `cpm_runtime.mac` both define BDISK, BOOT, BUFF, FCB,
+FCB16, MAXB, MON1, MON2, MON2A and TBUFF, and the first, X0100's, won. GENSYS
+now links what DRI's `GENSYS.SUB` linked, GENSYS, LDRLWR and X0100, and no
+runtime, which it needs nothing from. Its data sits 12 bytes lower, without
+the runtime's stack-convention MON1, which nothing called; run under cpmemu
+with the same answers, it prints the same dialogue and writes the same
+MPM.SYS and SYSTEM.DAT as before, in V2.0 and V2.1.
+
+`tools/genmod.py` no longer refuses an ORG in column 1, which um80 0.3.51
+assembles as an ORG, as MAC does.
+
+CI and the release workflow check the toolchain out at its release tags —
+um80_and_friends v0.3.51, uplm80 v0.4.0 and cpmemu v4.10.0 — and install
+upeepz80 0.2.6 or later, instead of each tool's main branch, so a change to
+the toolchain cannot break an mpm2 build that nothing in mpm2 has changed.
 
 `scripts/gensys.sh` generated the system in a fixed `/tmp/gensys_work`, which
 it removes first, and `run_tests.sh` wrote the emulator's log and the source
@@ -481,9 +541,10 @@ a memory segment based at 0000H. The build now assembles each module, and a
 copy of it with every ORG 100H higher, with `um80 --aseg`, and the new
 `tools/genmod.py` does what GENMOD, GENHEX and PRLCOM did. Under cpmemu DRI's
 MAC.COM gives the same HEX records for all ten modules both ways. `genmod.py`
-refuses the two ORG forms um80 assembles differently from MAC — an ORG in
-column 1, and a label on an ORG line — rather than let them through; none of
-the ten modules has either. GENMOD never cleared its memory, so a DS area or
+refuses the ORG form um80 assembles differently from MAC — a label on an ORG
+line, which MAC sets to the new location and um80 to the old — rather than
+let it through; none of the ten modules has one. GENMOD never cleared its
+memory, so a DS area or
 the gap before a module's ORG kept whatever the program run before it had
 left there. The default build leaves those bytes zero; `--dri-exact` fills
 them with MAC.COM, which makes `RDT.PRL` and `DDT.COM` identical to DRI's and
@@ -571,15 +632,9 @@ is byte for byte DRI's, in either release; the V2.1 ones were checked by what
 they do. uplm80's code is larger, which matters only for the `.BRS` files, in
 bank 0: `SCHED.BRS` is 06B1H bytes against DRI's 043DH.
 
-Some of DRI's assembler text still needs a workaround for um80 0.3.50: the 28
-names spelled two ways (in `MPM.ASM`, `CLI.ASM`, `RESBDOS1.ASM` and
-`BNKBDOS.ASM`); six line ends in `MEMMGR.ASM` of CR and 8AH, a line feed with
-the parity bit set, after which um80 drops the line; and `MPMLDR/LDRBDOS.ASM`,
-which um80 cannot assemble as MAC does (indented `EQU`s, register aliases used
-as pairs, names spelled two ways), so the loader's BDOS is taken from DRI's
-`MPMLDR.COM`. `MPMLDR/LDMONX.ASM` is an override for another reason: uplm80
-passes an external procedure's arguments on the stack, where DRI's PL/M-80
-passes the last two in BC and DE.
+`MPMLDR/LDMONX.ASM` is an override, and not DRI's text: uplm80 passes an
+external procedure's arguments on the stack, where DRI's PL/M-80 passes the
+last two in BC and DE.
 
 `tools/gensys.py` does not write the same file as DRI's GENSYS for the same
 answers, although it places and relocates every module the same way. It also

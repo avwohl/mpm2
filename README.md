@@ -107,16 +107,19 @@ it uses. This release needs:
 |------|---------|------------|
 | uplm80 | 0.3.7 or later | every build (the SFTP RSP is PL/M) and `--tree=src` |
 | upeepz80 | 0.2.5 or later | the same: it is uplm80's peephole optimizer |
-| um80_and_friends | 0.3.50 or later | every build (LDRBIOS, BNKXIOS, the SFTP RSP) and `--tree=src` |
+| um80_and_friends | 0.3.51 or later | every build (LDRBIOS, BNKXIOS, the SFTP RSP) and `--tree=src` |
 | cpmemu | 4.10.0 | every build (the emulator's Z80 and the disk image) |
 
-Older releases get parts of the system wrong, or cannot build it. An older
-um80 cannot give DRI's assembler sources RMAC's six-character PUBLIC and EXTRN
-names (`-t`), without which the nucleus does not link; an older uplm80
-miscompiles DRI's own text of SUBMIT, SPOOL and the resident system processes,
-and makes a source-built SDIR repeat its heading before every line; and an
-older ul80 leaves `.MEMORY` out of a `.PRL`'s relocation bit map. The
-[CHANGELOG](CHANGELOG.md) has the details.
+Older releases get parts of the system wrong, or cannot build it. um80
+before 0.3.51 has no `--dri`, with which the source build reads every one of
+DRI's assembler sources the way MAC and RMAC read them, and ul80 before
+0.3.51 no `--fatal-mult-def`, which every build's SPR and PRL links pass;
+before 0.3.50 um80 cannot give DRI's sources RMAC's six-character PUBLIC and
+EXTRN names (`-t`), without which the nucleus does not link. An older uplm80
+miscompiles DRI's own text of SUBMIT, SPOOL and the resident system
+processes, and makes a source-built SDIR repeat its heading before every
+line; and an older ul80 leaves `.MEMORY` out of a `.PRL`'s relocation bit
+map. The [CHANGELOG](CHANGELOG.md) has the details.
 
 ### Optional: SSH Support
 
@@ -183,6 +186,20 @@ relocation bits from the bytes that differ. The build does the same - `um80
 --aseg` for the two assemblies, and `tools/genmod.py` for GENMOD, GENHEX and
 PRLCOM.
 
+Every one of DRI's assembler sources is assembled with `um80 --dri`, which
+reads it as MAC and RMAC do: a `$` inside a name is ignored (DRI's text
+spells some names two ways - `MPM.ASM` stores to `nmb$lst`, which
+`DATAPG.ASM` defines as `nmblst`), a label needs no colon, `PUSH A` is
+`PUSH PSW`, and a line that starts with `*` is a comment. So they build from
+DRI's text: `BNKBDOS.ASM`, `MPMLDR/LDRBDOS.ASM` and `LDRBIOS.ASM`, and the
+nucleus modules V2.1 did not change, as they stand; the nucleus modules it
+did change from overrides that are DRI's text but for the V2.1 changes, the
+serial number, and in `TMPSUB.ASM` the one local fix `--dri-exact` leaves
+out. `MPMLDR.COM` is put together as DRI's `MPMLDR.SUB` did it, the PL/M
+loader at 0100H, the loader's BDOS at 0D00H and DRI's skeleton loader BIOS at
+1700H. Every link stops at a name two modules define (ul80
+`--fatal-mult-def`).
+
 With `--tree=src`, the entire MP/M II operating system is built from source. Only 4
 development tools are binary-only (no source available):
 
@@ -216,7 +233,10 @@ All four nucleus SPRs — XDOS, BNKXDOS, RESBDOS and TMP — come back byte for
 byte identical to Digital Research's own V2.0 and V2.1 binaries, and so do
 the debugger, `RDT.PRL` and `DDT.COM`, and the assembler, `ASM.PRL`, but for
 11 bytes of it that no source sets and GENMOD took from the memory MAC had
-left.
+left. So does the part of `MPMLDR.COM` that DRI assembled with MAC, the
+loader's BDOS and the skeleton of its BIOS at 0D00H-177FH, but for 233 bytes
+no source sets either - DS areas and the gap before the BIOS, where LOAD left
+whatever was in memory and the build has zeros.
 
 Outside the nucleus, V2.1 changed MPMLDR, SHOW, PRINTER, SCHED.RSP, SPOOL.PRL,
 SPOOL.BRS, SDIR, PIP and GENSYS, and all of them are reconstructed. They are
@@ -573,7 +593,6 @@ mpm2/
 ├── src/
 │   ├── overrides/        # Source code modifications, V2.1 recovery and
 │   │   │                 # compiler workarounds, by DRI source directory
-│   │   ├── BNKBDOS/      # Banked BDOS
 │   │   ├── MPMLDR/       # MPMLDR with disabled serial check, GENSYS V2.1
 │   │   ├── NUCLEUS/      # Kernel source overrides
 │   │   └── UTIL2, UTIL4..UTIL7/ # RSPs and transients
