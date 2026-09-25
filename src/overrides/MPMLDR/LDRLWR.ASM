@@ -9,10 +9,6 @@ $title	('MP/M II V2.0  Load, Relocate, and Write File')
 ;
 ;  Revised:
 ;    14 Sept 81 by Thomas Rolander
-;
-;  Modified for um80 assembler compatibility:
-;    - Replaced low(sctbfr) with runtime calculation
-;    - Replaced low(bitmap+128) with runtime calculation
 ;*/
 
 	cseg
@@ -65,9 +61,6 @@ rdloop:
 	xchg
 	lxi	h,sctbfr
 	xchg		;DE = base of program
-	; Save low byte of sctbfr for later use (um80 compatibility)
-	mov	a,e
-	sta	sctbfrlo
 	dad	d	;HL = bit map base
 	push	h	;save bit map base in stack
 	lda	DMA
@@ -84,11 +77,7 @@ pgrel0:
 ;	  may be into next byte of bit map
 	dcx	b	;count length down
 	mov	a,e
-	; Use saved low byte of sctbfr instead of immediate (um80 compatibility)
-	push	h
-	lxi	h,sctbfrlo
-	sub	m
-	pop	h
+	sui	low(sctbfr)
 	ani	111b	;0 causes fetch of next byte
 	jnz	pgrel3
 ;	fetch bit map from stacked address
@@ -96,16 +85,7 @@ pgrel0:
 	lda	btmptp
 	cmp	l
 	jnz	pgrel2
-	; Workaround (um80 0.3.48): low() of a relocatable address assembles
-	; to the low byte of its offset in this module, with no relocation,
-	; so 'mvi a,low(bitmap+128)' set btmptp to the wrong byte and the loop
-	; read the next bit map record too early or too late, depending on
-	; where the module was linked.  Take the low byte from a relocated
-	; 16-bit address instead: the same value, relocated.  HL is free here;
-	; it is reloaded with the buffer address below.
-;	mvi	a,low(bitmap+128)
-	lxi	h,bitmap+128
-	mov	a,l
+	mvi	a,low(bitmap+128)
 	sta	btmptp
 	push	b
 	push	d
@@ -251,6 +231,5 @@ wrcnt:	ds	2	;write counter
 DMA:	ds	2	;DMA address
 bitmap:	ds	128	;bit map buffer
 btmptp:	ds	1	;bit low (bitmap+128)
-sctbfrlo: ds	1	;low byte of sctbfr (saved at runtime)
 
 	end
