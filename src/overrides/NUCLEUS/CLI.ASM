@@ -1344,16 +1344,16 @@ loadprl:
 	rrc
 	rrc
 	mov	b,a
-	ani	00011111b
+	ani	0001$1111b
 	mov	d,a
 	mov	a,b
-	ani	11100000b
+	ani	1110$0000b
 	mov	e,a
 	mov	a,l
 	rrc
 	rrc
 	rrc
-	ani	00011111b
+	ani	0001$1111b
 	ora	e
 	mov	e,a	;DE = shr (prlen,3)
 	lxi	b,00ffh
@@ -1820,7 +1820,7 @@ cli:
 ;        rlrpd.disk$slct = disk$select;
 	LDA	DISKSELECT
 	sta	clislctuser
-	ani	11110000b
+	ani	1111$0000b
 	rar
 	rar
 	rar
