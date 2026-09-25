@@ -233,10 +233,15 @@ MPMLDR_TARGETS = [
     BuildTarget("GENSYS", "com", ["GENSYS.PLM", "LDRLWR.ASM", "X0100.ASM"], "MPMLDR"),
 ]
 
-# LDRBDOS binary path (extracted from DRI MPMLDR.COM)
-# Note: LDRBDOS.ASM uses RMAC register aliasing syntax (e.g., "arech equ b!")
-# that um80 doesn't support. The binary is extracted from DRI instead.
-# The extracted LDRBDOS is identical between V2.0 and V2.1 MPMLDR.COM.
+# LDRBDOS, the loader's BDOS at 0D00H, is taken from DRI's MPMLDR.COM (it is
+# the same in V2.0 and V2.1) rather than assembled from MPMLDR/LDRBDOS.ASM,
+# which um80 0.3.50 cannot assemble as MAC did.  Its register aliases are
+# EQUs whose names are not in column 1 (`<tab>arech  equ b! arecl  equ c'),
+# which um80 rejects; used as a register pair an alias comes out wrong
+# (`crech equ d' then `push crech' is PUSH H); and it spells some names two
+# ways (`call seek$dir' for `seekdir:'), which MAC, ignoring the `$', takes
+# for one.  With those three put right by hand um80 assembles it to DRI's
+# 0D00H-164CH byte for byte.
 LDRBDOS_BIN = BUILD_DIR / "MPMLDR" / "ldrbdos.bin"
 DRI_MPMLDR = SRC_ROOT / "MPMLDR" / "MPMLDR.COM"
 
@@ -742,8 +747,8 @@ class Builder:
         - 0xD00: LDRBDOS (extracted from DRI MPMLDR.COM)
         - 0x1700: LDRBIOS (loaded at runtime by boot loader)
 
-        Note: LDRBDOS.ASM uses RMAC register aliasing that um80 doesn't support,
-        so we extract the binary from DRI's MPMLDR.COM instead of building from source.
+        LDRBDOS is extracted from DRI's MPMLDR.COM instead of built from
+        LDRBDOS.ASM, which um80 cannot assemble yet (see LDRBDOS_BIN).
         """
         # Create MPMLDR build directory if needed
         mpmldr_build_dir = self.build_dir / "MPMLDR"
