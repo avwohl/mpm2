@@ -123,9 +123,6 @@ nmbflags:
 ;  declare sysfla address public at (.sys$flag);
 sysfla:
 	public	sysfla
-; Alias for 6-char truncation compatibility
-sysflag	equ	sysfla
-	public	sysflag
 	dw	0ffffh,0ffffh,0ffffh,0ffffh
 	dw	0ffffh,0ffffh,0ffffh,0ffffh
 	dw	0ffffh,0ffffh,0ffffh,0ffffh
@@ -147,9 +144,6 @@ nmbsegs:
 ;  declare mem$seg$tbl (max$usr$pr) memory$descriptor public;
 msegtbl:
 	public	msegtbl
-; Alias for 6-char truncation compatibility
-memsegtbl	equ	msegtbl
-	public	memsegtbl
 	db	0,0,0,0
 	db	0,0,0,0
 	db	0,0,0,0

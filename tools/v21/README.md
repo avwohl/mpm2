@@ -31,10 +31,12 @@ Two knobs:
 * `PRISTINE=1` makes `where.py` ignore `src/overrides` and use the untouched
   `mpm2_external` sources.  Wanted for `TMP`, whose override carries 25 bytes
   of local fix that shift every offset after `00CD`.  It does *not* work for
-  `XDOS`: `mpm2_external`'s `MPM.ASM` will not assemble without the
-  6-character symbol aliases the `DATAPG.ASM` override adds.  For `XDOS` leave
-  it unset - with no `-D MPM21` the overrides assemble to the V2.0 layout,
-  which matches DRI's V2.0 image exactly.
+  `XDOS`: `mpm2_external`'s `MPM.ASM` stores to `nmb$lst`, which RMAC reads
+  as `DATAPG.ASM`'s `nmblst` and um80 does not (it keeps the `$`), and its
+  `MEMMGR.ASM` ends six lines with 8AH, a line feed with the parity bit set,
+  which um80 does not take for one.  For `XDOS` leave it unset - with no
+  `-D MPM21` the overrides assemble to the V2.0 layout, which matches DRI's
+  V2.0 image exactly.
 
 `ds` reserves space without emitting listing bytes, so a run that falls inside
 one cannot be mapped.  The only place that bites is `pdtbl` entry 0's `ds 36`

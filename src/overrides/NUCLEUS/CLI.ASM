@@ -1406,7 +1406,10 @@ loadprl:
 ;    end load$PRL;
 
 PRINTBrlsfile:
-	public	PRINTBrlsfile	; ***** MP/M 2.1 - used by the patch area
+; ***** MP/M 2.1 - used by the patch area.  An object file carries the
+; first six characters of a name, and PRINTB is CLBDOS.ASM's printb.
+prbrls:
+	public	prbrls
 	CALL	crlfprintb
 rlsfile:
 	lxi	b,clipd

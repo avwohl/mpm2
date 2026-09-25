@@ -37,7 +37,7 @@ patch:
 	extrn	drive
 	extrn	chainseg
 	extrn	trysysdisk
-	extrn	PRINTBrlsfile
+	extrn	prbrls
 
 ;0000h - called from MPM.ASM in place of
 ;		LXI	H,16H
@@ -145,7 +145,7 @@ clidrive:
 ; reserved for the program that could not be loaded.
 	public	clinofile
 clinofile:
-	CALL	PRINTBrlsfile
+	CALL	prbrls
 	LDA	chainseg
 	INR	A
 	RZ

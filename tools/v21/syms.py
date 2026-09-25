@@ -11,7 +11,7 @@ inc = ["-I", str(where.EXT / "UTIL8"), "-I", str(where.EXT / sub), "-I", str(whe
 rels = []
 for name, path in files:
     r = where.OUT / f"{name}.g.rel"
-    subprocess.run(["um80", "-g", *inc, "-o", str(r), str(path)], capture_output=True)
+    subprocess.run(["um80", "-g", "-t", *inc, "-o", str(r), str(path)], capture_output=True)
     rels.append(str(r))
 symf = where.OUT / f"{target}.sym"
 subprocess.run(["ul80", "--spr", "-S", str(symf), "-o", str(where.OUT / f"{target}.spr"),

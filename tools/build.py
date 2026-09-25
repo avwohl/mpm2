@@ -400,7 +400,8 @@ class Builder:
             shutil.rmtree(self.output_dir)
         self.log("Cleaned build directories")
 
-    def assemble(self, asm_file: Path, rel_file: Path, absolute: bool = False) -> bool:
+    def assemble(self, asm_file: Path, rel_file: Path, absolute: bool = False,
+                 dri_names: bool = False) -> bool:
         """Assemble a .ASM file to .REL using um80.
 
         ``absolute`` assembles the way DRI's MAC does, with no relocatable
@@ -409,10 +410,19 @@ class Builder:
         carries its own ORG (100H, 200H, 1100H, ...).  Assembling them as
         relocatable put each one after the last instead of at its own
         address.
+
+        ``dri_names`` cuts every PUBLIC, EXTRN and module name to six
+        characters (um80 -t), as DRI's RMAC wrote them into the object
+        file, and DRI's sources count on it.  In the nucleus DSPTCH.ASM
+        refers to DATAPG.ASM's `memseg' as `memsegtbl' and to its `sysfla'
+        as `sysflag', and to MEMMGR.ASM's `userpr' as `userprocess'; FLAG,
+        QUEUE and XDOS call DSPTCH.ASM's `dispatch' as `dispat'.
         """
         cmd = [UM80]
         if absolute:
             cmd.append("--aseg")
+        if dri_names:
+            cmd.append("-t")
 
         cmd.extend(self.define_args())
 
@@ -649,7 +659,8 @@ class Builder:
 
             # Assemble concatenated file
             rel_path = self.build_dir / f"{target.name}.REL"
-            if self.assemble(concat_file, rel_path, target.asm_absolute):
+            if self.assemble(concat_file, rel_path, target.asm_absolute,
+                             dri_names=True):
                 rel_files.append(rel_path)
             else:
                 return False
@@ -673,7 +684,8 @@ class Builder:
                 rel_path = self.build_dir / rel_name
 
                 if src.upper().endswith(".ASM") or src.upper().endswith(".MAC"):
-                    if self.assemble(src_path, rel_path, target.asm_absolute):
+                    if self.assemble(src_path, rel_path, target.asm_absolute,
+                                     dri_names=True):
                         rel_files.append(rel_path)
                     else:
                         all_success = False
