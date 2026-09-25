@@ -11,7 +11,8 @@ A Z80-based MP/M II emulator with SSH terminal access. Multiple users can connec
 ./scripts/build_all.sh
 
 # Or build from source (requires uplm80/um80/ul80)
-./scripts/build_all.sh --tree=src
+./scripts/build_all.sh --tree=src                 # MP/M II V2.0
+./scripts/build_all.sh --tree=src --version=2.1   # MP/M II V2.1
 
 # Run with local console
 ./build/mpm2_emu -l -d A:disks/mpm2_system.img
@@ -29,8 +30,8 @@ Pre-built packages are available for Linux systems. Download the appropriate pac
 
 ```bash
 # Download and install
-wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2-emu-0.3.4-Linux.deb
-sudo dpkg -i mpm2-emu-0.3.4-Linux.deb
+wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2-emu-0.3.6-Linux.deb
+sudo dpkg -i mpm2-emu-0.3.6-Linux.deb
 sudo apt-get install -f  # Install dependencies if needed
 
 # Download disk image
@@ -44,8 +45,8 @@ mpm2_emu -l -d A:mpm2_system.img
 
 ```bash
 # Download and install
-wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2-emu-0.3.4-Linux.rpm
-sudo dnf install ./mpm2-emu-0.3.4-Linux.rpm
+wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2-emu-0.3.6-Linux.rpm
+sudo dnf install ./mpm2-emu-0.3.6-Linux.rpm
 
 # Download disk image
 wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2_system.img
@@ -71,8 +72,8 @@ The disk image is required - it contains the MP/M II operating system, boot load
 |------------|---------|--------------|
 | CMake 3.16+ | Build system | `brew install cmake` or `apt install cmake` |
 | C++17 compiler | Compile emulator | Xcode (macOS) or `apt install g++` |
-| Python 3 | Build scripts, um80/ul80 | Usually pre-installed |
-| cpmemu | Z80 CPU emulator + disk tools | Clone from github.com/avwohl/cpmemu |
+| Python 3.10+ | Build scripts, um80/ul80, uplm80 | Usually pre-installed |
+| cpmemu 4.10.0 | Z80 CPU library (`libqkz80`) and disk tool (`util/cpm_disk.py`) | Clone from github.com/avwohl/cpmemu and run `make` in `cpmemu/src` |
 
 ### External Repositories (must be cloned separately)
 
@@ -89,7 +90,7 @@ cd um80_and_friends
 pip install -e .  # Installs um80 and ul80 commands
 cd ..
 
-# uplm80 - PL/M-80 cross-compiler (required for --tree=src builds)
+# uplm80 - PL/M-80 cross-compiler (required: the SFTP RSP, and --tree=src)
 git clone https://github.com/avwohl/uplm80.git
 cd uplm80
 pip install -e .  # Installs uplm80 command
@@ -98,10 +99,21 @@ cd ..
 # MP/M II distribution files are included in the mpm2_external/ directory
 ```
 
-um80 and uplm80 are also on PyPI (`pip install um80 uplm80`). A source build
-needs um80 0.3.48 or later and uplm80 0.3.6 or later, which brings upeepz80
-0.2.4: earlier releases link `.PRL` transients a page low and miscompile
-several of the utilities.
+The toolchain is also on PyPI: `pip install um80 uplm80` installs
+um80_and_friends (the `um80` package: um80 and ul80), uplm80 and the upeepz80
+it uses. This release needs:
+
+| Tool | Release | Needed for |
+|------|---------|------------|
+| uplm80 | 0.3.7 or later | every build (the SFTP RSP is PL/M) and `--tree=src` |
+| upeepz80 | 0.2.5 or later | the same: it is uplm80's peephole optimizer |
+| um80_and_friends | 0.3.50 or later | every build (LDRBIOS, BNKXIOS, the SFTP RSP) and `--tree=src` |
+| cpmemu | 4.10.0 | every build (the emulator's Z80 and the disk image) |
+
+Older releases of these tools build a system that runs but gets parts of it
+wrong - with an older uplm80, for instance, a source-built SDIR repeats its
+heading before every line, and an older ul80 leaves `.MEMORY` out of a
+`.PRL`'s relocation bit map. The [CHANGELOG](CHANGELOG.md) has the details.
 
 ### Optional: SSH Support
 
@@ -121,8 +133,8 @@ The project supports two binary trees:
 
 | Tree | Description | Requirements |
 |------|-------------|--------------|
-| `dri` | Original DRI binaries (default) | None - binaries included |
-| `src` | Build from source code | uplm80, um80, ul80 |
+| `dri` | Original DRI binaries (default) | um80, ul80 and uplm80 for the emulator's own XIOS and SFTP RSP |
+| `src` | Build from source code | the same |
 
 ```bash
 cd mpm2
@@ -155,7 +167,11 @@ source code using modern cross-compilers:
 
 The source build system supports local modifications in `src/overrides/` that take
 precedence over the original source. For example, the MPMLDR has its serial number
-check disabled in `src/overrides/MPMLDR/MPMLDR.PLM`.
+check disabled in `src/overrides/MPMLDR/MPMLDR.PLM`. The overrides also carry the
+V2.1 changes, behind `MPM21` (see [below](#mpm-ii-v20-and-v21)).
+
+`build_src.sh` - and so `build_all.sh --tree=src` and `run_tests.sh src` - writes
+what it builds to `bin/src/`, over the committed binaries there.
 
 The assembler (`ASM.PRL`) and the debugger (`RDT.PRL`, `DDT.COM`) are not
 linked: DRI built them with MAC and GENMOD (`UTIL1/ASM.SUB`, `DDT.SUB`), each
@@ -197,9 +213,18 @@ All four nucleus SPRs — XDOS, BNKXDOS, RESBDOS and TMP — come back byte for
 byte identical to Digital Research's own V2.0 and V2.1 binaries, and so do
 the debugger, `RDT.PRL` and `DDT.COM`, and the assembler, `ASM.PRL`, but for
 11 bytes of it that no source sets and GENMOD took from the memory MAC had
-left. See
-[docs/mpm2_v21.md](docs/mpm2_v21.md) for what changed between the releases
-and what is still outstanding.
+left.
+
+Outside the nucleus, V2.1 changed MPMLDR, SHOW, PRINTER, SCHED.RSP,
+SPOOL.PRL, SPOOL.BRS, SDIR, PIP and GENSYS, and all of them are
+reconstructed. They are compiled PL/M, which uplm80 cannot make byte for byte
+what DRI's PL/M-80 made, so each was checked against DRI's patch instruction
+by instruction, and the larger ones also by running them beside DRI's binary:
+the V2.1 PIP, for instance, matches DRI's on every console line and every
+output file of 23 commands. BNKBDOS needs no reconstruction: the `BNKBDOS.ASM` DRI shipped
+with the V2.0 sources is already V2.1's, so a V2.0 build gets the V2.1 banked
+BDOS too. See [docs/mpm2_v21.md](docs/mpm2_v21.md) for every change between
+the releases and the evidence for it.
 
 V2.1's GENSYS asks one question V2.0's does not: "Enable Compatibility
 Attributes (N) ?".  The answer goes in system data byte 96, and with it set
@@ -228,24 +253,30 @@ XDOS never reads the byte, and `gensys.py` leaves it zero there with a note.
 
 ### Modern GENSYS
 
-The original DRI GENSYS.COM has a bug in its relocation code (LDRLWR.ASM) that
-corrupts SPR/BRS files when code size doesn't align well with 128-byte sectors.
-The bug is most severe at exactly 1024 bytes where 100% of relocation uses garbage.
+`scripts/gensys.sh` generates `MPM.SYS` with `tools/gensys.py`, a Python
+replacement for DRI's interactive GENSYS.COM that runs on the host:
 
-**The Bug:** LDRLWR.ASM loads `ceil(prgsiz/128)` sectors, which includes code plus
-extra bytes from rounding. It uses these extra bytes as the relocation bitmap. When
-more bitmap is needed, it should read from disk - but the detection check compares
-the bitmap pointer against an unrelated buffer address (`bitmap+128`) instead of
-checking if it exceeded the loaded data. Result: garbage is used instead of the
-actual bitmap.
+- It reads its answers from JSON, which `gensys.sh` writes, instead of
+  prompting.
+- It places and relocates the modules as DRI's GENSYS does, including RSPs
+  with a banked half (a `.BRS`, loaded when the RSP's process descriptor is
+  in memory segment 0, which is how DRI's GENSYS decides).
+- It makes the two V2.1 GENSYS changes that reach the system: the
+  compatibility attributes question (system data byte 96, above), and at most
+  seven user memory segments.
 
-This project uses a Python replacement (`tools/gensys.py`) that reads the complete
-bitmap directly from the SPR file and applies it correctly:
+For the same answers, DRI's V2.0 and V2.1 GENSYS.COM (run under cpmemu) and
+`gensys.py` place and relocate every module identically. The files are not
+byte for byte the same: `gensys.py` also writes the LCKLSTS and CONSOLE DAT
+pages, as zeros, which DRI's leaves out of the file (so the record count at
+system data bytes 120-121 is larger); it leaves the size and bank of unused
+memory segment entries zero; and it pads each module's last page with zeros
+where DRI's GENSYS leaves whatever its sector buffer held.
 
-- Fixes the bitmap relocation bug for all file sizes
-- Reads configuration from JSON instead of interactive prompts
-- Generates identical MPM.SYS output for valid inputs
-- Supports RSP modules with banked code (BRS files)
+Until 0.3.6 this README said that DRI's GENSYS relocates an SPR wrongly when
+its length is a multiple of 128 bytes. It does not; the fault was in a
+GENSYS.COM built from source with an older um80. See
+[docs/ldrlwr_bug.md](docs/ldrlwr_bug.md).
 
 ### Resident System Processes
 
@@ -483,7 +514,12 @@ PORT=2311 ./scripts/run_tests.sh all                   # SSH on 2311, HTTP on 83
 
 The SSH port is `PORT` (default 2222) and the HTTP port `HTTP_PORT` (default
 `PORT` + 6000), so two checkouts can run their tests at once on different
-ports.  Logs go to `build/mpm2_test.log` and `build/mpm2_src_build.log`.
+ports.  Logs go to `build/mpm2_test.log` and `build/mpm2_src_build.log`, and
+`gensys.sh` generates the system in `build/gensys_work` (or `$GENSYS_WORK`),
+so nothing is shared through `/tmp`.  A console prompt is waited for 30
+seconds; the 64K SFTP transfer, which runs through the Z80 RSP a record at a
+time and so at the emulated machine's speed, is given 180.  `src` rebuilds
+`bin/src` (see [Building from Source](#building-from-source)).
 
 `python3 tools/verify_dri.py` builds the nucleus, the assembler and the
 debugger of both releases with `--dri-exact` and compares them with Digital
@@ -517,8 +553,8 @@ To use a different log file:
 ```
 mpm2/
 ├── scripts/
-│   ├── build_all.sh      # Master build script (--tree=dri|src)
-│   ├── build_src.sh      # Build from source code
+│   ├── build_all.sh      # Master build script (--tree, --version, ...)
+│   ├── build_src.sh      # Build from source code into bin/src/
 │   ├── build_hd1k.sh     # Create disk image with MP/M II files
 │   ├── build_sftp_rsp.sh # Build the SFTP RSP (SFTP.RSP, SFTP.BRS)
 │   ├── build_asm.sh      # Assemble Z80 code, build C++, write boot sector
@@ -537,30 +573,37 @@ mpm2/
 │   │   ├── MPMLDR/       # MPMLDR with disabled serial check, GENSYS V2.1
 │   │   ├── NUCLEUS/      # Kernel source overrides
 │   │   └── UTIL2, UTIL4..UTIL7/ # RSPs and transients
-│   └── cpm_runtime.mac   # Runtime support for PL/M programs
+│   ├── cpm_runtime.mac   # PL/M runtime for .COM programs
+│   ├── mpm_runtime.mac   # PL/M runtime for .PRL transients (MON1..MON3)
+│   ├── mpm_pagezero.mac  # Page-zero symbols a .PRL relocates
+│   ├── brs_runtime.mac   # Banked RSP interface, in place of DRI's BRSPBI
+│   ├── main.cpp          # Emulator entry point and main loop
+│   ├── http_server.cpp   # HTTP file browser
+│   ├── sftp_bridge.cpp   # SFTP/HTTP to Z80 bridge
+│   └── ssh_session_libssh.cpp # SSH/SFTP server
 ├── tools/
 │   ├── build.py          # Source build script (Python)
+│   ├── genmod.py         # GENMOD, GENHEX and PRLCOM, for ASM, RDT and DDT
 │   ├── gensys.py         # MP/M II system generator (replaces DRI GENSYS)
+│   ├── verify_dri.py     # Compare a --dri-exact build with DRI's binaries
+│   ├── v21/              # Tools the V2.1 reconstruction was done with
 │   └── dri_patch.py      # Binary patching tool
 ├── asm/
 │   ├── coldboot.asm      # Boot sector (loads MPMLDR + LDRBIOS)
 │   ├── ldrbios.asm       # Loader BIOS for boot phase
 │   ├── bnkxios.asm       # Runtime XIOS (I/O port dispatch)
+│   ├── sftp_rsp.plm      # SFTP RSP process descriptor (common memory)
 │   ├── sftp_brs.plm      # SFTP RSP banked code (PL/M-80)
 │   ├── sftp_glue.asm     # SFTP assembly glue for BDOS calls
 │   └── sftp_brs_header.asm # SFTP RSP header and entry point
-├── src/                  # C++ emulator source
-│   ├── main.cpp          # Entry point and main loop
-│   ├── http_server.cpp   # HTTP file browser
-│   ├── sftp_bridge.cpp   # SFTP/HTTP to Z80 bridge
-│   └── ssh_session_libssh.cpp # SSH/SFTP server
 ├── include/              # C++ headers
-│   ├── logger.h          # Access logging
-├── build/                # CMake build directory (generated)
+│   └── logger.h          # Access logging
+├── docs/                 # Write-ups; mpm2_v21.md is the V2.1 reconstruction
+├── build/                # CMake build, source build and test logs (generated)
 ├── disks/                # Disk images (generated)
 └── mpm2_external/        # MP/M II source and distribution
-    ├── mpm2src/          # Original source code
-    └── mpm2dist/         # Original binaries
+    ├── mpm2src/          # Original source code (V2.0); CONTROL is the V2.0 master
+    └── mpm2dist/         # Original binaries (V2.1)
 ```
 
 ## How It Works
@@ -583,6 +626,11 @@ Run `./scripts/gensys.sh` to regenerate MPM.SYS with matching serial numbers.
 
 ### Build fails with "um80 not found"
 Install um80/ul80: `pip install -e path/to/um80_and_friends`
+
+### "dyld: Library not loaded: /usr/local/lib/libqkz80.4.dylib" (macOS)
+An emulator linked before 0.3.6 took cpmemu's `libqkz80` dylib, which is only
+at that path after cpmemu's `make install`. The build now links `libqkz80.a`
+by path; remove `build/` and run `./scripts/build_all.sh` again.
 
 ### SSH connection refused
 Ensure the emulator is running and check if port 2222 is available.

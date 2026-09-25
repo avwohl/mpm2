@@ -7,33 +7,202 @@ release notes; they are summarised below from their commits, in less detail
 than they would have carried at the time, so the record before 0.3.5 is short
 rather than empty.
 
-## [Unreleased]
+## [0.3.6] - 2026-09-25
+
+MP/M II V2.1 now builds from source as well as V2.0. In both releases XDOS,
+BNKXDOS, RESBDOS and TMP come back byte for byte identical to Digital
+Research's, and a source-built system runs every utility tried the way DRI's
+own binaries do.
+Every generated system now carries DRI's four resident system processes, and
+on the way the emulator's disk transfers, its XIOS results and SFTP and HTTP
+file access were put right.
+
+This release needs uplm80 0.3.7 or later, upeepz80 0.2.5 or later,
+um80_and_friends 0.3.50 or later and cpmemu 4.10.0. uplm80 and upeepz80
+compile the SFTP resident system process in every build, as well as the
+utilities of a `--tree=src` build; um80 and ul80 assemble and link the XIOS,
+the loader BIOS and the whole of a `--tree=src` build; cpmemu provides the
+emulator's Z80 (`libqkz80`) and `util/cpm_disk.py`, which writes the disk
+image. What the older releases get wrong here:
+
+- uplm80 before 0.3.7 computes `x MOD 0` as 0 where PL/M-80 gives `x`, so
+  every source-built SDIR reprinted its heading before each line of output
+  (SDIR's default page length is 0). It also laid out the initial values of
+  the resident system processes' descriptors and queues wrongly, returned from
+  inside a counted `DO` loop into the loop's count, compiled
+  `AT (.external - 1)` as the location counter, and put its stack and shared
+  locals after the last variable, which SUBMIT and SPOOL use as the start of a
+  buffer.
+- um80 before 0.3.49 assembled `LOW()` of a relocatable address as an
+  absolute byte, read a forward `EQU` of a later label as 0, and kept only the
+  last of two constants added to an external; ul80 before 0.3.49 left
+  references to `__END__`, PL/M's `.MEMORY`, out of a `.PRL`'s relocation bit
+  map.
+- upeepz80 before 0.2.5 made rewrites that changed a register or a flag that
+  was read afterwards.
+- cpmemu's `cpm_disk.py` before 4.10.0 fails with `UnicodeDecodeError` on
+  `add` and `delete` when a file on the disk has an F1'-F4' attribute set,
+  which `--compat-attributes` now puts to use.
 
 ### Added
 
 MP/M II V2.1 can be built from the same tree as V2.0. DRI published sources
-for V2.0 only, so the V2.1 changes were recovered from the binaries and put
-into `src/overrides` behind `IFDEF MPM21` / `$if MPM21`:
+for V2.0 only, so the V2.1 changes were recovered from the two masters in the
+archive — `mpm2src/CONTROL`, V2.0, and `mpm2dist`, V2.1 — and put into
+`src/overrides` behind `IFDEF MPM21` / `$if MPM21`. `docs/mpm2_v21.md`
+describes every change and the evidence for it.
 
 - `./scripts/build_all.sh --tree=src --version=2.1` builds the V2.1 system,
   which boots and reports `MP/M II V2.1 / Copyright (C) 1982, Digital
-  Research`.
-- `tools/verify_dri.py` builds both releases with `--dri-exact` and compares
-  them against DRI's own binaries. XDOS.SPR, BNKXDOS.SPR, RESBDOS.SPR and
-  TMP.SPR all come back byte for byte identical, in both releases.
+  Research`. `--version=2.0`, the default, builds V2.0, which the V2.1
+  changes leave as it was.
 - `tools/build.py` gained `--version`, `--serial`, `--dri-exact` and
-  `--output-dir`; `build_all.sh` passes the first three through.
-- The reconstruction, the binary evidence behind each change, and the four
-  transients that are identified but not yet reconstructed (SDIR, SPOOL, PIP,
-  GENSYS) are written up in `docs/mpm2_v21.md`.
+  `--output-dir`, and `build_all.sh` passes the first three through.
+  `--serial dri` builds in the serial number from DRI's master instead of the
+  sources' `654321`. `--dri-exact` also leaves out the local fixes the
+  overrides keep behind `DRIEXACT` — `TMPSUB.ASM`'s stack pointer save, which
+  DRI had commented out, and the whole-word `NCOPIED` test in V2.1's PIP — and
+  fills the bytes of ASM, RDT and DDT that no source sets the way DRI's GENMOD
+  found them.
+- `tools/verify_dri.py` builds both releases with `--dri-exact` and compares
+  them with DRI's binaries. XDOS.SPR, BNKXDOS.SPR, RESBDOS.SPR and TMP.SPR
+  come back byte for byte identical in both releases, and so do RDT.PRL and
+  DDT.COM; ASM.PRL does but for 11 bytes no source sets (see Fixed).
+- The nucleus changes, one line each: the MX queues a process owns are
+  released on its way out through XDOS rather than in the dispatcher;
+  `pd(1dh)` carries the F1'-F4' attributes of the command's file; a process's
+  abort return address is planted relative to its bank's system call user
+  stack; the list number is masked to its low nibble; the XIOS may print
+  through `extjmptbl` only for the process that owns the console; a
+  pushed-back keyboard character counts as console-ready; delete, rename and
+  set file attributes copy the FCB back out; a shell error keeps the code
+  already in HL; a submit file already started stays in force; and any
+  non-zero return from read random is a disk error.
+- The transients. None of them can match DRI's binary byte for byte, since
+  uplm80 is not PL/M-80, so each was checked against DRI's patch instruction
+  by instruction, and the larger ones also by running them beside DRI's
+  binary on the same system:
+  - MPMLDR: the banner.
+  - SHOW: `show users` lists user 15. V2.0's array had fifteen elements for
+    sixteen user numbers.
+  - PRINTER: a list number is valid up to the number of printers the system
+    was generated with, not a fixed sixteen.
+  - SCHED.RSP: the scheduler's process name marks it a system process, as
+    Spool's, MPMSTAT's and Abort's already did.
+  - SPOOL.PRL: the spooler drops to priority 201 before it lists; it checks
+    the files exist with F5' set, as it lists them; `spool a.txt[d]` no
+    longer stops with `Can't Open File = D`; and the message it prints on
+    detaching loses its last two lines.
+  - SPOOL.BRS: the resident spooler detaches from the console before it
+    waits for the next request.
+  - SDIR: V2.0's check for room in its file table could never fail, so on a
+    drive with more matching files than fit in its memory segment SDIR wrote
+    over the jump to the XDOS at the top of the segment. DRI's own V2.0 SDIR
+    lists 115 files in a small segment and hangs the whole system on 116.
+    V2.1 measures the room from the last record it stored, prints "Out of
+    Memory" and lists what fitted, and asks MP/M for 4K more in the `.PRL`
+    header, room for about 180 more files. `tools/build.py` gives only the V2.1 build the 4K.
+  - PIP, five changes. `[A]` no longer forces a character copy, which cut a
+    binary file off at its first ctl-Z. `[O]` takes effect in file-to-file
+    and multi-file copies, and in return a `.COM` file copied file-to-file
+    with a character option and no `[O]` stops at ctl-Z, as DRI's V2.1 does.
+    A multi-file copy without `[A]` copies a file whose extents are all
+    marked archived from its beginning, where V2.0 started part way in. `[K]`
+    also drops the final new line of a multi-file copy. And an error no
+    longer closes and deletes the destination's `.$$$` file, so a copy that
+    fails after the destination was made leaves it behind, as DRI's V2.1
+    does. On 23 commands covering `[A] [O] [K] [E] [N] [V] [G] [T] [U] [L]
+    [F]`, concatenation, multi-file copies and errors, the rebuilt V2.1 PIP
+    matches DRI's V2.1 on every console line and in all 26 output files, and
+    the rebuilt V2.0 matches DRI's V2.0 the same way.
+  - GENSYS: V2.1's GENSYS.COM is not a recompile but V2.0's with a 145-byte
+    patch where its sector buffer used to start. It asks "Enable
+    Compatibility Attributes (N) ?" (system data byte 96), shows drive P: as
+    `(P:)` instead of `(@:)`, limits the user memory segments to seven with
+    "*** Error Maximum Exceeded - 7 Assumed ***", closes each SPR, RSP and BRS
+    file after loading it, and prints the V2.1 banner. Run under cpmemu with
+    the same answers, the rebuilt one gives exactly the dialogue of DRI's
+    V2.1 GENSYS.COM, and an MPM.SYS and SYSTEM.DAT identical to its own but
+    for the serial number.
 
-### Fixed
+`--compat-attributes[=yes|no]` for `scripts/build_all.sh` and
+`scripts/gensys.sh`, and a `compatibility_attributes` key in
+`tools/gensys.py`'s configuration, answer V2.1 GENSYS's new question. The
+default is no, as in DRI's GENSYS. With yes, a V2.1 system copies a program
+file's F1'-F4' attributes into byte 1DH of its process descriptor, as DRI's
+Release 2.1 addendum describes; until now every generated system left byte 96
+zero, so the feature never fired. In a booted V2.1 system, a program marked
+with SET `[F1=ON]`, `[F4=ON]` or `[F1=ON,F3=ON]` now sees 80H, 70H or A0H
+there. A V2.0 XDOS never reads byte 96, so `gensys.py` leaves it zero for a
+V2.0 system and says so. `build_all.sh` rejects a value other than yes or no
+before it starts, instead of failing at the GENSYS step once everything else
+is built.
 
-- `bin/dri/TMP.SPR` was this repository's own build rather than Digital
-  Research's, and 128 bytes longer than every DRI copy. Replaced with the one
-  from the distribution.
+Every generated system now has DRI's four resident system processes — ABORT,
+MPMSTAT, SCHED and SPOOL — next to the emulator's SFTP RSP, taken from the
+selected tree. Before, `sched 12/31/99 23:59 dir` answered "Resident portion
+of scheduler is not in memory", and `abort` and `mpmstat` ran as transients.
+`tools/build.py` builds a resident system process the way DRI's `UTIL2/*.SUB`
+files do: the `.RSP` from `xxRSP.PLM` alone, and the banked code as a new
+`.BRS` output type, from `xxBRS.PLM` and `src/brs_runtime.mac`, which stands
+in for DRI's `BRSPBI.ASM`. It used to link the two into one `.RSP`, with the
+BRS's header and a CP/M program entry where MP/M expects the process
+descriptor. `ABORT.RSP` is now byte for byte DRI's, and the other three `.RSP`
+files match every byte DRI's declarations define. `tools/gensys.py` follows
+DRI's GENSYS in two more ways: it loads a `.BRS` exactly when the RSP's
+process descriptor is in memory segment 0, and it refuses an RSP that would
+extend below the common base.
 
-## [0.3.6] - 2026-09-23
+`run_tests.sh` has three new tests, all part of `all` and `src`:
+
+- `rsp` (`scripts/test_rsp.exp`): MPMSTAT lists the RSPs' queues, SCHED runs
+  a command that is due, ABORT answers through its queue, the spooler lists a
+  file and deletes it, and STOPSPLR stops it. Each check waits for what it
+  checks rather than for a fixed time, and cannot pass by accident: "Abort
+  failed." counts only after the CLI's "Msg Qued", since ABORT.PRL prints the
+  same words; a spooler check fails if PIP did not make the file it spools;
+  and STOPSPLR is taken to have stopped the spooler only once a marker file
+  queued behind the stopped one is gone.
+- `http`: a file read over HTTP, through the SFTP RSP.
+- `sftp` (`scripts/test_sftp.exp`): files put over SFTP read back over SFTP
+  and HTTP and are then used from a console — `type` one, `submit` the other;
+  PIP copies a file HTTP is reading; HTTP is refused a file ED has open and
+  the system carries on; and a 64K file goes up and comes back intact while
+  HTTP reads another file, which stays intact too. The transfer is given 180
+  seconds, since it runs through the Z80 RSP a record at a time: it takes
+  about 5 seconds on an idle host, and failed on every tree alike, DRI's
+  included, with the host's load average at 80-100.
+
+`tools/v21/` keeps the tools the V2.1 reconstruction was done with. `annot.py`
+diffs two `.SPR` or `.PRL` images and annotates each differing run with the
+source lines it covers, `where.py` maps an offset in a linked image back to
+its module and source line, and `spr.py`, `syms.py`, `disasm.py` and
+`rawdiff.py` each do one part of that. None of them is part of the build.
+
+### Changed
+
+`--tree=src` produces a running system. A fully source-built MP/M II V2.0 boots,
+loads and runs transient programs, and every PL/M utility tried — `dir`, `sdir`,
+`stat`, `tod`, `user`, `console`, `show`, `type`, `dump`, `set`, `prlcom`,
+`printer`, `stopsplr`, `sched`, `spool`, `abort`, `ren`, `submit`, `mpmstat`,
+with and without arguments — gives the same output as DRI's own binaries — `stat` prints
+`A: RW, Space:     7,512k`, `dir` lists `A: $3$      SUP`, `tod` prints
+`Mon 09/14/81 00:00:19`, `user 0` prints `User Number = 0`, `console` prints
+`Console = 3`. Before this release a source-built system printed a program's
+load line and then dropped the session, whatever the program was.
+
+`scripts/gensys.sh` generated the system in a fixed `/tmp/gensys_work`, which
+it removes first, and `run_tests.sh` wrote the emulator's log and the source
+build's to fixed names in `/tmp`, so two checkouts building or testing at once
+cleared each other's GENSYS inputs and interleaved their logs. The work
+directory is now `build/gensys_work`, which `GENSYS_WORK` overrides, and the
+logs are `build/mpm2_test.log` and `build/mpm2_src_build.log`.
+
+The XIOS's checksum vectors shrink from 256 bytes per drive to 16. They are
+never used — CKS is 0 in the one DPB the drives use, since a fixed disk is
+not checked for a media change — and the room they took in common memory is
+what DRI's four RSPs need: with the RSPs in, GENSYS stopped with "XIOS common
+base BD4BH below configured common base C000H".
 
 ### Fixed
 
@@ -75,7 +244,8 @@ command — 24 comparisons, all identical:
   another, so `ASM.PRL` came out at 36971 bytes against DRI's 8171 and began
   with zeros where its entry should be. um80's new `--aseg` assembles them the
   way MAC does, and they no longer link against the PL/M runtime they never
-  used.
+  used. The assembler and the debugger then needed GENMOD as well; see
+  below.
 
 `stat` printed its drive line 1837 times and never printed a figure, because
 um80 assembled a label named after a mnemonic as the opcode byte. UTIL4/STAT.PLM
@@ -142,7 +312,9 @@ and the DMA buffer at 0080H have to be relocated with everything else; DRI's
 `DIR.PRL` marks twelve `CALL 5` sites in its bitmap. Only a resolved symbol
 reference can reach the bitmap, so the addresses must not be assembled as
 literals. New `src/mpm_pagezero.mac` publishes them from a module of their own,
-and `src/mpm_runtime.mac` reaches them across that module boundary; `.PRL`
+the BDOS entry under the compiler's own name `??BDOS` (DRI's `X0100.ASM` does
+not publish `BDOS`, and `UTIL7/DM.PLM` declares a variable of that name), and
+`src/mpm_runtime.mac` reaches them across that module boundary; `.PRL`
 targets are now compiled with `uplm80 --mode mpm`, which emits the BDOS call,
 the stack fetch from 0006H and the warm-boot jump as those symbols instead of
 literals. This is the same split DRI used: `PLM_WORK/X0100.ASM` and
@@ -156,30 +328,223 @@ tree, so the V2.1 originals overwrote every source-built file and `--tree=src`
 silently produced a disk of V2.1 utilities on a V2.0 nucleus. The floppies are
 now the base layer, as the comment there always claimed.
 
-### Changed
+Disk transfers went to the last user bank selected rather than to the calling
+process's. The emulator's READ and WRITE moved a record to or from the DMA
+address in whichever bank 1-7 had been selected last, which is wrong for any
+process whose buffers are in bank 0 — the banked half of a resident system
+process. The SFTP RSP is one, which is why every HTTP file download answered
+404 and every SFTP `get` failed with "No such file or directory" while
+directory listings, which the BDOS reads into common memory, worked. DRI's
+spooler is another: built from source and put in the system, it listed 36
+records of zeros for a 36-record text file and so never stopped for STOPSPLR.
+MP/M II has an interface for exactly this, and the XIOS now uses it: READ and
+WRITE bracket the transfer with SWTUSER, which selects the bank of the process
+the BDOS is working for, and SWTSYS (System Implementor's Guide 2.4), and the
+emulator transfers in the bank selected when they call it. Checked on the DRI
+tree and on `--tree=src` V2.0 and V2.1: HTTP serves `DUMP.ASM` byte for byte,
+SFTP `get` returns `ABORT.PRL` unchanged, and a `put` round-trips.
 
-`--tree=src` produces a running system. A fully source-built MP/M II V2.0 boots,
-loads and runs transient programs, and every PL/M utility tried — `dir`, `sdir`,
-`stat`, `tod`, `user`, `console`, `show`, `type`, `dump`, `set`, `prlcom`,
-`printer`, `stopsplr`, `sched`, `spool`, `abort`, `ren`, `submit`, `mpmstat`,
-with and without arguments — gives the same output as DRI's own binaries — `stat` prints
-`A: RW, Space:     7,512k`, `dir` lists `A: $3$      SUP`, `tod` prints
-`Mon 09/14/81 00:00:19`, `user 0` prints `User Number = 0`, `console` prints
-`Console = 3`. Before this release a source-built system printed a program's
-load line and then dropped the session, whatever the program was.
+A disk read or write that had succeeded could fail at random, with DISK READ
+or DISK WRITE NONRECOVERABLE or "Bdos Err On A: Bad Sector". The XIOS
+dispatches a call with `OUT (0E0H),A`, and used to read the result back with
+`IN A,(0E0H)`, which returned a copy the emulator kept in one variable for the
+whole machine. The 60 Hz tick is taken at any instruction boundary and ends in
+the dispatcher, and whatever ran next — the dispatcher's own SELMEMORY, or the
+SFTP RSP, which polls constantly — made XIOS calls of its own before the
+interrupted process got to its IN, which then returned their result. Forty
+`pip b:c.dat=b:big.dat[v]` copies of a 64K file in a row: the old emulator
+reported NONRECOVERABLE on 7 of the first 11 and then hung; now 160 such
+copies over three runs had no error. The handler leaves the result in A as
+part of the OUT, so neither the XIOS (`asm/bnkxios.asm`) nor the SFTP RSP's
+glue (`asm/sftp_glue.asm`) reads it again, and an `IN A,(0E0H)` returns A
+itself. A is saved and restored with the rest of a process's registers, so it
+still holds the result when the process runs again.
+
+After an SFTP `put`, any other process that opened the file got "Bdos Err On
+A: File Currently Open" until the system was restarted. The SFTP open for
+writing made the file (BDOS 22) and opened it again into the same FCB, and the
+close closed it once; under MP/M II a make and an open each put an entry on
+the lock list and only a close takes one off, and an RSP never terminates, so
+nothing ever removed the make's. A file put with no data at all was not closed
+even once. `put` now returns only once MP/M has the file closed, so a command
+typed straight after it can use it, and a write that fails is reported to the
+client.
+
+An SFTP upload could go into whatever file an HTTP read had open. The SFTP
+RSP serves every SSH session and the HTTP server from one FCB, and a transfer
+was a run of requests that carried the open file from each to the next, so
+another client's request in between replaced it: a 200K `put` with HTTP
+reading `DUMP.ASM` in a loop left `DUMP.ASM` as 435 bytes of the upload's data
+and the uploaded file unreadable. Every request now stands on its own, and the
+RSP keeps nothing from one to the next: a read opens the file, reads up to 15
+records at the request's offset and closes it; a write does the same with
+write random; a directory listing searches from the first entry and skips the
+ones it has already returned. Under the same load `DUMP.ASM` is unchanged, all
+60 HTTP reads of it made during the transfer are right, and the 200K file
+comes back as it went up; so do a 120K and a 90K file put and fetched from two
+sessions at once while two more list A: over SFTP and HTTP. A 200K `put` or
+`get` takes about 4.7 seconds.
+
+An HTTP read of a file ED had open hung a V2.0 system for good. The SFTP
+RSP's open was refused ("File Currently Open"), and the RSP ran in the BDOS's
+default error mode, so V2.0's RESBDOS printed the error through the XIOS with
+the RSP's whole console byte, 0F0H: the XIOS polled device 0E0H for output
+ready, which it never is, inside the BDOS, and every process that went near a
+disk stopped behind it. V2.1's RESBDOS prints only for a process that owns the
+console, so a V2.1 system just lost the message. The RSP now selects
+return-error mode (BDOS function 45) when it starts; HTTP answers 404 for such
+a file, and SFTP reports it missing.
+
+A console program could not open a file an HTTP client was reading. The RSP
+opened the files it read in MP/M's default, locked, mode, so `pip x=dump.asm`
+with an HTTP loop on `DUMP.ASM` ended in
+`ERROR - OPEN FILE INCOMPATIBLE MODE - A:DUMP.ASM`. A read now opens the file
+read-only (F6'), as TYPE and PIP do. With three HTTP loops reading `DUMP.ASM`,
+five PIPs and a TYPE of it on a console all succeed while 32 HTTP reads of it
+return 200. A file a console program has open locked, as ED does, is still
+refused, and writes keep the locked mode.
+
+`submit` on a source-built system stopped the whole machine — no prompt on
+any console, HTTP dead, the emulator at 100% CPU — and a command file of more
+than about 1K came out garbled ("Bad entry"), with the rest of it lost.
+`SUB.PLM` builds its command file in `rbuff`, declared `AT (.minimum$buffer)`
+above `minimum$buffer`'s own declaration, and uses everything from there to
+the top of its memory segment. um80 0.3.48 read the forward `EQU` uplm80
+wrote for that as 0, so SUBMIT built the file over page zero, the tick's RST 1
+vector included; and uplm80 put its string constants, its procedures' shared
+locals and its stack after the last variable, where Intel's LOCATE put them
+below the data. Both defects are fixed in the releases this one needs. A
+400-line command file now gives the same 402 user numbers, in the same order,
+as DRI's SUBMIT.PRL, and a 200-line file of 120-character lines, 24K of
+commands, runs to the end.
+
+`SPOOL.PRL` built from source wrote its message to the spooler RSP over the
+queue's own pointer: `spool$msg` is declared `AT (.tbuff-1)`, which uplm80
+compiled as the location counter, the queue control block itself. While no
+system had a spooler RSP nothing noticed; with `SPOOL.RSP` in the system,
+`spool file` stopped the emulator with an assertion or hung the machine.
+Printing the files itself, with no spooler RSP, `SPOOL.PRL` also read records
+into a buffer that ran over uplm80's locals, as SUBMIT's did: a text file came
+out as garbage, and a file of zeros sent the records over SPOOL's own code
+before it reached its `[D]` delete. Both are fixed in the releases this one
+needs, and SPOOL now lists a file and, with `[D]`, deletes it, as DRI's
+SPOOL.PRL does.
+
+`ASM.PRL`, `RDT.PRL` and `DDT.COM` are made the way DRI made them.
+`UTIL1/ASM.SUB` and `DDT.SUB` never link them: they assemble each module twice
+with MAC, the second time with `+R`, which puts every ORG 100H higher, and
+GENMOD builds the relocation map from the bytes that differ. `DDT.SUB` does it
+twice over, with DDT0MOV, the relocator, loaded over RELDDT's header page, and
+PRLCOM makes `DDT.COM` from `RDT.PRL`. Linked with ul80, none of the three
+came out right: `RDT.PRL` was the bare module, with no relocator and no
+relocation bits; `DDT.COM` began with DDT1ASM's `JMP 0683H` at 100H; and
+`ASM.PRL` had not one of the 939 relocation bits DRI's has, so it ran only in
+a memory segment based at 0000H. The build now assembles each module, and a
+copy of it with every ORG 100H higher, with `um80 --aseg`, and the new
+`tools/genmod.py` does what GENMOD, GENHEX and PRLCOM did. Under cpmemu DRI's
+MAC.COM gives the same HEX records for all ten modules both ways. `genmod.py`
+refuses the two ORG forms um80 assembles differently from MAC — an ORG in
+column 1, and a label on an ORG line — rather than let them through; none of
+the ten modules has either. GENMOD never cleared its memory, so a DS area or
+the gap before a module's ORG kept whatever the program run before it had
+left there. The default build leaves those bytes zero; `--dri-exact` fills
+them with MAC.COM, which makes `RDT.PRL` and `DDT.COM` identical to DRI's and
+`ASM.PRL` identical but for 11 bytes of MAC's variables that MAC changed while
+it ran. `verify_dri.py` compares all three, header and relocation map
+included, against the V2.0 master `CONTROL` and against `mpm2dist`, which
+carry the same three files. The copies next to the sources in `mpm2src/UTIL1`
+are a rebuild neither master carries, and not a reference.
+
+The source-built `GENSYS.COM` relocated every SPR with the wrong bit map. um80
+0.3.48 assembled `LDRLWR.ASM`'s `mvi a,low(bitmap+128)` as the low byte of
+`bitmap+128`'s offset within its module, with no relocation, so GENSYS read the
+next record of an SPR's bit map at the wrong point. Run under cpmemu beside
+DRI's with the same answers and SPR files, the V2.0 build wrote an `MPM.SYS`
+that differed from DRI's in 5872 bytes, and the V2.1 build read a fourth bit
+map record out of a file that has three. It now writes the same `MPM.SYS` and
+`SYSTEM.DAT` as DRI's GENSYS, but for the six serial number bytes. The host
+build was never affected, since it generates the system with
+`tools/gensys.py`.
+
+`docs/ldrlwr_bug.md`, written for 0.3.4, and the README said that DRI's own
+GENSYS relocates an SPR wrongly when its length is a multiple of 128 bytes,
+and worst at 1024. It does not. DRI's V2.1 GENSYS.COM, run under cpmemu,
+relocates RSPs of 128, 256, 512, 1008, 1024, 1152, 1536 and 1664 bytes exactly
+as `tools/gensys.py` does, and DRI's V2.0 GENSYS.COM ones of 256, 1024 and 1536
+bytes; the analysis had missed that `LdRl` resets its end marker when it
+changes buffers. Both documents now say so, and the old analysis is kept,
+marked as superseded.
+
+`tools/gensys.py`, given more than seven user memory segments, dropped the
+table entries past seven but still sized the user system call stacks for the
+larger number. It now does what V2.1's GENSYS does, for either release: it
+prints "*** Error Maximum Exceeded - 7 Assumed ***" and uses seven. The table
+has eight entries and the first is MP/M's own.
+
+The PL/M runtimes put the command drive at 005CH and the two passwords'
+address and length (`PASS0`/`LEN0`, `PASS1`/`LEN1`) at 0080H and 0082H, inside
+the default DMA buffer. DRI's `X0100.ASM`, linked into every MP/M II PL/M
+transient, has them at 0050H-0056H, which MP/M II's CLI zeroes for a
+transient. So DRI's ED, TYPE and ERAQ, which test `len0 <> 0`, never take
+their password path, and the source-built ones read the command tail's length
+there and took it whenever a file was named. Both runtimes now carry DRI's
+values; `ED.PRL`, `TYPE.PRL` and `ERAQ.PRL` each change in that one operand.
+
+DUMP, the one transient written in assembler, is linked as DRI linked it,
+`link dump,extrn[op]`, with `UTIL5/EXTRN.ASM` for its `bdos`, `fcb` and `buff`
+and without the PL/M runtime. `DUMP.PRL`'s image and relocation bits are now
+DRI's.
+
+`ASM.PRL`, `ED.PRL`, `PIP.PRL`, `RDT.PRL` and `SDIR.PRL` put storage past the
+end of their image, and nothing in an object file says how much. DRI named it
+as GENMOD's third argument, and its binaries reserve 1000H for ASM, ED and PIP
+and 1500H for RDT, in the `.PRL` header. The source build now asks for the
+same. SDIR is the exception: V2.0's asks for none, as in both of DRI's V2.0
+binaries and `UTIL7/SDIR.SUB`, and V2.1's for 1000H (see Added).
+
+`tools/build.py` assembled `cpm_runtime.mac`, `mpm_runtime.mac` and
+`mpm_pagezero.mac` only when their `.rel` did not exist yet, so once a
+checkout had built anything, an edit to a runtime changed nothing and nothing
+said so. Each runtime is now assembled once per run.
+
+On macOS a fresh checkout built an emulator that linked cleanly and then would
+not start: "dyld: Library not loaded: /usr/local/lib/libqkz80.4.dylib". With
+`-L` pointing at `cpmemu/src`, the linker preferred the dylib there to
+`libqkz80.a`, and the dylib's install name is where nothing is unless cpmemu's
+`make install` was run. CMake now links the sister directory's `libqkz80.a` by
+path. Linux CI builds only the archive, which is why it never saw this.
+
+`bin/dri/TMP.SPR` was this repository's own build rather than Digital
+Research's, and 128 bytes longer than every DRI copy. Replaced with the one
+from the distribution.
 
 ### Known issues
 
-The V2.0 nucleus sources here are not the V2.1 binaries in `bin/dri`, and V2.1
-looks like V2.0 plus in-place patches rather than a recompile: every nucleus
-module has the same program length in both trees, `PATCH.ASM`'s 128 reserved
-zero bytes are filled with code in DRI's `XDOS.SPR`, and V2.0 call sites are
-rewritten to call into that area — at program offset 0x01F8 V2.0's `lxi h,0016 /
-dad d / mov m,b` becomes `call 1814H`, and at 0x0527 `lhld 2081H` becomes
-`call 183FH`. About 56 bytes of real code differ, the rest being those patch
-areas and the serial number. A source-built system is therefore a genuine V2.0
-and does not carry DRI's later fixes. `BNKBDOS.SPR` and `TMP.SPR` build
-byte-identical to DRI's.
+A `--version=2.0` build carries V2.1's banked BDOS. The `BNKBDOS.ASM` DRI
+shipped with the V2.0 sources is already V2.1's — it builds DRI's V2.1
+`BNKBDOS.SPR` byte for byte — and rebuilding V2.0's would mean undoing DRI's
+fixes across 26 regions of it, which has not been done.
+
+The transients are compiled by uplm80, not by DRI's PL/M-80, so none of them
+is byte for byte DRI's, in either release; the V2.1 ones were checked by what
+they do. uplm80's code is larger, which matters only for the `.BRS` files, in
+bank 0: `SCHED.BRS` is 06B1H bytes against DRI's 043DH.
+
+`tools/gensys.py` does not write the same file as DRI's GENSYS for the same
+answers, although it places and relocates every module the same way. It also
+writes the LCKLSTS and CONSOLE DAT pages, as zeros, which DRI's leaves out of
+the file, so its record count (system data bytes 120-121) is larger; it
+leaves the size and bank of unused memory segment entries zero; and it pads
+each module's last page with zeros where DRI's leaves whatever its sector
+buffer held.
+
+The emulator has no list device: the XIOS discards list output, so a spooled
+file goes nowhere. With `[D]` the spooler still deletes it once it has been
+listed, which is what the RSP test checks.
+
+The `basic` and `stat` tests still check only that a prompt came back. The
+new `rsp`, `http` and `sftp` tests check what the programs print and what
+reaches the disk.
 
 ## [0.3.5] - 2026-09-23
 

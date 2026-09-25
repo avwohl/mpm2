@@ -5,7 +5,8 @@ V2.1 sources on a distribution disk, and no archive has them: bitsavers,
 the Tim Olmstead collection, cpm.z80.de and the Unofficial CP/M Web Site
 all carry the same two files, `mpm2src.zip` (sources, V2.0) and
 `mpm_ii.zip` (binaries, V2.1).  What follows is a reconstruction of V2.1
-from the binaries, checked against them byte for byte.
+from the binaries, checked against them: byte for byte where the code is
+assembled, and by what it does where it is compiled from PL/M.
 
 ## Where the reference binaries are
 
@@ -97,7 +98,7 @@ from:
 | `RESBDOS.SPR` | 47    | `NUCLEUS`                 | yes, byte-exact |
 | `BNKXDOS.SPR` | 6     | `NUCLEUS/BNKXDOS.ASM`     | yes, byte-exact |
 | `TMP.SPR`     | 23    | `NUCLEUS/TMPSUB.ASM`      | yes, byte-exact |
-| `MPMLDR.COM`  | 1     | `MPMLDR/MPMLDR.PLM`       | yes |
+| `MPMLDR.COM`  | 3     | `MPMLDR/MPMLDR.PLM`       | yes |
 | `SHOW.PRL`    | 2     | `UTIL4/SHOW.PLM`          | yes |
 | `PRINTER.PRL` | 23    | `UTIL5/PRINT.PLM`         | yes |
 | `SCHED.RSP`   | 1     | `UTIL2/SCRSP.PLM`         | yes |
@@ -105,15 +106,23 @@ from:
 | `SDIR.PRL`    | 2     | `UTIL7/DSE.PLM`, `tools/build.py` | yes, see below |
 | `SPOOL.BRS`   | 37    | `UTIL2/SPBRS.PLM`         | yes, see below |
 | `PIP.PRL`     | 64    | `UTIL6/PIP.PLM`           | yes, see below |
-| `GENSYS.COM`  | 47 + 768 longer | `MPMLDR/GENSYS.PLM`, `LDRLWR.ASM` | yes, see below |
+| `GENSYS.COM`  | 47, and 768 longer | `MPMLDR/GENSYS.PLM`, `LDRLWR.ASM` | yes, see below |
 | `BNKBDOS.SPR` | 568   | `BNKBDOS/BNKBDOS.ASM`     | already V2.1, see below |
 | `LIB.COM`     | 2     | none (DRI tool)           | serial only |
 | `LINK.COM`    | 16    | none (DRI tool)           | n/a |
 | `RMAC.COM`    | 2     | none (DRI tool)           | serial only |
 
-The four transients built from PL/M cannot be checked byte for byte in
-any case: `uplm80` is not Digital Research's PL/M-80 and generates
-different code.  The nucleus is all assembler, which is why it can be.
+The byte counts include the two bytes of serial number in the files that
+carry one: `XDOS.SPR`, `RESBDOS.SPR`, `MPMLDR.COM`, `GENSYS.COM`,
+`LIB.COM`, `LINK.COM` and `RMAC.COM`.
+
+None of the transients can be checked byte for byte: they are compiled
+from PL/M, and `uplm80` is not Digital Research's PL/M-80 and generates
+different code.  Each one was checked instead against the patch,
+instruction by instruction, and the larger ones also by running them
+beside DRI's binary on the same system with the same input; the sections
+below say how.  The
+nucleus is all assembler, which is why it can be compared byte for byte.
 
 `ASM.PRL`, `RDT.PRL` and `DDT.COM` are not in the table: `CONTROL`'s and
 `mpm2dist`'s are the same file.  The copies next to their sources in
@@ -216,7 +225,7 @@ with six spare bytes.
 * `SCRSP.PLM`: the last character of the scheduler's process name gets
   its high bit set, marking it a system process the way Spool, MPMSTAT
   and Abort already were.
-* `MPMLDR.PLM`: banner only.
+* `MPMLDR.PLM`: banner only; the other two bytes are the serial number.
 * `MSPL.PLM`, four changes.  The spooler drops its priority to 201
   before it starts listing, so that it runs in the background.  The pass
   that checks the files exist opens them with `f5'` set, the way the
@@ -226,50 +235,358 @@ with six spare bytes.
   `SPOOL A.TXT[D]` used to do.  And the message it prints on detaching
   loses its last two lines - DRI took the bytes for the patch code.
 
-The first two are one statement each and read straight off the patch.
-The third is a source-level reconstruction of a hand-written patch: DRI
-jumped back to the top of the loop, which PL/M cannot express, so the
-loop body is restructured as an `if`/`else` around the open.  It does
-what the patch does; it does not assemble to the same bytes, and neither
-does anything else here that is compiled rather than assembled.
+Of the spooler's four changes, the first two are one statement each and
+read straight off the patch.  The third is a source-level reconstruction
+of a hand-written patch: DRI jumped back to the top of the loop, which
+PL/M cannot express, so the loop body is restructured as an `if`/`else`
+around the open.  It does what the patch does; it does not assemble to
+the same bytes, and neither does anything else here that is compiled
+rather than assembled.
 
-### SDIR, SPOOL.BRS, PIP, GENSYS
+The four sections that follow are the transients whose changes were
+larger than a statement.  Each is behind `$if MPM21` in
+`src/overrides`.  Offsets into a `.PRL` are file offsets, which for a
+transient linked at 0100H are also its load addresses.
 
-These were first identified here and left for later; all four have since
-been recovered into `src/overrides`, each behind `$if MPM21`, and the
-commit that did each has the evidence in full.  Offsets are into the
-`.PRL` or `.COM` file, which for these is also the load address.
+### SPOOL.BRS - the spooler detaches first (SPBRS.PLM)
 
-`SDIR.PRL`, two bytes.  `23C1`, `LHLD 3BADH` becomes `LHLD 3BB1H`:
-`store$file$info` in `UTIL7/DSE.PLM` tests `last$f$i$adr` instead of
-`f$i$adr` (which is always zero there) before it adds a record, so the
-file table is bounded at last.  And header byte 5, GENMOD's extra-memory
-word, `0000` to `1000`: V2.1 asks MP/M for 4K more, room for about 180
-more records.  `tools/build.py` gives the V2.1 build the 4K and V2.0
-none.
+`SPOOL.BRS` is the banked half of the resident spooler.  The 37 bytes
+are 32 of code at `01C2-01E1` of the program (`02C2` in the file, after
+the header page) and the five bitmap bytes that describe them.  The
+program length, `07ED`, and everything after `01E2` are unchanged: it is
+an in-place patch of the top of the spooler's main loop.
 
-`SPOOL.BRS`, 37 bytes, the banked resident half of the spooler
-(`UTIL2/SPBRS.PLM`): the spooler detaches from the console of the last
-request before it waits on SPOOLQ for the next.  The build makes `.BRS`
-files now (`tools/build.py`), and `gensys.sh` puts them in every system.
+```
+V2.0                              V2.1
+LXI D,0368H  ; .spool$uqcb        MVI C,93H     ; 147, detach console
+MVI C,89H    ; read$queue         CALL 02FCH    ; mon1
+CALL 02FCH   ; mon1               LXI D,0368H
+LXI B,0016H  ; disk$slct          MVI C,89H     ; read$queue
+LHLD 033CH   ; spool$pd$adr       CALL 02FCH
+DAD B / LDA 0370H / MOV M,A       LXI B,000EH   ; console
+LXI B,000EH  ; console            LHLD 033CH / DAD B / LDA 0371H / MOV M,A
+LHLD 033CH / DAD B                LXI B,0008H / DAD B  ; 0E+08 = disk$slct
+LDA 0371H / MOV M,A               LDA 0370H / MOV M,A
+LXI D,0000H                       NOP
+```
 
-`PIP.PRL`, 64 bytes in seven places, five changes: `[A]` no longer turns
-a file copy into a character copy; `[O]` counts in a file to file copy;
-a multiple-file copy without `[A]` no longer runs `archck`, and clears
-both extent bytes; `[K]` also suppresses MULTCOPY's closing new line;
-and an error no longer closes and deletes the destination's scratch
-file.  The room for the `[K]` test came from the file-not-found test
-above it, which the patch cut down to the low byte of `NCOPIED`
-(`1FE1`); the default build keeps the whole word, `--dri-exact` builds
-DRI's test.
+In the source that is `call mon1 (detach,0)` put in front of `call mon1
+(read$queue,.spool$uqcb)`, so the spooler lets go of the console of the
+last request before it waits on SPOOLQ for the next.  DRI found the five
+bytes it needed by storing `console` before `disk$slct`, so that the
+second store reuses the pointer, and by dropping the `LXI D,0` in front
+of `detach$list`; neither detach reads DE.  The reconstruction keeps
+V2.1's store order.  Built with `--version=2.1`, the loop compiles to
+detach (93H), read$queue, the console at pd+0EH, `disk$slct` at pd+16H
+and detach$list; `spool file[d]` lists the file and deletes it, and
+after STOPSPLR the next listing stops at its first line and leaves the
+file.
 
-`GENSYS.COM` is V2.0's with a 768-byte patch area, not a recompile.  It
-asks "Enable Compatibility Attributes (N) ?" (system data byte 96, which
-the V2.1 CLI's `cliattr` tests), shows a temporary or system drive P: as
-`P:` instead of `@:`, limits the user memory segments to seven, and
-closes each SPR, RSP and BRS file it has loaded.  `MPM.SYS` itself is
-generated by `tools/gensys.py`, which writes byte 96 from
-`build_all.sh --compat-attributes` (default no, as DRI's).
+No other resident system process file differs between the two masters
+apart from `SCHED.RSP`'s one byte (above).  The copy of `SCHED.RSP` in
+`mpm2src/UTIL2`, a rebuild in the source tree, also differs from both
+masters at `0118-0135`: the descriptor's undefined tail, whatever was in
+memory when it was built.
+
+### SDIR - the file table's bounds check (DSE.PLM)
+
+SDIR's two bytes are two halves of one fix.
+
+In the code, one operand changes, at `23C1`:
+
+```
+23B6  CALL 22E0H        hash$look$up
+23B9  RAR
+23BA  JC   2452H        found: go and update the existing record
+23BD  LXI  D,002EH      2 * size(file$info)
+23C0  LHLD 3BADH        f$i$adr            V2.1: LHLD 3BB1H, last$f$i$adr
+23C3  DAD  D
+23C4  LXI  D,3BB3H      .x$i$adr
+23C7  CALL 3A39H        HL = x$i$adr - HL
+23CA  JNC  23D0H
+23CD  MVI  A,00H        return false: out of memory
+23CF  RET
+23D0  LXI  D,0017H      size(file$info)
+23D3  LHLD 3BB1H
+23D6  DAD  D
+23D7  SHLD 3BB1H        last$f$i$adr := last$f$i$adr + 23
+23DA  SHLD 3BADH        f$i$adr = ...
+```
+
+This is `store$file$info` in `UTIL7/DSE.PLM`:
+
+```
+if not hash$look$up then
+do;
+    if f$i$adr + 2 * size(file$info) > x$i$adr then     /* V2.1: last$f$i$adr */
+        return(false);                     /* out of memory         */
+    f$i$adr = (last$f$i$adr := last$f$i$adr + size(file$info));
+```
+
+The words are identified by what the code does with them:
+
+* `23D0-23DA` above makes `3BB1` `last$f$i$adr` and `3BAD` `f$i$adr`.
+* `get$files` (`259E-25CF`) loads `3BB1` from `3BAF`, and `3BB3` from
+  `0006H`, maxb.
+* `DM.PLM`'s main line sets `3BAF` to `3D88H` at `06E8`.  That is
+  `.hash$table + size(hash$table) - size(file$info)`, with `.memory` at
+  `3C9FH`.
+
+So `3BAD` is `f$i$adr`, `3BAF` `end$adr`, `3BB1` `last$f$i$adr` and
+`3BB3` `x$i$adr`, which is DSE's own declaration order.  The XFCB branch
+further down (`2460`) already tested `last$f$i$adr`.
+
+The V2.0 test could never fail.  `hash$look$up` returns false only after
+following the hash chain to its end, that is with `f$i$adr = 0`, so the
+test read `0 + 46 > x$i$adr`.  Nothing else bounds the table.  Once a
+drive has more matching files than fit between `.memory+256` and the top
+of SDIR's memory segment, the 23-byte records run over the `JMP` to the
+XDOS that the CLI puts in the segment's top three bytes, and on into
+memory the process does not own.  SDIR checks the console after every
+directory entry, so the next BDOS call jumps into a file name.
+
+The other byte is the high byte of the `.PRL` header's extra-memory word
+(bytes 4-5, GENMOD's third argument), `0000H` to `1000H`.  V2.0's
+`UTIL7/SDIR.SUB` gives GENMOD no third argument, and every other `.PRL`
+carries the same figure in both releases.  The CLI sizes a segment as
+`high(len + len/8 + 0FFH) + high(extra + 0FFH) + 1` pages, and MP/M
+gives a program the smallest free segment that fits.  V2.0 SDIR asks for
+45H pages and can land in a segment with room for about 80 files; V2.1
+asks for 55H.  The extra memory is not what SDIR's hash table at
+`.memory` needs - the pages of the relocation bitmap, dead once the
+image is relocated, always leave room for that - so on its own it only
+moves the point where V2.0 overruns.  `tools/build.py` links SDIR with
+1000H for `--version 2.1` and none for 2.0.
+
+This was checked on the emulator, with the `MPM.SYS` segment table
+patched to user segments of 48H, 58H and 68H pages and C0H for the rest:
+
+| SDIR                          | segment | files | result |
+|-------------------------------|---------|-------|--------|
+| DRI V2.0                      | 48H     | 115   | lists them ("Not enough memory for sort") |
+| DRI V2.0                      | 48H     | 116   | hangs the system (2 of 3 runs), or `Bdos Err On B: Bad Sector` |
+| DRI V2.1                      | 58H     | 200   | lists them, sorted |
+| DRI V2.1                      | 58H     | 400   | "Out of Memory" at 293, lists those, returns |
+| source V2.1                   | 68H     | 400   | "Out of Memory" at 311, lists those, returns |
+| source V2.0 (any extra)       | 58H/68H | 200/400 | hangs the system |
+
+Record 116 is the first to reach DRI V2.0's jump at `47FDH`, and 293 and
+311 are the counts the V2.1 test allows in those segments.  Apart from
+where it stops and the totals, the source-built V2.1 listing is line for
+line DRI's.  That needs uplm80 0.3.7 or later, which computes `x MOD 0`
+as PL/M-80 does: with an earlier uplm80 every source-built SDIR repeats
+its heading on each line, because SDIR's default page length is 0.
+
+Built with `--version=2.1`, `SDIR.PRL` differs from the V2.0 build in the
+same single operand (`LHLD FIADR` becomes `LHLD LASTFIADR`) and in the
+header.
+
+### PIP - five changes in seven places (PIP.PLM)
+
+`PIP.PRL` differs in 64 bytes: 57 in the program, in seven places, and 7
+in the relocation bitmap that goes with them.  DRI patched every change
+in place over V2.0's code, so nothing moves, and the addresses give the
+variables' names once `PIP.PLM`'s data area is mapped.  PL/M-80
+allocates that area in declaration order, starting with `COLUMN` at
+`2251H`, just after the 100-byte stack.
+
+| Address | Variable |
+|---------|----------|
+| `2262H` | `SCOM` - the source is a `.COM` file |
+| `243AH` | `OBJ`, `CONT(14)` - the `[O]` option |
+| `242CH` | `ARCHIV`, `CONT(0)` - `[A]` |
+| `2436H` | `KILDS`, `CONT(10)` - `[K]` |
+| `2270H` | `source.fcb(12)`, the source's extent number |
+| `22CCH` | `odest.fcb(12)`, the destination's |
+| `2494H` | `I`, `SIMPLECOPY`'s loop index |
+| `2499H` | `NCOPIED`, local to `MULTCOPY` |
+
+The seven places:
+
+| Offset | Where | V2.0 | V2.1 |
+|--------|-------|------|------|
+| `06E7` | main, concatenation loop | `LDA 243AH` / `LXI H,2262H` / `ORA M` / `MOV M,A` | `LDA 2262H` / `LXI H,243AH` / `ORA M` / `MOV M,A` |
+| `0B12` | `ERROR` | `CALL SETDUSER`, `CALL CLOSE(.dest)`, `CALL DELETE(.dest)`; `CLOSE(.odest)` follows at `0B21` | `JMP 0B27H`; at `0B15` a new routine `LXI H,2270H` / `MVI M,0` / `LXI H,22CCH` / `MVI M,0` / `RET` |
+| `1258` | `GETSOURCEC` | `LDA 2262H` / `RAR` / `JNC` | `LDA 243AH` / `RAR` / `JNC` |
+| `1855` | `RD$EOF` | `LDA 2262H` / `RAR` / `JNC` | `LDA 243AH` / `RAR` / `JNC` |
+| `1EBE` | `SIMPLECOPY` | `MVI M,00H` into `2494H` | `MVI M,01H` |
+| `1FE1` | `MULTCOPY`, nothing left to copy | 16-bit `NCOPIED = 0` test, then `CALL CRLF` | 8-bit test, then `LDA 2436H` / `RAR` / `RC` before `CALL CRLF` |
+| `202E` | `MULTCOPY`, archive check | `CMA` / `PUSH PSW` / `CALL ARCHCK` / ... / `ORA C` / `RAR` / `JNC`, then `MVI M,0` into `22CCH` | `ORA A` / `JZ 203AH` / `CALL ARCHCK` / `ORA A` / `JZ`, then `CALL 0B15H` |
+
+In PIP's terms these are five changes:
+
+* **`[A]` no longer turns a file copy into a character copy.**
+  `SIMPLECOPY` looks through the options to decide whether it can copy
+  the file directly.  That loop now starts at 1 instead of 0, so
+  `CONT(0)`, the archive option, no longer turns off the fast copy.  In
+  V2.0, `PIP B:X.DAT=A:X.DAT[A]` copied a binary file only as far as its
+  first ctl-Z.
+* **`[O]` works in a file-to-file copy.**  `GETSOURCEC` and `RD$EOF` test
+  `OBJ` instead of `SCOM`.  The concatenation loop's `SCOM = SCOM OR OBJ`
+  becomes `OBJ = OBJ OR SCOM`, so a `.COM` source still counts as binary
+  there.  DRI shipped the other side of this as well: a `.COM` file
+  copied file-to-file with a character option and no `[O]` now stops at
+  a ctl-Z too.
+* **An archived file is copied whole.**  V2.0 wrote `if not archiv or
+  archck`.  PL/M evaluates both sides of an `OR`, so `archck` searched
+  every extent of every file even without `[A]`.  When all of a file's
+  extents were marked archived, it left `source.fcb(12)` at the extent of
+  the last directory entry it read, so `PIP B:=A:*.*` copied such a file
+  starting from that extent.  V2.1 skips `archck` unless `[A]` was given,
+  and clears both extent numbers before the copy.
+* **`[K]` also drops the new line** that a multi-file copy prints at the
+  end.
+* **`ERROR` no longer cleans up the destination.**  It no longer closes
+  and deletes the destination's `.$$$` file, or closes the original
+  destination.  DRI jumped over those four calls to find the twelve
+  bytes for the new routine at `0B15`.  As a result, a copy that fails
+  after the destination was made - `PIP C:NEW.TXT=B:NOSUCH.TXT`, for
+  example - leaves `C:NEW.$$$` behind.  The bytes do not say why the
+  cleanup was dropped.  A likely reason is that most errors happen before
+  any destination exists, so the calls were working on whatever `dest`
+  and `odest` held.  DRI's later CP/M 3 PIP keeps the calls but guards
+  them with `made` and `opened` flags.
+
+Two pieces of the source are equivalents rather than transcriptions:
+
+* The patch tests `ARCHIV` before it calls `archck`.  PL/M has no
+  short-circuit `OR`, so the test moves to the top of `archck` (`if
+  archiv = 0 then return 1`), and the call site becomes `if archck then`.
+* To make room for the `[K]` test, the patch compares only the low byte
+  of `NCOPIED` with zero, so a copy that matched a multiple of 256 files
+  ends in FILE NOT FOUND.  The default build keeps the whole word, as
+  V2.0 did; `--dri-exact` builds DRI's test (see
+  [Building either release](#building-either-release)).
+
+DRI's own CP/M 3 `PIP.PLM`, by the same author a few months later, has
+the same changes in source form: `IF OBJ` in both places, `if not archiv
+then return 1` at the top of `archck`, both extent numbers cleared, and
+`if not kilds then call crlf`.  The version strings still say 2.0 in
+DRI's V2.1 binary, and are left that way.
+
+To check the reconstruction, four PIPs were run through the same 23
+commands on the source-built V2.1 system: the rebuilt V2.1, DRI's V2.1
+(on the disk as `XPIP.PRL`), DRI's V2.0, and the rebuilt V2.0.  The
+commands covered `[A]`, `[O]`, `[K]`, `[E]`, `[N]`, `[V]`, `[G]`, `[T]`,
+`[U]`, `[L]`, `[F]`, concatenation, multi-file copies and two errors.
+The rebuilt V2.1 matched DRI's V2.1 on every console line and in all 26
+output files, and the rebuilt V2.0 matched DRI's V2.0.  The two releases
+differed only where the changes above say they should:
+
+| Command | DRI V2.0 | DRI V2.1, and the rebuilt V2.1 |
+|---------|----------|--------------------------------|
+| `PIP C:OUTA.DAT=B:BIN.DAT[A]` (1024 bytes, ctl-Z at byte 300) | 384 bytes | 1024, same as the source |
+| `PIP C:OUTOZ.DAT=B:BIN.DAT[OZ]` | 384 bytes | 1024 |
+| `PIP C:OUTZ.COM=B:BIN.COM[Z]` | 1024 bytes | 384 |
+| `PIP C:=B:BIG.DAT[A]`, then `PIP D:=B:BIG.*` (20K) | 4096 bytes, starting at record 128 | 20480, same as the source |
+| `PIP D:=B:*.TXT[K]` | ends with an empty line | no empty line |
+| `PIP C:NEW.TXT=B:NOSUCH.TXT` | FILE NOT FOUND; nothing left on C: | FILE NOT FOUND; `C:NEW.$$$` left, 0 records |
+
+### GENSYS - a patch, not a recompile (GENSYS.PLM, LDRLWR.ASM)
+
+`GENSYS.COM` is 8704 bytes in V2.0 and 9472 in V2.1, which made it look
+like a recompile.  It is not.  V2.1 is V2.0's binary, patched in memory
+and saved as 37 pages (2500H bytes).  Within V2.0's 8704 bytes the two
+files differ in exactly 47:
+
+* 2: the serial number.
+* 1: the banner, `V2.0` to `V2.1` (0768H).
+* 29: the high byte of every operand that addresses `.MEMORY`, GENSYS's
+  sector buffer, which is `sctbfr` in `LDRLWR.ASM`.  It moves one page,
+  from 253DH to 263DH.  A whole page keeps `low(sctbfr)` unchanged, and
+  LDRLWR uses that low byte as an immediate.
+* 15: five three-byte instructions, each turned into a `CALL` or `JMP`
+  into the patch.
+
+The patch occupies 145 bytes of the page `.MEMORY` gave up, 253DH-25CDH,
+and every byte of it is accounted for.  Addresses here are load
+addresses in DRI's V2.1 binary, 100H above the file offset.  The V2.0
+routines were located from the source: `get$response` 0CC9H,
+`setup$system$dat` 1909H, `LdRl` 1CBEH, `FCBin` 2035H, `system$data`
+21BEH.
+
+* **1961H**: `LXI B,<'Add system call user stacks '>` becomes `CALL
+  255EH`.  That routine prints `Enable Compatibility Attributes `, calls
+  `get$response(.system$data(96))` and `crlf`, then does the displaced
+  `LXI`.  This is the new question.  It is asked after Breakpoint RST and
+  defaults to N, because byte 96 of the unchanged default table is zero.
+  The answer is 0FFH or 00H, and it is the byte `cliattr` in the XDOS
+  patch area tests.
+* **1991H, 19C7H**: `ADI 41H`/`DCR A` (`'A'+drive-1`) becomes a call to
+  `CPI 0`/`JNZ`/`ADI 10H`/`ADI 40H`.  A drive is stored masked with 0FH,
+  so P: is 0; V2.0 displayed it as `(@:)` and V2.1 displays `(P:)`.
+* **1A56H**, after `get$param('Number of user memory segments')`: if the
+  answer is 8 or more, it is set to 7, `*** Error Maximum Exceeded - 7
+  Assumed ***` is printed, and the question is asked again with 7 as the
+  default.  The memory segment table at system data 16-47 has eight
+  entries and the first is MP/M's own.  V2.0 accepted any number and
+  wrote the extra entries over the breakpoint vectors at 48.  The
+  Implementor's Guide gives the range as 1 to 7.
+* **1D4DH**, `ExitLdRl` in LDRLWR: `LXI H,0` becomes a call that first
+  closes `FCBin`.  V2.0 left every SPR, RSP and BRS file it had loaded
+  open; under MP/M each one holds a lock list entry and counts against
+  the open file limit until it is closed.
+
+DRI's addendum, "MP/M II Release 2.1 Compatibility Attributes", gives the
+question as `Enable Compatibility Attributes (N) ?`.
+
+The source carries these changes behind `$if MPM21` in
+`src/overrides/MPMLDR/GENSYS.PLM`, and behind `IFDEF MPM21` in the
+`LDRLWR.ASM` override for the close.  With `MPM21` undefined, the
+`GENSYS.PLM` override compiles to exactly the same code as DRI's file.
+The result cannot match DRI's byte for byte, so it was run under cpmemu
+beside DRI's V2.1 `GENSYS.COM` with the same answers and SPR files, in
+four sessions.  Together they cover the question answered Y and N,
+defaults read back from a `SYSTEM.DAT`, drive P:, 7, 8 and 9 segments,
+and an RSP/BRS pair.  In every session the dialogue was identical, the
+BDOS close calls matched (9 closes where V2.0 makes 3), and `MPM.SYS`
+and `SYSTEM.DAT` were identical apart from the six serial bytes.
+
+Building this also exposed an older fault in the source build, not in
+DRI's GENSYS: `LDRLWR.ASM`'s `mvi a,low(bitmap+128)`.  um80 before 0.3.49
+assembled `low()` of a relocatable address as the low byte of its offset
+within the module, with no relocation, so a source-built `GENSYS.COM`
+read the next record of an SPR's relocation bit map at the wrong point:
+its V2.0 `MPM.SYS` differed from the one DRI's GENSYS writes in 5872
+bytes, and the V2.1 build read a fourth bit map record out of a file
+that has three.  DRI assembled `LDRLWR.ASM` with ASM80, whose object
+format carries the relocation.  With that fixed, the source-built V2.0
+GENSYS writes the same `MPM.SYS` and `SYSTEM.DAT` as DRI's, but for the
+serial number.  DRI's own `GENSYS.COM` relocates correctly; see
+[ldrlwr_bug.md](ldrlwr_bug.md).
+
+The system itself is generated by `tools/gensys.py`, not by
+`GENSYS.COM`, so the two changes that reach `MPM.SYS` are made there as
+well:
+
+* `compatibility_attributes` (default false) writes byte 96.
+  `scripts/gensys.sh` and `build_all.sh` take
+  `--compat-attributes[=yes|no]`.  gensys.py tells the releases apart by
+  XDOS's version word, `mpmver` at offset 61H of the code: 0120H or
+  0121H.  A V2.0 system always gets zero at byte 96, for three reasons:
+  * V2.0 GENSYS never asks for it, and has zero there in its default
+    table.
+  * No V2.0 binary reads it: V2.1's `cliattr` is the only code in either
+    release that addresses system data offset 60H.
+  * DRI's own V2.0 `NUCLEUS/MPM.SYS` happens to have 0FFH there,
+    presumably copied through from an old `SYSTEM.DAT`, and a V2.0 XDOS
+    ignores it.
+* More than seven user segments is reduced to seven, with DRI's message,
+  for both releases.
+
+In a booted V2.1 system generated with the attributes on, a program that
+prints byte 1DH of its own process descriptor reports:
+
+| SET on the program file | byte 1DH |
+|---|---|
+| none | 00H |
+| `[F1=ON]` | 80H |
+| `[F4=ON]` | 70H |
+| `[F1=ON,F3=ON]` | A0H |
+
+F4' also sets F2' and F3', as DRI's addendum says.  With the attributes
+off, all four report 00H.  The same holds for an `MPM.SYS` written by the
+source-built V2.1 `GENSYS.COM`.
 
 ### BNKBDOS - the shipped source is already V2.1
 
@@ -365,13 +682,37 @@ breakpoint vector through the system data page.
 * `bin/dri/TMP.SPR` was this repository's own build, not Digital
   Research's - 1536 bytes where every DRI copy is 1408.  Replaced with
   `mpm2_external/mpm2dist/TMP.SPR`.
-* `SCHED.RSP`, `SPOOL.RSP` and `MPMSTAT.RSP` were built here from two
-  modules each (`*BRS.PLM` and `*RSP.PLM`), which put the process
-  descriptor somewhere other than where MP/M looks for it.  They are now
-  built the way DRI's `SCHED.SUB` does it: `*.RSP` from `*RSP.PLM`
-  alone and a separate `*.BRS` from `*BRS.PLM` with
-  `src/brs_runtime.mac` in `BRSPBI.ASM`'s place, and `gensys.sh` loads
-  all four of DRI's resident system processes into every system.
+* Resident system processes were built wrong and left out of every
+  generated system.  Both are fixed.
+  * `SCHED.RSP`, `SPOOL.RSP` and `MPMSTAT.RSP` had been linked from two
+    modules each (`*BRS.PLM` + `*RSP.PLM`), which put the BRS's header and
+    a CP/M program entry where MP/M expects the process descriptor.  They
+    are now built the way DRI's `UTIL2/*.SUB` build them: each `*.RSP`
+    from `*RSP.PLM` alone - offset 0 the word MP/M sets to the BDOS entry,
+    the descriptor at 2 and the queue at 2+52 - and the code as a
+    separate `*.BRS` (a new build output) from `*BRS.PLM` and
+    `src/brs_runtime.mac`, which stands in for `BRSPBI.ASM`.  A BRS's
+    offset 0 is OS, offset 2 the stack pointer and offset 4 the name.
+  * Against DRI's files, `ABORT.RSP` is byte for byte identical.  The
+    other RSPs match in every byte DRI's DATA and INITIAL lists define.
+    The BRS headers have the same shape, and each one's stack-pointer word
+    addresses the process entry with 19 `0C7C7H` below it.
+  * `scripts/gensys.sh` loads ABORT, MPMSTAT, SCHED and SPOOL (with their
+    `.BRS` files) ahead of SFTP, into every system.  Making room for them
+    in common memory meant shrinking the XIOS's checksum vectors, which
+    are never used (CKS is 0).
+  * The spooler also needed the XIOS to move disk records in the calling
+    process's bank (through SWTUSER and SWTSYS) rather than in the last
+    user bank selected.  The same fault had broken every SFTP and HTTP
+    file read.
+  * Building them from DRI's sources found four uplm80 defects - a
+    STRUCTURE's DATA and INITIAL lists, a string in one, a LITERALLY list
+    in one, and a RETURN inside a counted DO loop.  Putting the spooler
+    RSP in the system then showed `SPOOL.PRL` writing its message to the
+    spooler over the queue's own pointer: uplm80 compiled
+    `AT (.tbuff-1)` as the location counter, and um80 kept only the last
+    of two constants added to an external.  They are fixed in uplm80
+    0.3.7 and um80 0.3.49.
 * SUBMIT and SPOOL (when there is no SPOOL RSP and `SPOOL.PRL` prints
   the files itself) build their buffers from their last variable up to
   the top of the memory segment - `rbuff` at `minimum$buffer`, `buffer` at
@@ -383,14 +724,14 @@ breakpoint vector through the system data page.
   in.  Both overrides now put the buffer at `.MEMORY`, and
   `tools/build.py` asks MP/M for the minimum the sources had reserved in
   the image (400H and 80H, in the `.PRL` header).
-* ul80 0.3.48 does not relocate `__END__` in a `.PRL`: a reference to it
-  is not marked in the bit map, so `.MEMORY` is right only when the
-  program is loaded at a segment base of 0000H.  PIP, ED, SDIR, STAT,
+* ul80 0.3.48 did not relocate `__END__` in a `.PRL`: a reference to it
+  was not marked in the bit map, so `.MEMORY` was right only when the
+  program was loaded at a segment base of 0000H.  PIP, ED, SDIR, STAT,
   SUBMIT and SPOOL use it.  Every memory segment `gensys.sh` generates
-  starts at 0000H (seven banks of 0000-BFFFH), so nothing here shows it;
-  a system with a segment based elsewhere would.  Reproduction:
-  `extrn __END__` / `ld hl,__END__` linked with `ul80 --prl` leaves the
-  bit for the high byte clear.
+  starts at 0000H (seven banks of 0000-BFFFH), so nothing here showed it;
+  a system with a segment based elsewhere would have.  ul80 0.3.49 marks
+  those references, and a source build now needs um80_and_friends 0.3.50
+  or later.
 * The emulator's SFTP RSP ran in the BDOS's default error mode.  A read
   refused because a console program had the file open ("File Currently
   Open") was then reported on the RSP's console, and V2.0's RESBDOS
