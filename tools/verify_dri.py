@@ -118,7 +118,7 @@ def compare_file(ref, built):
     if len(a) != len(b):
         return f"length {len(a)} vs {len(b)}"
     unset = offsets(UNSET.get(ref.name, ""))
-    part = offsets(PART[ref.name]) if ref.name in PART else range(len(a))
+    part = sorted(offsets(PART[ref.name])) if ref.name in PART else range(len(a))
     bad = [i for i in part if a[i] != b[i] and i not in unset]
     if bad:
         return (f"{len(bad)} bytes differ, first at "
