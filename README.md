@@ -99,9 +99,11 @@ cd ..
 ```
 
 um80 and uplm80 are also on PyPI (`pip install um80 uplm80`). A source build
-needs um80 0.3.48 or later and uplm80 0.3.6 or later, which brings upeepz80
-0.2.4: earlier releases link `.PRL` transients a page low and miscompile
-several of the utilities.
+needs um80 0.3.50 or later and uplm80 0.3.7 or later, with upeepz80 0.2.5:
+earlier releases link `.PRL` transients a page low, miscompile several of the
+utilities, and cannot build DRI's own text of SUBMIT, SPOOL, the resident
+system processes and `LDRLWR.ASM`, or give the nucleus RMAC's six-character
+names.
 
 ### Optional: SSH Support
 

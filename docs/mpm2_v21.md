@@ -383,14 +383,13 @@ breakpoint vector through the system data page.
   is one of those locals, a few records in; for a while the overrides
   moved both buffers to `.MEMORY`.  uplm80 0.3.7 lays a program out as
   Intel's PL/M-80 does, variables last, and both build from DRI's text.
-* ul80 0.3.48 does not relocate `__END__` in a `.PRL`: a reference to it
-  is not marked in the bit map, so `.MEMORY` is right only when the
-  program is loaded at a segment base of 0000H.  PIP, ED, SDIR, STAT,
-  SUBMIT and SPOOL use it.  Every memory segment `gensys.sh` generates
-  starts at 0000H (seven banks of 0000-BFFFH), so nothing here shows it;
-  a system with a segment based elsewhere would.  Reproduction:
-  `extrn __END__` / `ld hl,__END__` linked with `ul80 --prl` leaves the
-  bit for the high byte clear.
+* ul80 up to 0.3.48 did not relocate `__END__` in a `.PRL`: a reference
+  to it was not marked in the bit map, so `.MEMORY` was right only when
+  the program was loaded at a segment base of 0000H.  PIP, ED, SDIR and
+  STAT use it.  Every memory segment `gensys.sh` generates starts at
+  0000H (seven banks of 0000-BFFFH), so nothing here showed it.  ul80
+  0.3.49 marks it: `extrn __END__` / `ld hl,__END__` linked with
+  `ul80 --prl` sets the bit for the high byte.
 * The emulator's SFTP RSP ran in the BDOS's default error mode.  A read
   refused because a console program had the file open ("File Currently
   Open") was then reported on the RSP's console, and V2.0's RESBDOS
