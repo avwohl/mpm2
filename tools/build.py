@@ -229,8 +229,16 @@ MPMLDR_TARGETS = [
     # - Post-build combines with LDRBDOS binary
     BuildTarget("MPMLDR", "com", ["MPMLDR.PLM", "LDMONX.ASM"], "MPMLDR",
                 plm_mode="bare", skip_runtime=True, post_build="mpmldr"),
-    # GENSYS needs LDRLWR.ASM for LDRL/FXWR and X0100.ASM for standard symbols
-    BuildTarget("GENSYS", "com", ["GENSYS.PLM", "LDRLWR.ASM", "X0100.ASM"], "MPMLDR"),
+    # DRI: `link gensys.obj,ldrlwr.obj,x0100.obj,plm80.lib' (GENSYS.SUB).
+    # LDRLWR.ASM is LDRL and FXWR, and X0100.ASM the page-zero names the
+    # two use: FCB, FCB16, TBUFF and MAXB for GENSYS, and MON1 as 0005H
+    # for LDRLWR, which calls it with the function in C, as PL/M-80 did.
+    # The CP/M runtime is not linked: it defines all ten of X0100's names
+    # again, its MON1 for uplm80's stack convention, and GENSYS needs
+    # nothing else from it - uplm80 open-codes every BDOS call GENSYS
+    # makes and puts the arithmetic routines in the module.
+    BuildTarget("GENSYS", "com", ["GENSYS.PLM", "LDRLWR.ASM", "X0100.ASM"], "MPMLDR",
+                skip_runtime=True),
 ]
 
 # LDRBDOS, the loader's BDOS at 0D00H, is taken from DRI's MPMLDR.COM (it is
@@ -516,8 +524,17 @@ class Builder:
 
     def link(self, rel_files: list, output_file: Path, output_type: str,
              origin: str = None, extra: str = "0") -> bool:
-        """Link .REL files to output using ul80"""
-        cmd = [UL80]
+        """Link .REL files to output using ul80.
+
+        A global that two modules define stops the link (ul80
+        --fatal-mult-def).  LINK-80, and ul80 without the flag, warn and
+        use the first definition, and the output looks fine: that is how,
+        when the nucleus's names were first cut to six characters, CLI's
+        exported PRINTBrlsfile became a second PRINTB and the four calls
+        CLI and ATTACH make to CLBDOS's printb went to it.  No link here
+        defines a name twice.
+        """
+        cmd = [UL80, "--fatal-mult-def"]
 
         if output_type == "prl":
             # A transient is loaded at segment_bottom+0100H while MP/M's

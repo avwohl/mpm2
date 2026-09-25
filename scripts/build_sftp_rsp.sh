@@ -19,7 +19,7 @@ echo ""
 echo "Building SFTP.RSP (common module)..."
 uplm80 -m bare -O2 -o sftp_rsp.mac sftp_rsp.plm
 um80 -o sftp_rsp.rel sftp_rsp.mac
-ul80 --prl -p 0 -o SFTP.RSP sftp_rsp.rel
+ul80 --fatal-mult-def --prl -p 0 -o SFTP.RSP sftp_rsp.rel
 echo "  Output: SFTP.RSP"
 ls -la SFTP.RSP
 echo ""
@@ -39,7 +39,7 @@ um80 -o sftp_brs_header.rel sftp_brs_header.asm
 echo "  Assembled to .rel files"
 
 # Link all together (header first for proper layout)
-ul80 --prl -p 0 -s -o SFTP.BRS sftp_brs_header.rel sftp_brs.rel sftp_glue.rel
+ul80 --fatal-mult-def --prl -p 0 -s -o SFTP.BRS sftp_brs_header.rel sftp_brs.rel sftp_glue.rel
 
 echo "  Output: SFTP.BRS"
 ls -la SFTP.BRS

@@ -180,7 +180,7 @@ cd "$ASM_DIR"
 
 BNKXIOS="bnkxios"
 um80 -o "${BNKXIOS}.rel" "${BNKXIOS}.asm"
-ul80 --prl -p 0 -o "${BNKXIOS}.spr" "${BNKXIOS}.rel"
+ul80 --fatal-mult-def --prl -p 0 -o "${BNKXIOS}.spr" "${BNKXIOS}.rel"
 
 # Ensure dsize=0 in SPR header (GENSYS requires this for banked XIOS)
 # dsize field is at bytes 4-5 in the SPR header
