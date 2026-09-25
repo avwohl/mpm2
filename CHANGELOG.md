@@ -194,31 +194,38 @@ prints `Mon 09/14/81 00:00:19`, `user 0` prints `User Number = 0`, `console`
 prints `Console = 3`. Before this release a source-built system printed a
 program's load line and then dropped the session, whatever the program was.
 
-More of the source build is DRI's own text. SUBMIT (`UTIL5/SUB.PLM`) and both
-halves of the resident spooler, scheduler and MPMSTAT (`UTIL2/*RSP.PLM` and
-`*BRS.PLM`) build from DRI's files as they stand. The overrides that are left
-carry the V2.1 reconstruction, a few local fixes, and what the toolchain still
-needs (see Known issues):
+More of the source build is DRI's own text. SUBMIT (`UTIL5/SUB.PLM`), the
+banked halves of the scheduler and MPMSTAT (`UTIL2/SCBRS.PLM`, `MSBRS.PLM`) and
+the resident halves of the spooler and MPMSTAT (`UTIL2/SPRSP.PLM`, `MSRSP.PLM`)
+build from DRI's files as they stand. The overrides that are left carry the
+V2.1 reconstruction, a few local fixes, and what the toolchain still needs (see
+Known issues):
 
-- `SPBRS.PLM`, `SCRSP.PLM`, `UTIL5/MSPL.PLM` and `MPMLDR/LDRLWR.ASM` are DRI's
-  text apart from their V2.1 changes. `MPMLDR.PLM` also keeps its disabled
-  serial check, with DRI's loop under the early return.
+- The ones that carry the V2.1 reconstruction are DRI's text apart from their
+  V2.1 changes: `SPBRS.PLM` has DRI's `restarts` stack and its `DO` loop,
+  `SCRSP.PLM` DRI's `DATA` and `INITIAL` lists, `UTIL5/MSPL.PLM` its message
+  at `.tbuff-1` and its buffer at `.dummy$buffer`, and `MPMLDR/LDRLWR.ASM` its
+  `low()` immediates. `MPMLDR.PLM` also keeps its disabled serial check, with
+  DRI's loop under the early return.
 - `tools/build.py` assembles DRI's `.ASM` sources with six-character PUBLIC and
   EXTRN names (um80 `-t`), as RMAC wrote them into the object file. DRI's
   nucleus depends on that: `DSPTCH.ASM` refers to `DATAPG.ASM`'s `memseg` as
   `memsegtbl`, for one. The five aliases the nucleus overrides carried instead
   are gone, and the V2.1 patch area enters CLI at `prbrls`, which does not
   collide with CLBDOS's `printb` at six characters.
-- A `$` inside a name is DRI's spelling again, except in the 28 names DRI's
-  text spells two ways, which RMAC takes for one name since it ignores the `$`,
-  and um80 does not: `MPM.ASM` stores to `nmb$lst`, which `DATAPG.ASM` defines
-  as `nmblst`, and 23 of them are in `BNKBDOS.ASM`. `NUCLEUS/BNKBDOS1.ASM` and
-  `BDOS30.ASM`, `$`-stripped copies that nothing built, and a copy of
-  `MPMLDR/LDRBDOS.ASM` identical to DRI's are gone.
+- A `$` inside a name or a binary constant is DRI's spelling again —
+  `BNKXDOS.ASM`'s `pw$fld`, `CLI.ASM`'s `0001$1111b` — except in the 28 names
+  DRI's text spells two ways, which RMAC takes for one name since it ignores
+  the `$`, and um80 does not: `MPM.ASM` stores to `nmb$lst`, which `DATAPG.ASM`
+  defines as `nmblst`, and 23 of them are in `BNKBDOS.ASM`.
+  `NUCLEUS/BNKBDOS1.ASM` and `BDOS30.ASM`, `$`-stripped copies that nothing
+  built, and a copy of `MPMLDR/LDRBDOS.ASM` identical to DRI's are gone.
 - XDOS, BNKXDOS, RESBDOS and TMP are still identical to DRI's in both
   releases, and BNKBDOS to DRI's V2.1. SUBMIT, SPOOL with and without the
   spooler RSP, SCHED and MPMSTAT give the same results as DRI's binaries on
-  V2.0 and V2.1.
+  V2.0 and V2.1. SUBMIT.PRL and SPOOL.PRL ask MP/M for no extra memory, as
+  DRI's do: each program's buffer starts at one of its last variables and runs
+  on to the top of its memory segment.
 
 `scripts/gensys.sh` generated the system in a fixed `/tmp/gensys_work`, which
 it removes first, and `run_tests.sh` wrote the emulator's log and the source
