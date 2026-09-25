@@ -46,8 +46,12 @@ differ only in an `offset` equate, and diffing the two images with GENMOD.
 The equivalent here is `uplm80 --mode mpm` plus `src/mpm_pagezero.mac`: the
 page-zero addresses are published from a module of their own so that a
 reference from the runtime or from compiled code crosses a module boundary and
-is recorded. `.SPR` and `.RSP` images are still linked at 0 (`ul80 --spr`),
-because those *are* loaded at the segment base.
+is recorded. The compiler reaches the BDOS entry, the stack top and the
+warm-boot jump through names of its own, `??BDOS`, `??MAXB` and `??BOOT`, which
+no PL/M identifier can capture; `BDOS` itself is not published, because
+`UTIL7/DM.PLM` declares a public variable of that name (DRI's `X0100.ASM` does
+not publish it either). `.SPR` and `.RSP` images are still linked at 0
+(`ul80 --spr`), because those *are* loaded at the segment base.
 
 With that fixed, source-built utilities work. On an otherwise all-DRI system,
 source-built `USER.PRL` prints `User Number = 0` and `CONSOLE.PRL` prints
@@ -74,29 +78,28 @@ Traced by arming an instruction trace at the CLI's `MVI C,90H / JMP XDOS`
 reach `ld sp,hl` / `ret`; DRI pops `0100` — the transient's entry — and a
 source-built system popped `cddb`, which falls through to `jp 0`.
 
-### Open: two utilities the compiler still gets wrong
+### Fixed: STAT and TOD
 
-`stat` prints its drive line without the free-space figure and repeats it
-instead of stopping; `tod` prints nothing. Both are compiled PL/M. DRI's own
-`STAT.PRL` on the same source-built nucleus prints `A: RW, Space:     7,524k`
-and stops, and DRI's `DIR.PRL` lists correctly there too, so what remains is in
-what the compiler emits, not in the system.
+`stat` printed its drive line without the free-space figure and repeated it
+instead of stopping, and `tod` printed nothing. Both were in what the compiler
+and the assembler emitted, and the 0.3.6 CHANGELOG has the defects - among
+them, um80 assembled `STAT.PLM`'s `call add(...)` as `CALL 0080H`, 80H being
+the opcode of `ADD A,B`. A source-built `stat` now prints
+`A: RW, Space:     7,512k` and `tod` prints `Mon 09/14/81 00:00:19`, as DRI's
+own binaries do on the same system.
 
-### The source tree is V2.0, and V2.1 is V2.0 plus patches
+### V2.0 and V2.1
 
-`mpm2_external/mpm2src/NUCLEUS` is MP/M II **V2.0** (`VER.ASM` says so, and a
-source-built system banners as "MP/M II V2.0", 1981); everything in `bin/dri` is
-**V2.1** (1982). The two are closer than that suggests. Every nucleus module has
-exactly the same program length in both trees, `PATCH.ASM`'s 128 reserved zero
-bytes are filled with code in DRI's `XDOS.SPR`, and V2.0 call sites are
-rewritten to call into that area — at program offset 0x01F8 V2.0's `lxi h,0016 /
-dad d / mov m,b` becomes `call 1814H`, and at 0x0527 `lhld 2081H` becomes
-`call 183FH`. About 56 bytes of real code differ; the rest is those patch areas
-and the serial number. `BNKBDOS.SPR` and `TMP.SPR` build byte-identical to
-DRI's.
-
-So a source-built system is a genuine V2.0 and does not carry DRI's later
-fixes, but it runs.
+`mpm2_external/mpm2src/NUCLEUS` is MP/M II **V2.0** (`VER.ASM` says so);
+everything in `bin/dri` is **V2.1** (1982). V2.1 turned out to be V2.0 plus
+in-place patches, and those have been recovered from the binaries into
+`src/overrides` behind `IFDEF MPM21` / `$if MPM21`. `build_all.sh --tree=src`
+builds V2.0 by default and V2.1 with `--version=2.1`, and in both releases
+XDOS, BNKXDOS, RESBDOS and TMP build byte for byte identical to DRI's
+(`tools/verify_dri.py`). The one exception is BNKBDOS: the `BNKBDOS.ASM` DRI
+shipped with the V2.0 sources is already V2.1's, so a V2.0 build carries the
+V2.1 banked BDOS. [mpm2_v21.md](mpm2_v21.md) has every change and how it was
+recovered.
 
 ## GENSYS is a Python tool, not `GENSYS.COM`
 
@@ -108,7 +111,10 @@ inside MP/M, and neither is part of the host build.
 
 ## LDRBDOS (Loader BDOS)
 
-The loader's BDOS component (LDRBDOS) has no separate source. It is extracted from DRI's pre-built MPMLDR.COM at file offset 0xC00 (2,688 bytes).
+The loader's BDOS (LDRBDOS) is not assembled from DRI's `MPMLDR/LDRBDOS.ASM`,
+which um80 cannot yet assemble as DRI's MAC did. It is extracted from DRI's
+pre-built MPMLDR.COM at file offset 0xC00 (2,688 bytes); it is the same in V2.0
+and V2.1.
 
 This extraction happens in `tools/build.py` during the MPMLDR build:
 ```python
@@ -137,7 +143,7 @@ These reference files are always copied from `bin/dri/` regardless of build tree
 
 ## Build Process Summary
 
-1. **Source compilation** (`build_src.sh`): Builds ~40 utilities from source using uplm80/um80/ul80
+1. **Source compilation** (`build_src.sh`): Builds 44 targets from source using uplm80/um80/ul80 into `bin/src/`
 
 2. **Disk creation** (`build_hd1k.sh`):
    - Copies source-built binaries from `bin/src/`
@@ -158,11 +164,14 @@ With `--tree=src`, these are compiled from `mpm2_external/mpm2src/`:
 
 - All PRL utilities (DIR, STAT, PIP, TYPE, ERA, REN, etc.)
 - All SPR system components (BNKBDOS, BNKXDOS, RESBDOS, XDOS, etc.)
-- All RSP resident processes (SPOOL, MPMSTAT, ABORT, etc.)
+- The resident system processes: ABORT.RSP, and MPMSTAT, SCHED and SPOOL each as an `.RSP` and a `.BRS`
 - MPMLDR (with serial check disabled via src/overrides/)
-- Development tools: DDT, GENHEX, GENMOD, GENSYS (GENSYS is built for use inside MP/M; the host build uses `tools/gensys.py`)
+- Development tools: ASM, RDT and DDT (assembled twice and put together by `tools/genmod.py`, as DRI did with MAC and GENMOD), GENHEX, GENMOD, GENSYS (GENSYS is built for use inside MP/M; the host build uses `tools/gensys.py`)
 
 Source overrides in `src/overrides/` customize:
 - MPMLDR - Serial number check disabled
-- BNKBDOS - Custom modifications
+- BNKBDOS - the names DRI's text spells both with and without a `$`, which
+  RMAC reads as one name and um80 does not
 - NUCLEUS components
+- The V2.1 changes, behind `MPM21`, in the nucleus, MPMLDR, GENSYS and the
+  UTIL2, UTIL4, UTIL5, UTIL6 and UTIL7 utilities

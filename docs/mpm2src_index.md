@@ -73,9 +73,9 @@ Source files from `mpm2_external/mpm2src/` - the original Digital Research MP/M 
 | GENSYS.PLM | GENSYS.COM | System Generation - creates MPM.SYS from SPR files |
 | LDRBDOS.ASM | MPMLDR.COM | Loader BDOS - minimal BDOS for boot phase |
 | LDRBIOS.ASM | (skeleton) | Loader BIOS skeleton - OEM customization required |
-| LDRLWR.ASM | MPMLDR.COM | Loader low-level routines |
+| LDRLWR.ASM | GENSYS.COM | Load, relocate and write an SPR, RSP or BRS (`LdRl`, `FxWr`) |
 | LDMONX.ASM | MPMLDR.COM | Loader monitor interface |
-| X0100.ASM | MPMLDR.COM | Loader initialization at 0100H |
+| X0100.ASM | GENSYS.COM | PL/M-80 interface: `mon1`, `mon2` and the page-zero publics |
 
 ---
 
@@ -119,15 +119,20 @@ DDT".
 
 | Source File | Builds | Description |
 |-------------|--------|-------------|
-| MSBRS.PLM | MPMSTAT.RSP | MPMSTAT - banked portion (system status display) |
-| MSRSP.PLM | MPMSTAT.RSP | MPMSTAT - RSP portion |
+| MSBRS.PLM | MPMSTAT.BRS | MPMSTAT - banked portion (system status display) |
+| MSRSP.PLM | MPMSTAT.RSP | MPMSTAT - RSP portion (process descriptor and queue) |
 | MSCMN.PLM | (common) | MPMSTAT common routines |
-| SCBRS.PLM | SCHED.RSP | SCHED - banked portion (scheduler configuration) |
-| SCRSP.PLM | SCHED.RSP | SCHED - RSP portion |
-| SPBRS.PLM | SPOOL.RSP | SPOOL - banked portion (print spooler) |
-| SPRSP.PLM | SPOOL.RSP | SPOOL - RSP portion |
-| ABORT.ASM | ABORT.RSP | Abort RSP handler |
-| BRSPBI.ASM | (common) | RSP BIOS interface |
+| SCBRS.PLM | SCHED.BRS | SCHED - banked portion (scheduler configuration) |
+| SCRSP.PLM | SCHED.RSP | SCHED - RSP portion (process descriptor and queue) |
+| SPBRS.PLM | SPOOL.BRS | SPOOL - banked portion (print spooler) |
+| SPRSP.PLM | SPOOL.RSP | SPOOL - RSP portion (process descriptor and queues) |
+| ABORT.ASM | ABORT.RSP | Abort RSP handler (no banked portion) |
+| BRSPBI.ASM | (each .BRS) | Banked RSP header and BDOS interface; the build uses `src/brs_runtime.mac` in its place |
+
+Each `.RSP` is its `*RSP.PLM` alone and each `.BRS` its `*BRS.PLM` with
+`BRSPBI`, as `SCHED.SUB`, `SPOOL.SUB` and `MPMSTAT.SUB` build them; GENSYS
+loads the `.BRS` into bank 0 when the RSP's process descriptor is in memory
+segment 0.
 
 ---
 
@@ -162,18 +167,18 @@ DDT".
 |-------------|--------|-------------|
 | ABORT.PLM | ABORT.PRL | Abort a running program |
 | TOD.PLM | TOD.PRL | Time-of-day display/set |
-| SUB.PLM | SUB.PRL | Submit batch processor |
+| SUB.PLM | SUBMIT.PRL | Submit batch processor |
 | PRINT.PLM | PRINTER.PRL | List device assignment utility |
 | MSCHD.PLM | SCHED.PRL | Scheduler transient program |
 | MSTS.PLM | MPMSTAT.PRL | Status display transient |
 | MSPL.PLM | SPOOL.PRL | Spool control transient |
-| STPSP.PLM | STPSPL.PRL | Stop spooler |
+| STPSP.PLM | STOPSPLR.PRL | Stop spooler |
 | DRST.PLM | DSKRESET.PRL | Disk reset |
 | CNS.PLM | CONSOLE.PRL | Console status/switch |
 | USER.PLM | USER.PRL | User number display/set |
 | PRLCM.PLM | PRLCOM.PRL | Convert PRL to COM |
-| DUMP.ASM | DUMP.PRL | Memory dump |
-| EXTRN.ASM | (common) | External declarations |
+| DUMP.ASM | DUMP.PRL | File dump, in hex |
+| EXTRN.ASM | DUMP.PRL | `bdos`, `fcb` and `buff` for DUMP (`link dump,extrn[op]`) |
 
 ---
 
