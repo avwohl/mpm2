@@ -78,7 +78,8 @@ def build(target):
     rows = {}
     for name, path in files:
         prn = OUT / f"{name}.prn"
-        r = subprocess.run(["um80", *inc, "-l", str(prn),
+        # -t: six-character PUBLIC and EXTRN names, as RMAC wrote them
+        r = subprocess.run(["um80", "-t", *inc, "-l", str(prn),
                             "-o", str(OUT / f"{name}.rel"), str(path)],
                            capture_output=True, text=True)
         if not prn.exists():

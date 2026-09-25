@@ -54,12 +54,6 @@ attrib	equ	2
 ;  user$process:
 userpr:
 	public	userpr
-; Alias for 6-char truncation compatibility
-userprocess	equ	userpr
-	public	userprocess
-; Alias for 6-char truncation compatibility
-userproc	equ	userpr
-	public	userproc
 ;    procedure (pdadr) byte public;
 ;      declare pdadr address;
 ;      declare pd based pdadr process$descriptor;

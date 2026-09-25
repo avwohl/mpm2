@@ -107,7 +107,7 @@ parse6:
 	mvi b,8! cpi ';'! jz parse7
 	call padfld! jmp parse8
 parse7:
-	inx d! call pwfld
+	inx d! call pw$fld
 parse8:
 	push d! call deblank! call delim! jnz parse81
 	inx sp! inx sp! jmp parse82
@@ -136,16 +136,16 @@ setfld3:
 	call delim! rz
 	pop h! jmp parse9
 
-pwfld:
+pw$fld:
 	call delim! jz padfld
 	inx sp! inx sp! inx sp
 	inx sp! inx sp! inx sp
 	push d! push h! mvi l,0! xthl
 	dcx sp! dcx sp
-pwfld1:
+pw$fld1:
 	inx sp! inx sp! xthl! inr l! xthl! dcx sp! dcx sp
 	inx h! mov m,a! inx d! dcr b! jz setfld3
-	call delim! jnz pwfld1
+	call delim! jnz pw$fld1
 	;jmp padfld
 
 padfld:

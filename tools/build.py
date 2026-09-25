@@ -137,16 +137,11 @@ UTIL4_TARGETS = [
 UTIL5_TARGETS = [
     BuildTarget("ABORT", "prl", ["ABORT.PLM"], "UTIL5"),
     BuildTarget("TOD", "prl", ["TOD.PLM"], "UTIL5"),
-    # SUBMIT and SPOOL build their buffers at .MEMORY, up to the top of the
-    # memory segment (see the overrides).  DRI's sources reserved the minimum
-    # in the image - SUBMIT a 1024-byte minimum$buffer, SPOOL a 128-byte
-    # dummy$buffer, each the last variable - and the extra memory asked for
-    # here keeps that minimum now that the buffer starts past the image.
-    BuildTarget("SUBMIT", "prl", ["SUB.PLM"], "UTIL5", prl_extra="400"),  # SUB.PLM -> SUBMIT.PRL
+    BuildTarget("SUBMIT", "prl", ["SUB.PLM"], "UTIL5"),          # SUB.PLM -> SUBMIT.PRL
     BuildTarget("PRINTER", "prl", ["PRINT.PLM"], "UTIL5"),       # PRINT.PLM -> PRINTER.PRL
     BuildTarget("SCHED", "prl", ["MSCHD.PLM"], "UTIL5"),         # MSCHD.PLM -> SCHED.PRL
     BuildTarget("MPMSTAT", "prl", ["MSTS.PLM"], "UTIL5"),        # MSTS.PLM -> MPMSTAT.PRL
-    BuildTarget("SPOOL", "prl", ["MSPL.PLM"], "UTIL5", prl_extra="80"),   # MSPL.PLM -> SPOOL.PRL
+    BuildTarget("SPOOL", "prl", ["MSPL.PLM"], "UTIL5"),          # MSPL.PLM -> SPOOL.PRL
     BuildTarget("STOPSPLR", "prl", ["STPSP.PLM"], "UTIL5"),      # STPSP.PLM -> STOPSPLR.PRL
     BuildTarget("DSKRESET", "prl", ["DRST.PLM"], "UTIL5"),       # DRST.PLM -> DSKRESET.PRL
     BuildTarget("CONSOLE", "prl", ["CNS.PLM"], "UTIL5"),         # CNS.PLM -> CONSOLE.PRL
@@ -238,10 +233,15 @@ MPMLDR_TARGETS = [
     BuildTarget("GENSYS", "com", ["GENSYS.PLM", "LDRLWR.ASM", "X0100.ASM"], "MPMLDR"),
 ]
 
-# LDRBDOS binary path (extracted from DRI MPMLDR.COM)
-# Note: LDRBDOS.ASM uses RMAC register aliasing syntax (e.g., "arech equ b!")
-# that um80 doesn't support. The binary is extracted from DRI instead.
-# The extracted LDRBDOS is identical between V2.0 and V2.1 MPMLDR.COM.
+# LDRBDOS, the loader's BDOS at 0D00H, is taken from DRI's MPMLDR.COM (it is
+# the same in V2.0 and V2.1) rather than assembled from MPMLDR/LDRBDOS.ASM,
+# which um80 0.3.50 cannot assemble as MAC did.  Its register aliases are
+# EQUs whose names are not in column 1 (`<tab>arech  equ b! arecl  equ c'),
+# which um80 rejects; used as a register pair an alias comes out wrong
+# (`crech equ d' then `push crech' is PUSH H); and it spells some names two
+# ways (`call seek$dir' for `seekdir:'), which MAC, ignoring the `$', takes
+# for one.  With those three put right by hand um80 assembles it to DRI's
+# 0D00H-164CH byte for byte.
 LDRBDOS_BIN = BUILD_DIR / "MPMLDR" / "ldrbdos.bin"
 DRI_MPMLDR = SRC_ROOT / "MPMLDR" / "MPMLDR.COM"
 
@@ -405,7 +405,8 @@ class Builder:
             shutil.rmtree(self.output_dir)
         self.log("Cleaned build directories")
 
-    def assemble(self, asm_file: Path, rel_file: Path, absolute: bool = False) -> bool:
+    def assemble(self, asm_file: Path, rel_file: Path, absolute: bool = False,
+                 dri_names: bool = False) -> bool:
         """Assemble a .ASM file to .REL using um80.
 
         ``absolute`` assembles the way DRI's MAC does, with no relocatable
@@ -414,10 +415,19 @@ class Builder:
         carries its own ORG (100H, 200H, 1100H, ...).  Assembling them as
         relocatable put each one after the last instead of at its own
         address.
+
+        ``dri_names`` cuts every PUBLIC, EXTRN and module name to six
+        characters (um80 -t), as DRI's RMAC wrote them into the object
+        file, and DRI's sources count on it.  In the nucleus DSPTCH.ASM
+        refers to DATAPG.ASM's `memseg' as `memsegtbl' and to its `sysfla'
+        as `sysflag', and to MEMMGR.ASM's `userpr' as `userprocess'; FLAG,
+        QUEUE and XDOS call DSPTCH.ASM's `dispatch' as `dispat'.
         """
         cmd = [UM80]
         if absolute:
             cmd.append("--aseg")
+        if dri_names:
+            cmd.append("-t")
 
         cmd.extend(self.define_args())
 
@@ -654,7 +664,8 @@ class Builder:
 
             # Assemble concatenated file
             rel_path = self.build_dir / f"{target.name}.REL"
-            if self.assemble(concat_file, rel_path, target.asm_absolute):
+            if self.assemble(concat_file, rel_path, target.asm_absolute,
+                             dri_names=True):
                 rel_files.append(rel_path)
             else:
                 return False
@@ -678,7 +689,8 @@ class Builder:
                 rel_path = self.build_dir / rel_name
 
                 if src.upper().endswith(".ASM") or src.upper().endswith(".MAC"):
-                    if self.assemble(src_path, rel_path, target.asm_absolute):
+                    if self.assemble(src_path, rel_path, target.asm_absolute,
+                                     dri_names=True):
                         rel_files.append(rel_path)
                     else:
                         all_success = False
@@ -735,8 +747,8 @@ class Builder:
         - 0xD00: LDRBDOS (extracted from DRI MPMLDR.COM)
         - 0x1700: LDRBIOS (loaded at runtime by boot loader)
 
-        Note: LDRBDOS.ASM uses RMAC register aliasing that um80 doesn't support,
-        so we extract the binary from DRI's MPMLDR.COM instead of building from source.
+        LDRBDOS is extracted from DRI's MPMLDR.COM instead of built from
+        LDRBDOS.ASM, which um80 cannot assemble yet (see LDRBDOS_BIN).
         """
         # Create MPMLDR build directory if needed
         mpmldr_build_dir = self.build_dir / "MPMLDR"

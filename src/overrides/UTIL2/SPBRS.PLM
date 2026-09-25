@@ -92,17 +92,8 @@ $endif
   declare spool$pd$adr address;
   declare spool$pd based spool$pd$adr process$descriptor;
 
-  /* ***** uplm80 workaround - a LITERALLY whose text is a list stands
-     for only its first value inside an INITIAL or DATA list, so
-     restarts gave one 0C7C7H here instead of nineteen and .spool landed
-     in spool$stk(1), not in spool$stk(19) where the stack pointer
-     word above points.  restarts is written out instead. */
   declare spool$stk (20) address
-    initial (0C7C7H,0C7C7H,0C7C7H,0C7C7H,
-             0C7C7H,0C7C7H,0C7C7H,0C7C7H,
-             0C7C7H,0C7C7H,0C7C7H,0C7C7H,
-             0C7C7H,0C7C7H,0C7C7H,0C7C7H,
-             0C7C7H,0C7C7H,0C7C7H,.spool);
+    initial (restarts,.spool);
 
   declare spool$lqcb$adr address;
   declare spool$lqcb based spool$lqcb$adr
@@ -151,15 +142,7 @@ $endif
         itab = (char = 09H) and (7 - (column and 7));
         if char = 09H
           then char = ' ';
-        /* ***** uplm80 workaround - a DO loop whose body does not read
-           its index is compiled as a count in B, pushed around the body,
-           and the RETURN below returned with the count still on the
-           stack: STOPSPLR sent the spooler to whatever address the count
-           made.  Written as the WHILE loop the iterative DO stands for -
-           same index, same limit, tested before each pass - nothing is
-           pushed. */
-        jtab = 0;
-        do while jtab <= itab;
+        do jtab = 0 to itab;
           if char >= ' '
             then column = column + 1;
           if char = 0AH then
@@ -173,7 +156,6 @@ $endif
             end;
           end;
           call mon1 (lo,char);
-          jtab = jtab + 1;
         end;
       end;
       return false;

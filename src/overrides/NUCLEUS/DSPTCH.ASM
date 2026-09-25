@@ -558,9 +558,6 @@ pdisp:
 dispatch:
 ;    procedure public;
 	public	dispatch
-; Alias for 6-char truncation compatibility
-dispat	equ	dispatch
-	public	dispat
 
 ;      enter$region;
 	DI
