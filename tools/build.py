@@ -406,8 +406,23 @@ class Builder:
         self.log("Cleaned build directories")
 
     def assemble(self, asm_file: Path, rel_file: Path, absolute: bool = False,
-                 dri_names: bool = False) -> bool:
+                 dri_names: bool = False, dri: bool = False) -> bool:
         """Assemble a .ASM file to .REL using um80.
+
+        ``dri`` reads the source as DRI's MAC and RMAC read it (um80
+        --dri).  Every .ASM a target names is DRI's, or an override of
+        one, and is read that way; the runtimes in src/ and what uplm80
+        writes are MACRO-80's and are not.  MAC and RMAC ignore a `$'
+        inside a name, and DRI's text counts on it, spelling one name two
+        ways - MPM.ASM stores to `nmb$lst', which DATAPG.ASM defines as
+        `nmblst', and BNKBDOS.ASM calls `seek$dir' for `seekdir:'.  The
+        first word of a statement is a label without a colon when it is
+        no instruction or directive (GENHEX.ASM's `OBP DS 1'), a line
+        that starts with `*' is a comment (BNKBDOS.ASM), and PUSH A is
+        PUSH PSW (RESBDOS1.ASM, BNKBDOS.ASM); MACRO-80 has none of these.
+        MPMLDR's LDRLWR.ASM and X0100.ASM are Intel ASM80 sources, and
+        ASM80 ignores a `$' in a name too; they assemble the same either
+        way.
 
         ``absolute`` assembles the way DRI's MAC does, with no relocatable
         segments, so an ORG is an absolute address.  MP/M II's own assembler,
@@ -424,6 +439,8 @@ class Builder:
         QUEUE and XDOS call DSPTCH.ASM's `dispatch' as `dispat'.
         """
         cmd = [UM80]
+        if dri:
+            cmd.append("--dri")
         if absolute:
             cmd.append("--aseg")
         if dri_names:
@@ -555,8 +572,8 @@ class Builder:
             text = path.read_bytes().decode("latin-1")
             copy.write_bytes(genmod.mac_plus_r(text, str(path)).encode("latin-1"))
             rel_r = plus_r_dir / (stem + ".REL")
-            if not (self.assemble(path, rel, absolute=True)
-                    and self.assemble(copy, rel_r, absolute=True)):
+            if not (self.assemble(path, rel, absolute=True, dri=True)
+                    and self.assemble(copy, rel_r, absolute=True, dri=True)):
                 return None
             first += genmod.rel_bytes(rel)
             second += genmod.rel_bytes(rel_r)
@@ -665,7 +682,7 @@ class Builder:
             # Assemble concatenated file
             rel_path = self.build_dir / f"{target.name}.REL"
             if self.assemble(concat_file, rel_path, target.asm_absolute,
-                             dri_names=True):
+                             dri_names=True, dri=True):
                 rel_files.append(rel_path)
             else:
                 return False
@@ -690,7 +707,7 @@ class Builder:
 
                 if src.upper().endswith(".ASM") or src.upper().endswith(".MAC"):
                     if self.assemble(src_path, rel_path, target.asm_absolute,
-                                     dri_names=True):
+                                     dri_names=True, dri=True):
                         rel_files.append(rel_path)
                     else:
                         all_success = False

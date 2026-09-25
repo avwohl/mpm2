@@ -78,8 +78,9 @@ def build(target):
     rows = {}
     for name, path in files:
         prn = OUT / f"{name}.prn"
-        # -t: six-character PUBLIC and EXTRN names, as RMAC wrote them
-        r = subprocess.run(["um80", "-t", *inc, "-l", str(prn),
+        # --dri: read as RMAC reads it; -t: six-character PUBLIC and EXTRN
+        # names, as RMAC wrote them
+        r = subprocess.run(["um80", "--dri", "-t", *inc, "-l", str(prn),
                             "-o", str(OUT / f"{name}.rel"), str(path)],
                            capture_output=True, text=True)
         if not prn.exists():

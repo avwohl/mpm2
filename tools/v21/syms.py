@@ -13,12 +13,14 @@ inc = ["-I", str(where.EXT / "UTIL8"), "-I", str(where.EXT / sub), "-I", str(whe
 # um80 -g makes every label PUBLIC.  With -t as well it would cut them all to
 # six characters, and without -t the nucleus does not link (DSPTCH's
 # `memsegtbl' is DATAPG's `memseg').  So each module is assembled with -g
-# alone and its symbols placed at the module bases of where.build()'s link,
-# which has RMAC's six-character PUBLIC and EXTRN names.
+# and without -t, and its symbols placed at the module bases of
+# where.build()'s link, which has RMAC's six-character PUBLIC and EXTRN
+# names.  --dri reads the source as RMAC does, so a name comes out without
+# its `$' signs, as in RMAC's own symbol table.
 tab = []
 for name, path in files:
     r = where.OUT / f"{name}.g.rel"
-    subprocess.run(["um80", "-g", *inc, "-o", str(r), str(path)], capture_output=True)
+    subprocess.run(["um80", "--dri", "-g", *inc, "-o", str(r), str(path)], capture_output=True)
     lk = Linker()
     lk.load_rel(str(r))
     cb, db = bases[name]

@@ -30,19 +30,14 @@ Two knobs:
 * `V21=<dir>` is where listings and `.rel` files go (default `/tmp/v21`).
 * `PRISTINE=1` makes `where.py` ignore `src/overrides` and use the untouched
   `mpm2_external` sources.  Wanted for `TMP`, whose override carries 25 bytes
-  of local fix that shift every offset after `00CD`.  It does *not* work for
-  `XDOS`, `RESBDOS` or `BNKBDOS`.  DRI's text spells some names two ways,
-  which RMAC takes for one name because it ignores a `$` in a name, and um80
-  does not: `MPM.ASM` stores to `nmb$lst`, which `DATAPG.ASM` defines as
-  `nmblst`; `CLI.ASM` calls `open$test` and defines `opentest`;
-  `RESBDOS1.ASM` calls `SET$DMA$BUFA` as well as `SET$DMABUFA`, and
-  loads `common$fcb` as well as `commonfcb`; and
-  `BNKBDOS.ASM` has 23 such names.  And `MEMMGR.ASM` ends six lines with 8AH,
-  a line feed with the parity bit set, which um80 does not take for one.
-  For these leave it unset - with no `-D MPM21` the XDOS and RESBDOS
-  overrides assemble to the V2.0 layout, which matches DRI's V2.0 images
-  exactly, and BNKBDOS's to DRI's V2.1 `BNKBDOS.SPR`, the only one its
-  source builds.
+  of local fix that shift every offset after `00CD`.  For the others it makes
+  no difference to an offset: with no `-D MPM21` the XDOS and RESBDOS
+  overrides assemble to the V2.0 layout, which is DRI's V2.0 image, and
+  BNKBDOS's to DRI's V2.1 `BNKBDOS.SPR`, the only one its source builds.
+  `where.py` and `syms.py` assemble with `um80 --dri`, which reads DRI's
+  text as RMAC does: a `$` in a name is ignored, so `MPM.ASM`'s `nmb$lst`
+  is `DATAPG.ASM`'s `nmblst`, and `syms.py` prints names without their `$`
+  signs, as RMAC's symbol table has them.
 
 `ds` reserves space without emitting listing bytes, so a run that falls inside
 one cannot be mapped.  The only place that bites is `pdtbl` entry 0's `ds 36`
