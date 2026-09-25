@@ -98,12 +98,24 @@ cd ..
 # MP/M II distribution files are included in the mpm2_external/ directory
 ```
 
-um80 and uplm80 are also on PyPI (`pip install um80 uplm80`). A source build
-needs um80 0.3.50 or later and uplm80 0.3.7 or later, with upeepz80 0.2.5:
-earlier releases link `.PRL` transients a page low, miscompile several of the
-utilities, and cannot build DRI's own text of SUBMIT, SPOOL, the resident
-system processes and `LDRLWR.ASM`, or give the nucleus RMAC's six-character
-names.
+The toolchain is also on PyPI: `pip install um80 uplm80` installs
+um80_and_friends (the `um80` package: um80 and ul80), uplm80 and the upeepz80
+it uses. This release needs:
+
+| Tool | Release | Needed for |
+|------|---------|------------|
+| uplm80 | 0.3.7 or later | every build (the SFTP RSP is PL/M) and `--tree=src` |
+| upeepz80 | 0.2.5 or later | the same: it is uplm80's peephole optimizer |
+| um80_and_friends | 0.3.50 or later | every build (LDRBIOS, BNKXIOS, the SFTP RSP) and `--tree=src` |
+| cpmemu | 4.10.0 | every build (the emulator's Z80 and the disk image) |
+
+Older releases get parts of the system wrong, or cannot build it. An older
+um80 cannot give DRI's assembler sources RMAC's six-character PUBLIC and EXTRN
+names (`-t`), without which the nucleus does not link; an older uplm80
+miscompiles DRI's own text of SUBMIT, SPOOL and the resident system processes,
+and makes a source-built SDIR repeat its heading before every line; and an
+older ul80 leaves `.MEMORY` out of a `.PRL`'s relocation bit map. The
+[CHANGELOG](CHANGELOG.md) has the details.
 
 ### Optional: SSH Support
 
