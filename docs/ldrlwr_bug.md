@@ -10,12 +10,13 @@ records it has loaded into `sctbfr`, and the moment the bit map pointer
 reaches that byte `LdRl` reads the next record into `bitmap`, points at
 `bitmap` and sets `btmptp` to `low(bitmap+128)`.  Within either buffer
 the pointer covers at most 128 consecutive bytes before it reaches that
-end, so its low byte matches `btmptp` there and nowhere earlier.  When the program length is a multiple of
-128 the pointer starts at the end of the loaded records, the first
-comparison matches, and the bit map is read from the file before any of
-it is used - no garbage.  In DRI's binaries both immediates are right:
-V2.0's `GENSYS.COM` has `MVI A,5CH` for `low(bitmap+128)` with `bitmap`
-at 1DDCH, and `SUI 3DH` for `low(sctbfr)` with `sctbfr` at 253DH.
+end, so its low byte matches `btmptp` there and nowhere earlier.  When
+the program length is a multiple of 128 the pointer starts at the end of
+the loaded records, the first comparison matches, and the bit map is
+read from the file before any of it is used - no garbage.  In DRI's
+binaries both immediates are right: V2.0's `GENSYS.COM` has `MVI A,5CH`
+for `low(bitmap+128)` with `bitmap` at 1DDCH, and `SUI 3DH` for
+`low(sctbfr)` with `sctbfr` at 253DH.
 
 Measured: DRI's V2.1 `GENSYS.COM`, run under cpmemu, relocates an RSP of
 128, 256, 512, 1008, 1024, 1152, 1536 and 1664 bytes exactly as

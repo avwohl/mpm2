@@ -28,16 +28,18 @@ image. What the older releases get wrong here:
 - uplm80 before 0.3.7 computes `x MOD 0` as 0 where PL/M-80 gives `x`, so
   every source-built SDIR reprinted its heading before each line of output
   (SDIR's default page length is 0). It also laid out the initial values of
-  the resident system processes' descriptors and queues wrongly, returned from
+  the resident system processes' descriptors and queues wrongly, took only
+  the first word of a `LITERALLY` list in an `INITIAL` list, returned from
   inside a counted `DO` loop into the loop's count, compiled
   `AT (.external - 1)` as the location counter, and put its stack and shared
   locals after the last variable, which SUBMIT and SPOOL use as the start of a
-  buffer.
-- um80 before 0.3.49 assembled `LOW()` of a relocatable address as an
-  absolute byte, read a forward `EQU` of a later label as 0, and kept only the
-  last of two constants added to an external; ul80 before 0.3.49 left
-  references to `__END__`, PL/M's `.MEMORY`, out of a `.PRL`'s relocation bit
-  map.
+  buffer. The source build now compiles all of that code as DRI wrote it.
+- um80 before 0.3.50 cannot cut PUBLIC and EXTRN names to six characters
+  (`-t`), as RMAC does; the nucleus does not link without it. Before 0.3.49 it
+  assembled `LOW()` of a relocatable address as an absolute byte, read a
+  forward `EQU` of a later label as 0, and kept only the last of two constants
+  added to an external; ul80 before 0.3.49 left references to `__END__`, PL/M's
+  `.MEMORY`, out of a `.PRL`'s relocation bit map.
 - upeepz80 before 0.2.5 made rewrites that changed a register or a flag that
   was read afterwards.
 - cpmemu's `cpm_disk.py` before 4.10.0 fails with `UnicodeDecodeError` on
@@ -101,7 +103,8 @@ describes every change and the evidence for it.
     lists 115 files in a small segment and hangs the whole system on 116.
     V2.1 measures the room from the last record it stored, prints "Out of
     Memory" and lists what fitted, and asks MP/M for 4K more in the `.PRL`
-    header, room for about 180 more files. `tools/build.py` gives only the V2.1 build the 4K.
+    header, room for about 180 more files. `tools/build.py` gives only the
+    V2.1 build the 4K.
   - PIP, five changes. `[A]` no longer forces a character copy, which cut a
     binary file off at its first ctl-Z. `[O]` takes effect in file-to-file
     and multi-file copies, and in return a `.COM` file copied file-to-file
@@ -140,18 +143,18 @@ is built.
 
 Every generated system now has DRI's four resident system processes — ABORT,
 MPMSTAT, SCHED and SPOOL — next to the emulator's SFTP RSP, taken from the
-selected tree. Before, `sched 12/31/99 23:59 dir` answered "Resident portion
-of scheduler is not in memory", and `abort` and `mpmstat` ran as transients.
+selected tree. Before, `sched 12/31/99 23:59 dir` answered "Resident portion of
+scheduler is not in memory", and `abort` and `mpmstat` ran as transients.
 `tools/build.py` builds a resident system process the way DRI's `UTIL2/*.SUB`
 files do: the `.RSP` from `xxRSP.PLM` alone, and the banked code as a new
-`.BRS` output type, from `xxBRS.PLM` and `src/brs_runtime.mac`, which stands
-in for DRI's `BRSPBI.ASM`. It used to link the two into one `.RSP`, with the
-BRS's header and a CP/M program entry where MP/M expects the process
-descriptor. `ABORT.RSP` is now byte for byte DRI's, and the other three `.RSP`
-files match every byte DRI's declarations define. `tools/gensys.py` follows
-DRI's GENSYS in two more ways: it loads a `.BRS` exactly when the RSP's
-process descriptor is in memory segment 0, and it refuses an RSP that would
-extend below the common base.
+`.BRS` output type, from `xxBRS.PLM` and `src/brs_runtime.mac`, which stands in
+for DRI's `BRSPBI.ASM`. It used to link the two into one `.RSP`, with the BRS's
+header and a CP/M program entry where MP/M expects the process descriptor.
+`ABORT.RSP`'s header, image and relocation bits are now DRI's, and the other
+three `.RSP` files match every byte DRI's declarations define.
+`tools/gensys.py` follows DRI's GENSYS in two more ways: it loads a `.BRS`
+exactly when the RSP's process descriptor is in memory segment 0, and it
+refuses an RSP that would extend below the common base.
 
 `run_tests.sh` has three new tests, all part of `all` and `src`:
 
@@ -185,11 +188,37 @@ its module and source line, and `spr.py`, `syms.py`, `disasm.py` and
 loads and runs transient programs, and every PL/M utility tried — `dir`, `sdir`,
 `stat`, `tod`, `user`, `console`, `show`, `type`, `dump`, `set`, `prlcom`,
 `printer`, `stopsplr`, `sched`, `spool`, `abort`, `ren`, `submit`, `mpmstat`,
-with and without arguments — gives the same output as DRI's own binaries — `stat` prints
-`A: RW, Space:     7,512k`, `dir` lists `A: $3$      SUP`, `tod` prints
-`Mon 09/14/81 00:00:19`, `user 0` prints `User Number = 0`, `console` prints
-`Console = 3`. Before this release a source-built system printed a program's
-load line and then dropped the session, whatever the program was.
+with and without arguments — gives the same output as DRI's own binaries —
+`stat` prints `A: RW, Space:     7,512k`, `dir` lists `A: $3$      SUP`, `tod`
+prints `Mon 09/14/81 00:00:19`, `user 0` prints `User Number = 0`, `console`
+prints `Console = 3`. Before this release a source-built system printed a
+program's load line and then dropped the session, whatever the program was.
+
+More of the source build is DRI's own text. SUBMIT (`UTIL5/SUB.PLM`) and both
+halves of the resident spooler, scheduler and MPMSTAT (`UTIL2/*RSP.PLM` and
+`*BRS.PLM`) build from DRI's files as they stand. The overrides that are left
+carry the V2.1 reconstruction, a few local fixes, and what the toolchain still
+needs (see Known issues):
+
+- `SPBRS.PLM`, `SCRSP.PLM`, `UTIL5/MSPL.PLM` and `MPMLDR/LDRLWR.ASM` are DRI's
+  text apart from their V2.1 changes. `MPMLDR.PLM` also keeps its disabled
+  serial check, with DRI's loop under the early return.
+- `tools/build.py` assembles DRI's `.ASM` sources with six-character PUBLIC and
+  EXTRN names (um80 `-t`), as RMAC wrote them into the object file. DRI's
+  nucleus depends on that: `DSPTCH.ASM` refers to `DATAPG.ASM`'s `memseg` as
+  `memsegtbl`, for one. The five aliases the nucleus overrides carried instead
+  are gone, and the V2.1 patch area enters CLI at `prbrls`, which does not
+  collide with CLBDOS's `printb` at six characters.
+- A `$` inside a name is DRI's spelling again, except in the 28 names DRI's
+  text spells two ways, which RMAC takes for one name since it ignores the `$`,
+  and um80 does not: `MPM.ASM` stores to `nmb$lst`, which `DATAPG.ASM` defines
+  as `nmblst`, and 23 of them are in `BNKBDOS.ASM`. `NUCLEUS/BNKBDOS1.ASM` and
+  `BDOS30.ASM`, `$`-stripped copies that nothing built, and a copy of
+  `MPMLDR/LDRBDOS.ASM` identical to DRI's are gone.
+- XDOS, BNKXDOS, RESBDOS and TMP are still identical to DRI's in both
+  releases, and BNKBDOS to DRI's V2.1. SUBMIT, SPOOL with and without the
+  spooler RSP, SCHED and MPMSTAT give the same results as DRI's binaries on
+  V2.0 and V2.1.
 
 `scripts/gensys.sh` generated the system in a fixed `/tmp/gensys_work`, which
 it removes first, and `run_tests.sh` wrote the emulator's log and the source
@@ -413,10 +442,12 @@ the top of its memory segment. um80 0.3.48 read the forward `EQU` uplm80
 wrote for that as 0, so SUBMIT built the file over page zero, the tick's RST 1
 vector included; and uplm80 put its string constants, its procedures' shared
 locals and its stack after the last variable, where Intel's LOCATE put them
-below the data. Both defects are fixed in the releases this one needs. A
-400-line command file now gives the same 402 user numbers, in the same order,
-as DRI's SUBMIT.PRL, and a 200-line file of 120-character lines, 24K of
-commands, runs to the end.
+below the data. Both defects are fixed in the releases this one needs, and
+`SUB.PLM` builds as DRI wrote it. On a source-built V2.0 system a 400-line
+command file gives the same 402 user numbers, in the same order, as DRI's
+SUBMIT.PRL, and a 200-line file of 120-character lines, 24K of commands, runs
+to the end; a 300-line file using `$1` and `$2` prints the same 1202 lines as
+DRI's SUBMIT.PRL, in V2.0 and V2.1.
 
 `SPOOL.PRL` built from source wrote its message to the spooler RSP over the
 queue's own pointer: `spool$msg` is declared `AT (.tbuff-1)`, which uplm80
@@ -461,9 +492,12 @@ The source-built `GENSYS.COM` relocated every SPR with the wrong bit map. um80
 next record of an SPR's bit map at the wrong point. Run under cpmemu beside
 DRI's with the same answers and SPR files, the V2.0 build wrote an `MPM.SYS`
 that differed from DRI's in 5872 bytes, and the V2.1 build read a fourth bit
-map record out of a file that has three. It now writes the same `MPM.SYS` and
-`SYSTEM.DAT` as DRI's GENSYS, but for the six serial number bytes. The host
-build was never affected, since it generates the system with
+map record out of a file that has three. um80 0.3.49 hands `LOW()` of a
+relocatable value to the linker, as MACRO-80 does, and `LDRLWR.ASM` is DRI's
+text again but for V2.1's close of each file it loads: linked where DRI's V2.0
+`GENSYS.COM` has it, it is DRI's 415 bytes. GENSYS now writes the same
+`MPM.SYS` and `SYSTEM.DAT` as DRI's, but for the six serial number bytes. The
+host build was never affected, since it generates the system with
 `tools/gensys.py`.
 
 `docs/ldrlwr_bug.md`, written for 0.3.4, and the README said that DRI's own
@@ -529,6 +563,16 @@ The transients are compiled by uplm80, not by DRI's PL/M-80, so none of them
 is byte for byte DRI's, in either release; the V2.1 ones were checked by what
 they do. uplm80's code is larger, which matters only for the `.BRS` files, in
 bank 0: `SCHED.BRS` is 06B1H bytes against DRI's 043DH.
+
+Some of DRI's assembler text still needs a workaround for um80 0.3.50: the 28
+names spelled two ways (in `MPM.ASM`, `CLI.ASM`, `RESBDOS1.ASM` and
+`BNKBDOS.ASM`); six line ends in `MEMMGR.ASM` of CR and 8AH, a line feed with
+the parity bit set, after which um80 drops the line; and `MPMLDR/LDRBDOS.ASM`,
+which um80 cannot assemble as MAC does (indented `EQU`s, register aliases used
+as pairs, names spelled two ways), so the loader's BDOS is taken from DRI's
+`MPMLDR.COM`. `MPMLDR/LDMONX.ASM` is an override for another reason: uplm80
+passes an external procedure's arguments on the stack, where DRI's PL/M-80
+passes the last two in BC and DE.
 
 `tools/gensys.py` does not write the same file as DRI's GENSYS for the same
 answers, although it places and relocates every module the same way. It also

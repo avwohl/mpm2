@@ -167,18 +167,18 @@ segment 0.
 |-------------|--------|-------------|
 | ABORT.PLM | ABORT.PRL | Abort a running program |
 | TOD.PLM | TOD.PRL | Time-of-day display/set |
-| SUB.PLM | SUB.PRL | Submit batch processor |
+| SUB.PLM | SUBMIT.PRL | Submit batch processor |
 | PRINT.PLM | PRINTER.PRL | List device assignment utility |
 | MSCHD.PLM | SCHED.PRL | Scheduler transient program |
 | MSTS.PLM | MPMSTAT.PRL | Status display transient |
 | MSPL.PLM | SPOOL.PRL | Spool control transient |
-| STPSP.PLM | STPSPL.PRL | Stop spooler |
+| STPSP.PLM | STOPSPLR.PRL | Stop spooler |
 | DRST.PLM | DSKRESET.PRL | Disk reset |
 | CNS.PLM | CONSOLE.PRL | Console status/switch |
 | USER.PLM | USER.PRL | User number display/set |
 | PRLCM.PLM | PRLCOM.PRL | Convert PRL to COM |
-| DUMP.ASM | DUMP.PRL | Memory dump |
-| EXTRN.ASM | (common) | External declarations |
+| DUMP.ASM | DUMP.PRL | File dump, in hex |
+| EXTRN.ASM | DUMP.PRL | `bdos`, `fcb` and `buff` for DUMP (`link dump,extrn[op]`) |
 
 ---
 

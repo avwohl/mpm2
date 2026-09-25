@@ -110,10 +110,13 @@ it uses. This release needs:
 | um80_and_friends | 0.3.50 or later | every build (LDRBIOS, BNKXIOS, the SFTP RSP) and `--tree=src` |
 | cpmemu | 4.10.0 | every build (the emulator's Z80 and the disk image) |
 
-Older releases of these tools build a system that runs but gets parts of it
-wrong - with an older uplm80, for instance, a source-built SDIR repeats its
-heading before every line, and an older ul80 leaves `.MEMORY` out of a
-`.PRL`'s relocation bit map. The [CHANGELOG](CHANGELOG.md) has the details.
+Older releases get parts of the system wrong, or cannot build it. An older
+um80 cannot give DRI's assembler sources RMAC's six-character PUBLIC and EXTRN
+names (`-t`), without which the nucleus does not link; an older uplm80
+miscompiles DRI's own text of SUBMIT, SPOOL and the resident system processes,
+and makes a source-built SDIR repeat its heading before every line; and an
+older ul80 leaves `.MEMORY` out of a `.PRL`'s relocation bit map. The
+[CHANGELOG](CHANGELOG.md) has the details.
 
 ### Optional: SSH Support
 
@@ -215,16 +218,16 @@ the debugger, `RDT.PRL` and `DDT.COM`, and the assembler, `ASM.PRL`, but for
 11 bytes of it that no source sets and GENMOD took from the memory MAC had
 left.
 
-Outside the nucleus, V2.1 changed MPMLDR, SHOW, PRINTER, SCHED.RSP,
-SPOOL.PRL, SPOOL.BRS, SDIR, PIP and GENSYS, and all of them are
-reconstructed. They are compiled PL/M, which uplm80 cannot make byte for byte
-what DRI's PL/M-80 made, so each was checked against DRI's patch instruction
-by instruction, and the larger ones also by running them beside DRI's binary:
-the V2.1 PIP, for instance, matches DRI's on every console line and every
-output file of 23 commands. BNKBDOS needs no reconstruction: the `BNKBDOS.ASM` DRI shipped
-with the V2.0 sources is already V2.1's, so a V2.0 build gets the V2.1 banked
-BDOS too. See [docs/mpm2_v21.md](docs/mpm2_v21.md) for every change between
-the releases and the evidence for it.
+Outside the nucleus, V2.1 changed MPMLDR, SHOW, PRINTER, SCHED.RSP, SPOOL.PRL,
+SPOOL.BRS, SDIR, PIP and GENSYS, and all of them are reconstructed. They are
+compiled PL/M, which uplm80 cannot make byte for byte what DRI's PL/M-80 made,
+so each was checked against DRI's patch instruction by instruction, and the
+larger ones also by running them beside DRI's binary: the V2.1 PIP, for
+instance, matches DRI's on every console line and every output file of 23
+commands. BNKBDOS needs no reconstruction: the `BNKBDOS.ASM` DRI shipped with
+the V2.0 sources is already V2.1's, so a V2.0 build gets the V2.1 banked BDOS
+too. See [docs/mpm2_v21.md](docs/mpm2_v21.md) for every change between the
+releases and the evidence for it.
 
 V2.1's GENSYS asks one question V2.0's does not: "Enable Compatibility
 Attributes (N) ?".  The answer goes in system data byte 96, and with it set
@@ -509,7 +512,7 @@ PORT=2311 ./scripts/run_tests.sh all                   # SSH on 2311, HTTP on 83
 | `http` | a file read over HTTP, through the SFTP RSP |
 | `sftp` | `scripts/test_sftp.exp`: files put over SFTP read back over SFTP and HTTP, then open from a console - `type` one, `submit` the other; `pip` copies a file HTTP is reading; HTTP is refused a file `ed` has open, and the system carries on; and a 64K file goes up and comes back intact while HTTP reads another file, which stays intact too |
 | `all` | all of the above |
-| `src` | `build_all.sh --tree=src`, then `basic`, `rsp`, `http` and `sftp` |
+| `src` | `build_all.sh --tree=src` (V2.0), then `basic`, `rsp`, `http` and `sftp` |
 | `interactive` | an SSH session to type at |
 
 The SSH port is `PORT` (default 2222) and the HTTP port `HTTP_PORT` (default
@@ -517,9 +520,10 @@ The SSH port is `PORT` (default 2222) and the HTTP port `HTTP_PORT` (default
 ports.  Logs go to `build/mpm2_test.log` and `build/mpm2_src_build.log`, and
 `gensys.sh` generates the system in `build/gensys_work` (or `$GENSYS_WORK`),
 so nothing is shared through `/tmp`.  A console prompt is waited for 30
-seconds; the 64K SFTP transfer, which runs through the Z80 RSP a record at a
-time and so at the emulated machine's speed, is given 180.  `src` rebuilds
-`bin/src` (see [Building from Source](#building-from-source)).
+seconds (45 in `basic` and `stat`); the 64K SFTP transfer, which runs through
+the Z80 RSP a record at a time and so at the emulated machine's speed, is
+given 180.  `src` rebuilds `bin/src` (see
+[Building from Source](#building-from-source)).
 
 `python3 tools/verify_dri.py` builds the nucleus, the assembler and the
 debugger of both releases with `--dri-exact` and compares them with Digital

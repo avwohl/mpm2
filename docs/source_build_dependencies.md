@@ -111,7 +111,10 @@ inside MP/M, and neither is part of the host build.
 
 ## LDRBDOS (Loader BDOS)
 
-The loader's BDOS component (LDRBDOS) has no separate source. It is extracted from DRI's pre-built MPMLDR.COM at file offset 0xC00 (2,688 bytes).
+The loader's BDOS (LDRBDOS) is not assembled from DRI's `MPMLDR/LDRBDOS.ASM`,
+which um80 cannot yet assemble as DRI's MAC did. It is extracted from DRI's
+pre-built MPMLDR.COM at file offset 0xC00 (2,688 bytes); it is the same in V2.0
+and V2.1.
 
 This extraction happens in `tools/build.py` during the MPMLDR build:
 ```python
@@ -167,7 +170,8 @@ With `--tree=src`, these are compiled from `mpm2_external/mpm2src/`:
 
 Source overrides in `src/overrides/` customize:
 - MPMLDR - Serial number check disabled
-- BNKBDOS - Custom modifications
+- BNKBDOS - the names DRI's text spells both with and without a `$`, which
+  RMAC reads as one name and um80 does not
 - NUCLEUS components
 - The V2.1 changes, behind `MPM21`, in the nucleus, MPMLDR, GENSYS and the
   UTIL2, UTIL4, UTIL5, UTIL6 and UTIL7 utilities
