@@ -92,17 +92,8 @@ $endif
   declare spool$pd$adr address;
   declare spool$pd based spool$pd$adr process$descriptor;
 
-  /* ***** uplm80 workaround - a LITERALLY whose text is a list stands
-     for only its first value inside an INITIAL or DATA list, so
-     restarts gave one 0C7C7H here instead of nineteen and .spool landed
-     in spool$stk(1), not in spool$stk(19) where the stack pointer
-     word above points.  restarts is written out instead. */
   declare spool$stk (20) address
-    initial (0C7C7H,0C7C7H,0C7C7H,0C7C7H,
-             0C7C7H,0C7C7H,0C7C7H,0C7C7H,
-             0C7C7H,0C7C7H,0C7C7H,0C7C7H,
-             0C7C7H,0C7C7H,0C7C7H,0C7C7H,
-             0C7C7H,0C7C7H,0C7C7H,.spool);
+    initial (restarts,.spool);
 
   declare spool$lqcb$adr address;
   declare spool$lqcb based spool$lqcb$adr
