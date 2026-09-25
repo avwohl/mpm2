@@ -142,15 +142,7 @@ $endif
         itab = (char = 09H) and (7 - (column and 7));
         if char = 09H
           then char = ' ';
-        /* ***** uplm80 workaround - a DO loop whose body does not read
-           its index is compiled as a count in B, pushed around the body,
-           and the RETURN below returned with the count still on the
-           stack: STOPSPLR sent the spooler to whatever address the count
-           made.  Written as the WHILE loop the iterative DO stands for -
-           same index, same limit, tested before each pass - nothing is
-           pushed. */
-        jtab = 0;
-        do while jtab <= itab;
+        do jtab = 0 to itab;
           if char >= ' '
             then column = column + 1;
           if char = 0AH then
@@ -164,7 +156,6 @@ $endif
             end;
           end;
           call mon1 (lo,char);
-          jtab = jtab + 1;
         end;
       end;
       return false;
