@@ -250,7 +250,7 @@ cli$memseg:
 	dw	$-$	; b
 	dw	$-$	; thread
 	dw	buffer	; disk set DMA
-clislctuser:
+cli$slct$user:
 	db	$-$	; disk select / user code
 	dw	$-$	; dcnt
 	db	$-$	; searchl
@@ -957,7 +957,7 @@ load:
 	ani	80h
 	jnz	@62a
 	lda	diskselect
-	lxi	h,clislctuser
+	lxi	h,cli$slctuser
 	cmp	m
 	jz	@63
 @62a:
@@ -1491,7 +1491,7 @@ trysysdisk:			; ***** MP/M 2.1 - used by the patch area
 
 ;        /* first try for PRL file */
 ;        if open$test (.fcb) = 0FFH then
-	call	opentest
+	call	open$test
 	JNZ	LOADPRL
 ;        /* PRL file not found, try COM file */
 ;        do;
@@ -1509,13 +1509,13 @@ trysysdisk:			; ***** MP/M 2.1 - used by the patch area
 	INX	H
 	MVI	M,'M'
 ;          if open$test (.fcb) = 0FFH then
-	call	opentest
+	call	open$test
 	JNZ	LOADCOM
 
 	lda	notsyspass
 	ora	a
 	jnz	@18a
-	lda	clislctuser
+	lda	cli$slct$user
 	ani	0fh
 	jz	@19
 	mvi	c,32
@@ -1819,7 +1819,7 @@ cli:
 
 ;        rlrpd.disk$slct = disk$select;
 	LDA	DISKSELECT
-	sta	clislctuser
+	sta	cli$slctuser
 	ani	1111$0000b
 	rar
 	rar

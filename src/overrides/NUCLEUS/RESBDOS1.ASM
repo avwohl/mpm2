@@ -376,7 +376,7 @@ BDOS2:
     cpydmain:
 	LHLD DIRBUFA! PUSH H! MVI B,128! PUSH B
     CPYDMAIN1:
-	CALL SETDMABUFA
+	CALL SET$DMABUFA
 	XCHG! POP B! POP H
 	call move
 	pop d! push d
@@ -418,7 +418,7 @@ BDOS2:
 
     CDMACPYOUT:
 	PUSH D ;SAVE FCB ADDRESS FOR COPYOUT
-	CALL SETDMABUFA
+	CALL SET$DMA$BUFA
         MVI B,3! CALL COPY$CDMA$OUT
  	POP D! JMP NOCPYOUT
     dmacpyout:
@@ -664,13 +664,13 @@ nxdf equ ($-xdfctbl)+100
 get$dma$add:
 	call rlr! lxi d,disksetdma! dad d! ret
 
-setdmabufa:
+set$dmabufa:
 	call get$dma$add
 	mov e,m! inx h! mov d,m
 	xchg! shld dmabufa! ret
 
 shell:
-	sta fx! call setdmabufa
+	sta fx! call set$dmabufa
 	shld shell$dma
 	call get$mult$cnt$add
 	mov a,m! sta shell$cnt
@@ -689,7 +689,7 @@ shell$dma:	dw	0
 cbdos:
 	lda fx! mov c,a
 cbdos1:
-	lxi d,commonfcb! call bank$bdos! lda aret! ret
+	lxi d,common$fcb! call bank$bdos! lda aret! ret
 ;
 adv$dma:
 	lhld shell$dma
@@ -779,7 +779,7 @@ compare:
 	jmp compare
 ;
 get$rra:
-	lxi h,commonfcb! lxi d,33! dad d! ret
+	lxi h,common$fcb! lxi d,33! dad d! ret
 
 ;******************************************************
 ;**                                                  **

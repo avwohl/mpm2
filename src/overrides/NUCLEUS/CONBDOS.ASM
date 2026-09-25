@@ -646,10 +646,10 @@ listcp:	db	0	;listing toggle
 kbproc:	db	0	;kb proc resident flag
 
 ;
-patchsize equ	80
-	ds	patchsize
+patch$size equ	80
+	ds	patch$size
 patch:
-	org	(((patch-base)+255) AND 0ff00h)-patchsize
+	org	(((patch-base)+255) AND 0ff00h)-patch$size
 patcharea:
 	IFDEF	MPM21
 
@@ -682,7 +682,7 @@ kbconst:
 	RET
 
 ; a negative count here means a patch no longer fits in the area
-	ds	patchsize-($-patcharea)
+	ds	patch$size-($-patcharea)
 
 	ELSE
 

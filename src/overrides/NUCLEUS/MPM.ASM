@@ -405,7 +405,7 @@ mpm:
 	LHLD	sysdat
 	mvi	l,197
 	mov	a,m
-	sta	nmblst
+	sta	nmb$lst
 
 ;      /* see if consoles configured > max physical consoles */
 ;      if (nmb$cns:=sys$dat(1)) > maxcns then

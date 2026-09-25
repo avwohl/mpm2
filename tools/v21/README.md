@@ -33,7 +33,8 @@ Two knobs:
   of local fix that shift every offset after `00CD`.  For the others it makes
   no difference to an offset: with no `-D MPM21` the XDOS and RESBDOS
   overrides assemble to the V2.0 layout, which is DRI's V2.0 image, and
-  BNKBDOS's to DRI's V2.1 `BNKBDOS.SPR`, the only one its source builds.
+  BNKBDOS has no override (its source builds DRI's V2.1 `BNKBDOS.SPR`, the
+  only one it builds).
   `where.py` and `syms.py` assemble with `um80 --dri`, which reads DRI's
   text as RMAC does: a `$` in a name is ignored, so `MPM.ASM`'s `nmb$lst`
   is `DATAPG.ASM`'s `nmblst`, and `syms.py` prints names without their `$`
