@@ -170,11 +170,10 @@ def mac_plus_r(source, name="source"):
     rather than 0, which the ORG put in front of the source does.  The
     HEX files of all ten UTIL1 modules come out the same either way.
 
-    Every ORG statement is shifted, including one after a `!' and one
-    whose operand follows it with no space (`ORG(200H)').  Two forms are
-    refused, because um80 does not assemble them as MAC does, in either
-    copy: an ORG in column 1, which um80 does not take for an ORG at
-    all, and a label on an ORG line, which MAC sets to the new location
+    Every ORG statement is shifted, including one in column 1, one after
+    a `!' and one whose operand follows it with no space (`ORG(200H)').
+    A label on an ORG line is refused, because um80 does not assemble it
+    as MAC does, in either copy: MAC sets the label to the new location
     and um80 to the old.
     """
     newline = "\r\n" if "\r\n" in source else "\n"
@@ -200,9 +199,6 @@ def mac_plus_r(source, name="source"):
             if head.strip():
                 raise GenmodError(f"{where}: an ORG that is not the first "
                                   "word of its statement")
-            if k == 0 and not head:
-                raise GenmodError(f"{where}: an ORG in column 1, which um80 "
-                                  "does not assemble as an ORG - indent it")
             expr = text[m.end():]
             operand = expr.strip()
             if not operand:
