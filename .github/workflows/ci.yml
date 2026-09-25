@@ -13,22 +13,28 @@ jobs:
       - name: Checkout mpm2
         uses: actions/checkout@v4
 
+      # The toolchain is checked out at the release tags this release was
+      # built and tested with, so that a change on a tool's main branch
+      # cannot break the build here.
       - name: Checkout cpmemu (for qkz80 and cpm_disk.py)
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/cpmemu
+          ref: v4.10.0
           path: cpmemu
 
       - name: Checkout um80_and_friends (for assembler)
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/um80_and_friends
+          ref: v0.3.51
           path: um80_and_friends
 
       - name: Checkout uplm80 (for PL/M compiler)
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/uplm80
+          ref: v0.4.0
           path: uplm80
 
       - name: Install dependencies
@@ -36,10 +42,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential cmake libssh-dev python3-pip expect
 
-      - name: Install Python tools (um80, ul80, uplm80)
+      - name: Install Python tools (um80, ul80, uplm80, upeepz80)
         run: |
           pip install ./um80_and_friends
           pip install ./uplm80
+          pip install "upeepz80>=0.2.6"
 
       - name: Build qkz80 library
         working-directory: cpmemu/src
