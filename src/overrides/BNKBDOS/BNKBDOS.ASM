@@ -47,7 +47,7 @@ thread		equ	18
 disksetDMA	equ	20
 diskselect	equ	22
 diskparams	equ	23
-MULTCNTOFF	EQU	50
+MULT$CNT$OFF	EQU	50
 PDCNTOFF	EQU	51
 ;
 ;	System Data Page Offsets
@@ -70,7 +70,7 @@ base	equ	$
 
 	jmp	bnkbdose
 	JMP	BNKBDOSINIT
-	JMP	REMOVEFILES
+	JMP	REMOVE$FILES
 XDMAAD:	DW	$-$
 SYSDAT:	DW	$-$
 BUFFA:	DW	$-$
@@ -83,11 +83,11 @@ bnkbdosinit:
 	;INITIALIZE OPEN FILE AND LOCKED RECORD LIST
 	
 	LHLD SYSDAT! MVI L,187
-	MOV A,M! STA LOCKMAX! INX H
-	MOV A,M! STA OPENMAX
+	MOV A,M! STA LOCK$MAX! INX H
+	MOV A,M! STA OPEN$MAX
 	INX H! MOV E,M! INX H! MOV D,M! INX H
 	PUSH D
-	MOV E,M! INX H! MOV D,M! XCHG! SHLD FREEROOT
+	MOV E,M! INX H! MOV D,M! XCHG! SHLD FREE$ROOT
 	POP D! DCX D! LXI B,10
 ILIST:
 	PUSH D
@@ -116,11 +116,11 @@ bnkbdose:
 
 	push d! push b
 
-	LXI H,DELETEDFILES
+	LXI H,DELETED$FILES
 	DI
 	MOV A,M! ORA A! MVI M,0
 	EI
-	CNZ DELETEFILES
+	CNZ DELETE$FILES
 
 	;perform the necessary BDOS parameter initialization
 	;disk set DMA
@@ -140,8 +140,8 @@ bnkbdose:
 	inx h! push h! lxi d,dcnt
 	XCHG! MVI C,2! CALL MOVE
 	LXI H,SEARCHL! LDAX D! MOV M,A
-	LXI H,MULTCNTOFF-DISKPARAMS-2! DAD D
-	MOV A,M! STA MULTCNT
+	LXI H,MULT$CNT$OFF-DISKPARAMS-2! DAD D
+	MOV A,M! STA MULT$CNT
 	INX H! MOV A,M! ANI 0F0H! CMP M! JZ BNKBDOS1
 	ADI 10H! MOV M,A
 BNKBDOS1:
@@ -169,18 +169,18 @@ bdose:
 	mov a,e! sta linfo ;linfo = low(info) - don't equ
 	lxi h,0! shld aret ;return value defaults to 0000
 	SHLD RESEL ; RESEL,FCBDSK = 0
-	SHLD COMPFCBCKS ; COMP$FCB$CKS,SEARCH$USER0 = 0
-	SHLD MAKEXFCB ; MAKE$XFCB,FIND$XFCB = 0
+	SHLD COMP$FCB$CKS ; COMP$FCB$CKS,SEARCH$USER0 = 0
+	SHLD MAKE$XFCB ; MAKE$XFCB,FIND$XFCB = 0
 	DAD SP! SHLD ENTSP ; SAVE STACK POSITION
 	lxi h,goback! push h ;fake return address
 
 	;compute disk function code address
 	mov a,c! STA FX! mov c,e! mov b,d
-	CPI NFUNCS+12! JNC HIGHFXS
-	LXI H,DISKF-24! JMP BDOSJMP
-HIGHFXS:
+	CPI NFUNCS+12! JNC HIGH$FXS
+	LXI H,DISKF-24! JMP BDOS$JMP
+HIGH$FXS:
 	LXI H,XDISKF-200
-BDOSJMP:
+BDOS$JMP:
 	mov e,a! mvi d,0 ;DE=func, HL=.diskf-24
 	dad d! dad d! mov e,m! inx h! mov d,m ;DE=functab(func)
 	LHLD INFO	;INFO IN DE FOR LATER EXCHANGE
@@ -212,21 +212,21 @@ SELERR:	DW	SELSUB		;SELECT ERROR SUBROUTINE
 ;	error subroutines
 PERSUB:
 	;report permanent error
-	lxi h,permsg! jmp reporterr ;to report the error
+	lxi h,permsg! jmp report$err ;to report the error
 ;
 SELSUB:
 	;report select error
-	lxi h,selmsg! jmp reporterr ;wait console before boot
+	lxi h,selmsg! jmp report$err ;wait console before boot
 ;
 RODSUB:
 	;report write to read/only disk
-	lxi h,rodmsg! jmp reporterr ;wait console
+	lxi h,rodmsg! jmp report$err ;wait console
 ;
 ROFSUB:
 	;report read/only file
 	lxi h,rofmsg ;drop through to wait for console
 ;
-reporterr:
+report$err:
 	;report error to console, message address in HL
 	push h ;stack msg address
 	;set D=console #
@@ -237,33 +237,33 @@ reporterr:
 	pop b! call xprint ;error mssage tail
 
 	lda fx! mvi b,30h
-	lxi h,prfx1
-	cpi 100! jc rpterr1
+	lxi h,pr$fx1
+	cpi 100! jc rpt$err1
 	mvi m,31h! inx h! sui 100
-rpterr1:
-	sui 10! jc rpterr2
-	inr b! jmp rpterr1
-rpterr2:
+rpt$err1:
+	sui 10! jc rpt$err2
+	inr b! jmp rpt$err1
+rpt$err2:
 	mov m,b! inx h! adi 3ah! mov m,a
 	inx h! mvi m,20h
-	lxi h,prfcb! mvi m,0
-	lda resel! ora a! jz rpterr3
+	lxi h,pr$fcb! mvi m,0
+	lda resel! ora a! jz rpt$err3
 	mvi m,20h! push d
-	lhld info! inx h! xchg! lxi h,prfcb1
+	lhld info! inx h! xchg! lxi h,pr$fcb1
 	mvi c,8! call move! mvi m,'.'! inx h
 	mvi c,3! call move! pop d
-rpterr3:
+rpt$err3:
 	call xcrlf
-	lxi b,prfx! call xprint
+	lxi b,pr$fx! call xprint
 
 	CALL GETMEMSEG
-	ORA A! JZ RTNPHYERRS
-	INR A! JZ RTNPHYERRS
-	LXI D,PNAME+5! CALL TESTERRORMODE1! JNZ RTNPHYERRS
+	ORA A! JZ RTN$PHY$ERRS
+	INR A! JZ RTN$PHY$ERRS
+	LXI D,PNAME+5! CALL TEST$ERROR$MODE1! JNZ RTN$PHY$ERRS
 	jmp reboot ;terminate process
 	;ret
 
-xerrlist:
+xerr$list:
 	dw	xe3,xe4,xe5,xe6,xe7,xe8,xe9,xe10,xe11
 
 xe3:	db	'File Opened in Read/Only Mode',0
@@ -276,10 +276,10 @@ xe9:	db	'Illegal ? in FCB',0
 xe10:	db	'Open File Limit Exceeded',0
 xe11:	db	'No Room in System Lock List',0
 
-prfx: 	db	'Bdos Function: '
-prfx1:	db	'   '
-prfcb:	db	'  File: '
-prfcb1:ds	12
+pr$fx: 	db	'Bdos Function: '
+pr$fx1:	db	'   '
+pr$fcb:	db	'  File: '
+pr$fcb1:ds	12
 	db	0
  
 fx:	ds	1
@@ -305,15 +305,15 @@ selmsg:	db	'Select$'
 rofmsg:	db	'File '
 rodmsg:	db	'R/O$'
 XERROR:	DB	'X/Err '
-XERRID:DB	' $'
+XERR$ID:DB	' $'
 ENDIF
 ;
 IF BNKBDOS
 setlret1:
 	mvi a,1
-staret:
+sta$ret:
 	sta	aret
-funcret:
+func$ret:
 	ret
 entsp:	ds	2
 ENDIF
@@ -355,17 +355,17 @@ tbuff	equ	0080h	;default buffer location
 ;	error message handlers
 ;
 ;
-roderror:						;
+rod$error:						;
 	;report read/only disk error
 	MVI B,2
  	JMP GOERR				;
 ;
-roferror:						;
+rof$error:						;
 	;report read/only file error			;
 	MVI B,3
  	JMP GOERR	
 ;
-selerror:
+sel$error:
 	;report select error
 	MVI B,4
 ;
@@ -373,34 +373,34 @@ goerr:
 	;HL = .errorhandler, call subroutine
 	MOV H,B! MVI L,0FFH! SHLD ARET
 IF MPM
-	call testerrormode! jnz rtnphyerrs
+	call test$error$mode! jnz rtn$phy$errs
 ELSE
-	LDA ERRORMODE! ORA A! JNZ RTNPHYERRS
+	LDA ERROR$MODE! ORA A! JNZ RTN$PHY$ERRS
 ENDIF
-	MOV A,B! LXI H,PERERR-2! JMP BDOSJMP
+	MOV A,B! LXI H,PERERR-2! JMP BDOS$JMP
 ;
-RTNPHYERRS:
+RTN$PHY$ERRS:
 ;
 IF MPM
-	lda lockshell! ora a! jnz lockperr
+	lda lock$shell! ora a! jnz lock$perr
 ENDIF
-	LDA RETURNFFFF! ORA A! JNZ GOBACK0
+	LDA RETURN$FFFF! ORA A! JNZ GOBACK0
 	JMP GOBACK
 ;
 IF MPM
-testerrormode:
+test$error$mode:
 	lxi d,pname+4
-testerrormode1:
+test$error$mode1:
 	call rlr! dad d
 	mov a,m! ani 80h! ret
 ENDIF
 ;
-BDEEBDEMHL:
+BDE$E$BDE$M$HL:
 	MOV A,E! SUB L! MOV E,A ;
 	MOV A,D! SBB H! MOV D,A ;
 	RNC! DCR B! RET
 ;
-BDEEBDEPHL:
+BDE$E$BDE$P$HL:
 	MOV A,E! ADD L! MOV E,A ;
 	MOV A,D! ADC H! MOV D,A ;
 	RNC! INR B! RET
@@ -414,21 +414,21 @@ SHL3BV1:
 ;*********************************************
 ;	routines used by shell and lock/unlock
 ;*********************************************
-incrrr:
-	call getrra
+incr$rr:
+	call get$rra
 	inr m! rnz
 	inx h! inr m! rnz
 	inx h! inr m! ret
 ;
-saverr:
-	call saverr2! xchg
-saverr1:
+save$rr:
+	call save$rr2! xchg
+save$rr1:
 	mvi c,3! jmp move ;ret
-saverr2:
-	call getrra! lxi d,saveranr! ret
+save$rr2:
+	call get$rra! lxi d,save$ranr! ret
 ;
-resetrr:
-	call saverr2! jmp saverr1 ;ret
+reset$rr:
+	call save$rr2! jmp save$rr1 ;ret
 ;
 compare:
 	ldax d! cmp m! rnz
@@ -502,14 +502,14 @@ home:
 	;curtrk, currec both set to 0000
 	ret
 ;
-PASSARECORD:
+PASS$ARECORD:
 	LXI H,ARECORD
 	MOV E,M! INX H! MOV D,M! INX H! MOV B,M
 	RET
 ;
 rdbuff:
 	;read buffer and check condition
-	CALL PASSARECORD
+	CALL PASS$ARECORD
 	call readf ;current drive, track, sector, dma
 	jmp diocomp	;check for i/o errors
 ;
@@ -519,9 +519,9 @@ wrbuff:
 	;wrtype = 0 => normal write operation
 	;wrtype = 1 => directory write operation
 	;wrtype = 2 => start of new block
-	CALL PASSARECORD
+	CALL PASS$ARECORD
 IF MPM
-	lda remdrv! ora c! mov c,a
+	lda rem$drv! ora c! mov c,a
 ENDIF
 	call writef ;current drive, track, sector, dma
 diocomp:	;check for disk errors
@@ -548,7 +548,7 @@ SEEKDIR1:
 ;
 	MOV A,L! ANA E! MOV L,A ; DCNT = DCNT & MASK
 	MOV A,H! ANA D! MOV H,A
-	POP B! POP D! CALL BDEEBDEPHL ;
+	POP B! POP D! CALL BDE$E$BDE$P$HL ;
 	LXI H,ARECORD! MOV M,E! INX H! MOV M,D! INX H! MOV M,B
 ;
 	;  jmp seek				;
@@ -567,11 +567,11 @@ SEEK0:
 	MOV A,L! SUB E! MOV A,H! SBB D! MOV A,C! SBB B
 	PUSH H ; SAVE LOW(ARECORD)
 	JNC SEEK1 ; IF ARECORD >= CURREC THEN GO TO SEEK1
-	LHLD SECTPT! CALL BDEEBDEMHL ; CURREC = CURREC - SECTPT
+	LHLD SECTPT! CALL BDE$E$BDE$M$HL ; CURREC = CURREC - SECTPT
 	POP H! XTHL! DCX H! XTHL ; CURTRK = CURTRK - 1
 	JMP SEEK0
 SEEK1:
-	LHLD SECTPT! CALL BDEEBDEPHL ; CURREC = CURREC + SECTPT
+	LHLD SECTPT! CALL BDE$E$BDE$P$HL ; CURREC = CURREC + SECTPT
 	POP H ; RESTORE LOW(ARECORD)
 	MOV A,L! SUB E! MOV A,H! SBB D! MOV A,C! SBB B
 	JC SEEK2 ; IF ARECORD < CURREC THEN GO TO SEEK2
@@ -580,7 +580,7 @@ SEEK1:
 	JMP SEEK1
 SEEK2:
 	XTHL! PUSH H ; HL,S0 = CURTRK, S1 = LOW(ARECORD)
-	LHLD SECTPT! CALL BDEEBDEMHL ; CURREC = CURREC - SECTPT
+	LHLD SECTPT! CALL BDE$E$BDE$M$HL ; CURREC = CURREC - SECTPT
 	POP H! PUSH D! PUSH B! PUSH H ; HL,S0 = CURTRK, 
 	; S1 = HIGH(ARECORD,CURREC), S2 = LOW(CURREC), 
 	; S3 = LOW(ARECORD)
@@ -633,7 +633,7 @@ invis	equ	10	;invisible file in dir command
 ;
 ;	utility functions for file access
 ;
-dmposition:
+dm$position:
 	;compute disk map position for vrecord to HL
 	lxi h,blkshf! mov c,m ;shift count to C
 	lda vrecord ;current virtual record to A
@@ -678,7 +678,7 @@ getdm:
 ;
 index:
 	;compute disk block number from current fcb
-	call dmposition ;0...15 in register A
+	call dm$position ;0...15 in register A
 	mov c,a! mvi b,0! call getdm ;value to HL
 	shld arecord! ret
 ;
@@ -707,19 +707,19 @@ GETATTS:
 	;INFO LOCATES FCB
 	LHLD INFO
 	LXI D,5! DAD D ; HL = .FCB(F'5)
-	MVI E,01111111B! MVI C,4
-GETATTSLOOP:
+	MVI E,0111$1111B! MVI C,4
+GET$ATTS$LOOP:
 	MOV A,M! PUSH A
 	RAL! MOV A,D! ADC A! MOV D,A
 	POP A! ANA E! MOV M,A
-	INX H! DCR C! JNZ GETATTSLOOP
+	INX H! DCR C! JNZ GET$ATTS$LOOP
 	MOV A,D! ADD A! ADD A! ADD A! ADD A! RET
 ;
 GETS1:
 	;GET CURRENT S1 FIELD TO A
 	CALL GETEXTA! INX H! MOV A,M! RET ;
 ;
-GETRRA:
+GET$RRA:
 	;GET CURRENT RAN REC FIELD ADDRESS TO HL
 	LHLD INFO! LXI D,RANREC! DAD D ;HL=.FCB(RANREC)
 	RET
@@ -770,7 +770,7 @@ hlrotr:
 		jmp hlrotr0
 ;
 ;
-computecs:
+compute$cs:
 	;compute checksum for current directory buffer
 	mvi c,recsiz ;size of directory buffer
 	lhld buffa ;current directory buffer
@@ -780,14 +780,14 @@ computecs:
 		jnz computecs0
 	ret ;with checksum in A
 ;
-CHKSUMFCB: ; COMPUTE CHECKSUM FOR FCB
+CHKSUM$FCB: ; COMPUTE CHECKSUM FOR FCB
 	; ADD 1ST 12 BYTES OF FCB + CURDSK + 
 	;     HIGH$EXT + XFCB$READ$ONLY + BBH
 IF MPM
 	lxi h,pdcnt! mov a,m
 	inx h! add m ; Add high$ext
 ELSE
-	LXI H,HIGHEXT! MOV A,M
+	LXI H,HIGH$EXT! MOV A,M
 ENDIF
 	INX H! ADD M ; ADD XFCB$READ$ONLY
 	INX H! ADD M ; ADD CURDSK
@@ -804,54 +804,54 @@ ENDIF
 	INX H! MVI C,16! CALL COMPUTECS0
 	ORA A! RET ; Z FLAG SET IF CHECKSUM VALID
 ;
-SETCHKSUMFCB:
-	CALL CHKSUMFCB! RZ
+SET$CHKSUM$FCB:
+	CALL CHKSUM$FCB! RZ
 	MOV B,A! CALL GETS1
 	CMA! ADD B! CMA
 	MOV M,A! RET
 ;
-RESETCHKSUMFCB:
-	XRA A! STA COMPFCBCKS
-	CALL CHKSUMFCB! RNZ
+RESET$CHKSUM$FCB:
+	XRA A! STA COMP$FCB$CKS
+	CALL CHKSUM$FCB! RNZ
 	CALL GETS1! INR M! RET
 ;
-CHEKFCB:
-	LDA HIGHEXT
+CHEK$FCB:
+	LDA HIGH$EXT
 	; IF EXT & 0110$0000B = 0110$0000B THEN
 	; SET FCB(0) TO 0 (USER 0)
-	CPI 01100000B! JNZ CHEKFCB1
+	CPI 0110$0000B! JNZ CHEK$FCB1
 	LHLD INFO! XRA A! MOV M,A ; FCB(0) = 0
-CHEKFCB1:
-	JMP CHKSUMFCB ;RET
+CHEK$FCB1:
+	JMP CHKSUM$FCB ;RET
 ;
-CHECKFCB:
+CHECK$FCB:
 IF MPM
-	xra a! sta checkfcb4
-checkfcb1:
+	xra a! sta check$fcb4
+check$fcb1:
 ENDIF
-	CALL CHEKFCB! RZ
-CHECKFCB2:
+	CALL CHEK$FCB! RZ
+CHECK$FCB2:
 ;
 IF MPM
-	ani 0fh! jnz checkfcb3
-	lda pdcnt! ora a! jz checkfcb3
-	call setsdcnt! sta dontclose
+	ani 0fh! jnz check$fcb3
+	lda pdcnt! ora a! jz check$fcb3
+	call set$sdcnt! sta dont$close
 	call close1
-	lxi h,lret! inr m! jz checkfcb3
-	mvi m,0! call packsdcnt! mvi b,5
-	call searcholist! rz
-checkfcb3:
+	lxi h,lret! inr m! jz check$fcb3
+	mvi m,0! call pack$sdcnt! mvi b,5
+	call search$olist! rz
+check$fcb3:
 ;
 ENDIF
 	POP H ; DISCARD RETURN ADDRESS
 IF MPM
-checkfcb4:
+check$fcb4:
 	nop
 ENDIF
-	MVI A,10! JMP STARET
+	MVI A,10! JMP STA$RET
 ;
-SETFCBCKSFLAG:
-	MVI A,0FFH! STA COMPFCBCKS! RET
+SET$FCB$CKS$FLAG:
+	MVI A,0FFH! STA COMP$FCB$CKS! RET
 ;
 hlrotl:
  	;rotate the mask in HL by amount in C
@@ -860,10 +860,10 @@ hlrotl:
  		dad h! jmp hlrotl0
 ;
 ;
-setcdisk:
+set$cdisk:
 	;set a "1" value in curdsk position of BC
 	LDA SELDSK
-SETCDISK1:
+SET$CDISK1:
 	push b ;save input parameter
 	mov c,a ;ready parameter for shift
 	lxi h,1 ;number to shift
@@ -877,16 +877,16 @@ nowrite:
 	;return true if dir checksum difference occurred
 	lhld rodsk! 
 ;
-TESTVECTOR:
+TEST$VECTOR:
 	LDA SELDSK
-TESTVECTOR1:
+TEST$VECTOR1:
 	mov c,a! call hlrotr
 	mov a,l! ani 1b! ret ;non zero if curdsk bit on
 ;
-setro:
+set$ro:
 	;set current disk to read only
 	lxi h,rodsk! mov c,m! inx h! mov b,m
-	call setcdisk ;sets bit to 1
+	call set$cdisk ;sets bit to 1
 	shld rodsk
 	;high water mark in directory goes to max
 	lhld dirmax! inx h! xchg ;DE = directory max	
@@ -894,25 +894,25 @@ setro:
 	mov m,e! inx h! mov m,d ;cdrmax = dirmax
 	ret
 ;
-checkrodir:
+check$rodir:
 	;check current directory element for read/only status
 	call getdptra ;address of element
 ;
-checkrofile:
+check$rofile:
 	;check current buff(dptr) or fcb(0) for r/o status
 	CALL ROTEST
 	rnc ;return if not set
-	jmp roferror ;exit to read only disk message
+	jmp rof$error ;exit to read only disk message
 ;
 ROTEST:
 	LXI D,ROFILE! DAD D
 	MOV A,M! RAL! RET ;CARRY SET IF R/O
 ;
 ;
-checkwrite:
+check$write:
 	;check for write protected disk
 	call nowrite! rz ;ok to write if not rodsk
-	jmp roderror ;read only disk error
+	jmp rod$error ;read only disk error
 ;
 getdptra:
 	;compute the address of a directory element at
@@ -937,9 +937,9 @@ clrmodnum:
 	call getmodnum! mvi m,0 ;fcb(modnum)=0
 	ret
 ;
-CLREXT:
+CLR$EXT:
 	;FCB EXT = FCB EXT & 1FH
-	CALL GETEXTA! MOV A,M! ANI 00011111B! MOV M,A!
+	CALL GETEXTA! MOV A,M! ANI 0001$1111B! MOV M,A!
 	RET
 ;
 setfwf:
@@ -985,16 +985,16 @@ checksum:
 	rnc ;skip checksum if past checksum vector size
 		;drec < chksiz, so continue
 		push b ;save init flag
-		call computecs ;check sum value to A
+		call compute$cs ;check sum value to A
 		lhld checka ;address of check sum vector
 		xchg
 		LHLD ARECORD
 		dad d ;HL = .check(drec)
 		pop b ;recall true=0ffh or false=00 to C
 		inr c ;0ffh produces zero flag
-		jz initialcs
+		jz initial$cs
 IF MPM
-		inr c! jz testdircs
+		inr c! jz test$dir$cs
 ENDIF
 			;not initializing, compare
 			cmp m ;compute$cs=check(drec)?
@@ -1004,22 +1004,22 @@ ENDIF
 			call compcdr
 			rnc ;no message if so
 IF MPM
-			call nowrite! cz flushfile0
+			call nowrite! cz flush$file0
 ENDIF
-			jmp setro ;read/only disk set
+			jmp set$ro ;read/only disk set
 IF MPM
-		testdircs:
-			cmp m! jnz flushfiles
+		test$dir$cs:
+			cmp m! jnz flush$files
 			ret
 ENDIF
-		initialcs:
+		initial$cs:
 			;initializing the checksum
 			mov m,a! ret
 ;
 ;
 wrdir:
 	;write the current directory entry, set checksum
-	CALL CHECKWRITE
+	CALL CHECK$WRITE
 	call newchecksum ;initialize entry
 	call setdir ;directory dma
 	mvi c,1 ;indicates a write directory operation
@@ -1027,7 +1027,7 @@ wrdir:
         jmp setdata ;to data dma address
 	;ret
 ;
-rddir:
+rd$dir:
 	;read a directory entry into the directory buffer
 	call setdir ;directory dma
 	call rdbuff ;directory record loaded
@@ -1049,7 +1049,7 @@ setdma:
 ;
 ;
 IF NOT MPM
-dirtouser:
+dir$to$user:
 	;copy the directory entry to the user buffer
 	;after call to search or searchn by user code
 	lhld buffa! xchg ;source is directory buffer
@@ -1059,25 +1059,25 @@ dirtouser:
 	;ret
 ENDIF
 ;
-MAKEFCBINV: ; FLAG FCB AS INVALID
+MAKE$FCB$INV: ; FLAG FCB AS INVALID
 	; RESET FCB WRITE FLAG
 	CALL SETFWF
 	; SET 1ST TWO BYTES OF DISKMAP TO FFH
 	INX H! INX H! MVI A,0FFH! MOV M,A! INX H! MOV M,A
 	RET
 ;
-CHKINVFCB: ; CHECK FOR INVALID FCB
-	CALL GETDMA! JMP TESTFFFF
+CHK$INV$FCB: ; CHECK FOR INVALID FCB
+	CALL GETDMA! JMP TEST$FFFF
 ;
-TSTINVFCB: ; TEST FOR INVALID FCB
-	CALL CHKINVFCB! RNZ
-	POP H! MVI A,9! JMP STARET! ; LRET = 9
+TST$INV$FCB: ; TEST FOR INVALID FCB
+	CALL CHK$INV$FCB! RNZ
+	POP H! MVI A,9! JMP STA$RET! ; LRET = 9
 ;
 endofdir:
 	;return zero flag if at end of directory, non zero
 	;if not at end (end of dir if dcnt = 0ffffh)
 	lxi h,dcnt
-TESTFFFF:
+TEST$FFFF:
 	mov a,m ;may be 0ffh
 	inx h! cmp m ;low(dcnt) = high(dcnt)?
 	rnz ;non zero returned if different
@@ -1085,33 +1085,33 @@ TESTFFFF:
 	inr a ;0ffh becomes 00 if so
 	ret
 ;
-setenddir:
+set$end$dir:
 	;set dcnt to the end of the directory
 	lxi h,enddir! shld dcnt! ret
 ;
-readdir:
+read$dir:
 	;read next directory entry, with C=true if initializing
 	lhld dirmax! xchg ;in preparation for subtract
 	lhld dcnt! inx h! shld dcnt ;dcnt=dcnt+1
 	;continue while dirmax >= dcnt (dirmax-dcnt no cy)
 	call subdh ;DE-HL
-	jnc readdir0
+	jnc read$dir0
 		;yes, set dcnt to end of directory
-		jmp setenddir			;
+		jmp set$end$dir			;
 ;		ret				;
-	readdir0:
+	read$dir0:
 		;not at end of directory, seek next element
 		;initialization flag is in C
 		lda dcnt! ani dskmsk ;low(dcnt) and dskmsk
 		mvi b,fcbshf ;to multiply by fcb size
-		readdir1:
-			add a! dcr b! jnz readdir1
+		read$dir1:
+			add a! dcr b! jnz read$dir1
 		;A = (low(dcnt) and dskmsk) shl fcbshf
 		sta dptr ;ready for next dir operation
 		ora a! rnz ;return if not a new record
 		push b ;save initialization flag C
 		call seekdir ;seek proper record
-		call rddir ;read the directory record
+		call rd$dir ;read the directory record
 		pop b ;recall initialization flag
 		jmp checksum ;checksum the directory elt
 		;ret
@@ -1141,7 +1141,7 @@ setallocbit:
 	;BC is the bit position of ALLOC to set or reset.  The
 	;value of the bit is in register E.
 	push d! call getallocbit ;shifted val A, count in D
-	ani 11111110b ;mask low bit to zero (may be set)
+	ani 1111$1110b ;mask low bit to zero (may be set)
 	pop b! ora c ;low bit of C is masked into A
 ;	jmp rotr ;to rotate back into proper position	
 	;ret
@@ -1193,20 +1193,20 @@ scandm:
 			pop b ;recall counter
 			jmp scandm0 ;for another item
 ;
-GETNALBS: ; GET # OF ALLOCATION VECTOR BYTES
+GET$NALBS: ; GET # OF ALLOCATION VECTOR BYTES
 	LHLD MAXALL! MVI C,3
 	;number of bytes in alloc vector is (maxall/8)+1
 	CALL HLROTR! INX H! RET
 ;
 IF MPM
-testdir:
+test$dir:
 	call home
-	call setenddir
-testdir1:
-	mvi c,0feh! call readdir
+	call set$end$dir
+test$dir1:
+	mvi c,0feh! call read$dir
 	lda flushed! ora a! rnz
 	call endofdir! rz
-	jmp testdir1
+	jmp test$dir1
 ;
 ENDIF
 initialize:
@@ -1214,8 +1214,8 @@ initialize:
 	;lret = false ;set to true if $ file exists
 	;compute the length of the allocation vector - 2
 IF MPM
-	lhld tlog! call testvector! jz initialize1
-	lhld tlog! call removedrive! shld tlog
+	lhld tlog! call test$vector! jz initialize1
+	lhld tlog! call remove$drive! shld tlog
 	xra a! sta flushed
 
 ; **** PATCH 2.1
@@ -1229,7 +1229,7 @@ IF MPM
 	rz
 initialize1:
 ENDIF
-	CALL GETNALBS ; get # of allocation vector bytes
+	CALL GET$NALBS ; get # of allocation vector bytes
 	mov b,h! mov c,l ;count down BC til zero
 	lhld alloca ;base of allocation vector
 	;fill the allocation vector with zeros
@@ -1249,17 +1249,17 @@ ENDIF
         ;cdrmax = 3 (scans at least one directory record)
 	lhld cdrmaxa! mvi m,3! inx h! mvi m,0
 	;cdrmax = 0000
-	call setenddir ;dcnt = enddir
+	call set$end$dir ;dcnt = enddir
 	;read directory entries and check for allocated storage
 	initial2:
-		mvi c,true! call readdir
+		mvi c,true! call read$dir
 		call endofdir! rz ;return if end of directory
 		;not end of directory, valid entry?
 		call getdptra ;HL = buffa + dptr
 		mvi a,empty! cmp m
 		jz initial2 ;go get another item
 		;
-		MVI A,20H! CMP M! JZ DRVLBL
+		MVI A,20H! CMP M! JZ DRV$LBL
 		MVI A,70H! ANA M! JNZ INITIAL3
 		;
 		;now scan the disk map for allocated blocks
@@ -1269,7 +1269,7 @@ ENDIF
 		call setcdr ;set cdrmax to dcnt
 		jmp initial2 ;for another entry
 ;
-DRVLBL:
+DRV$LBL:
 		LXI D,EXTNUM! DAD D! MOV A,M
 		LHLD DRVLBLA! MOV M,A! JMP INITIAL3
 ;
@@ -1277,7 +1277,7 @@ DRVLBL:
 copydirloc:
 	;copy directory location to lret following
 	;delete, rename, ... ops
-	lda dirloc! jmp staret				;
+	lda dirloc! jmp sta$ret				;
 ;	ret						;
 ;
 compext:
@@ -1292,26 +1292,26 @@ compext:
 	pop b ;restore original values
 	ret
 ;
-GETDIREXT:
+GET$DIR$EXT:
 	;COMPUTE DIRECTORY EXTENT FROM FCB
 	;SCAN FCB DISK MAP BACKWARDS
 	CALL GETFCBA ; HL = .FCB(VRECORD)
 	MVI C,16! MOV B,C! INR C! PUSH B
 	; B=DSKMAP POS (REL TO 0)
-GETDE0:
+GET$DE0:
 	POP B ;
 	DCR C ;
 	XRA A ; COMPARE TO ZERO
-GETDE1:
+GET$DE1:
 	DCX H! DCR B; DECR DSKMAP POSITION
-	CMP M! JNZ GETDE2 ; FCB(DSKMAP(B)) ~= 0
-	DCR C! JNZ GETDE1
+	CMP M! JNZ GET$DE2 ; FCB(DSKMAP(B)) ~= 0
+	DCR C! JNZ GET$DE1
 	;ALL BLOCKS = 0 IN FCB DISK MAP
-GETDE2:
+GET$DE2:
 	LDA SINGLE! ORA A! MOV A,B ;
-	JNZ GETDE3
+	JNZ GET$DE3
 	RAR ; NOT SINGLE, DIVIDE BLK IDX BY 2
-GETDE3:
+GET$DE3:
 	PUSH B! PUSH H ; SAVE DSKMAP POSITION & COUNT
 	MOV L,A! MVI H,0 ; HL = NON-ZERO BLK IDX
 	; COMPUTE EXT OFFSET FROM LAST NON-ZERO
@@ -1320,7 +1320,7 @@ GETDE3:
 	LDA BLKSHF! MOV D,A! MVI A,7! SUB D ;
 	MOV C,A! CALL HLROTR! MOV B,L ;
 	; B = EXT OFFSET
-	LDA EXTMSK! CMP B! POP H! JC GETDE0
+	LDA EXTMSK! CMP B! POP H! JC GET$DE0
 	; VERIFY COMPUTED EXTENT OFFSET <= EXTMSK
 	CALL GETEXTA! MOV C,M
 	CMA! ANI MAXEXT! ANA C! ORA B
@@ -1340,7 +1340,7 @@ search:
 	;search for directory element of length C at info
 	CALL SEARCHI;
 SEARCH1: ; ENTRY POINT USED BY RENAME
-	call setenddir ;dcnt = enddir
+	call set$end$dir ;dcnt = enddir
 	call home ;to start at the beginning
 	;(drop through to searchn)			;
 ;
@@ -1355,8 +1355,8 @@ ELSE
 	XRA A! STA USER0PASS ;
 ENDIF
 ;
-	mvi c,false! call readdir ;read next dir element
-	call endofdir! jz searchfin ;skip to end if so
+	mvi c,false! call read$dir ;read next dir element
+	call endofdir! jz search$fin ;skip to end if so
 		;not end of directory, scan for match
 		lhld searcha! xchg ;DE=beginning of user fcb
 		ldax d ;first character
@@ -1366,18 +1366,18 @@ ENDIF
 		push d ;save search address
 		call compcdr ;past logical end?
 		pop d ;recall address
-		jnc searchfin ;artificial stop
+		jnc search$fin ;artificial stop
 searchnext:
 		call getdptra ;HL = buffa+dptr
 		lda searchl! mov c,a ;length of search to c
 		mvi b,0 ;b counts up, c counts down
 		;
-		MOV A,M! CPI EMPTY! CZ SAVEDCNTPOS1 
-		XRA A! STA SAVEXFCB
-		MOV A,M! ANI 11101111B! CMP M! JZ SEARCHLOOP
+		MOV A,M! CPI EMPTY! CZ SAVE$DCNT$POS1 
+		XRA A! STA SAVE$XFCB
+		MOV A,M! ANI 1110$1111B! CMP M! JZ SEARCHLOOP
 		XCHG! CMP M! XCHG! JNZ SEARCHLOOP
-		LDA FINDXFCB! ORA A! JZ SEARCHN
-		STA SAVEXFCB! JMP SEARCHOK
+		LDA FIND$XFCB! ORA A! JZ SEARCHN
+		STA SAVE$XFCB! JMP SEARCHOK
 		;
 		searchloop:
 			mov a,c! ora a! jz endsearch
@@ -1399,21 +1399,21 @@ searchnext:
 IF MPM
 			push h
  			lhld sdcnt
- 			inr h! jnz dontsave
+ 			inr h! jnz dont$save
  			lhld dcnt! shld sdcnt
  			lhld dblk! shld sdblk
- 		dontsave:
+ 		dont$save:
 			pop h
 ENDIF
 			mov c,m ;directory character to c
 			call compext ;compare user/dir char
 			;
 			MOV B,A
-			LDA USER0PASS! INR A! JZ SAVEDCNTPOS2
+			LDA USER0PASS! INR A! JZ SAVE$DCNT$POS2
 			; DISABLE SEARCH OF USER 0 IF ANY FCB
 			; IS FOUND UNDER THE CURRENT USER #
-			XRA A! STA SEARCHUSER0
-			DCR A! STA FCBEXISTS
+			XRA A! STA SEARCH$USER0
+			DCR A! STA FCB$EXISTS
 			MOV A,B
 			;
 			pop b ;recall counters
@@ -1425,8 +1425,8 @@ ENDIF
 			jmp searchloop
 		endsearch:
 			;entire name matches, return dir position
-			LDA SAVEXFCB! ORA A! JZ ENDSEARCH1
-			LDA XDCNT+1! CPI 0FEH! CZ SAVEDCNTPOS0
+			LDA SAVE$XFCB! ORA A! JZ ENDSEARCH1
+			LDA XDCNT+1! CPI 0FEH! CZ SAVE$DCNT$POS0
 			JMP SEARCHN
 		ENDSEARCH1:
 			STA DIRLOC ; DIRLOC = 0
@@ -1437,23 +1437,23 @@ ENDIF
 			MOV B,A! INR B! RET
 		SEARCHMOD:
 			ANI 3FH! RET ; MASK OFF HIGH 2 BITS
-		searchfin:
+		search$fin:
 			;end of directory, or empty name
 			;
-			CALL SAVEDCNTPOS1 ;
+			CALL SAVE$DCNT$POS1 ;
 			;
 			;SET DCNT = 0FFFFH
-			call setenddir ;may be artifical end
-		LRETEQFF:
+			call set$end$dir ;may be artifical end
+		LRET$EQ$FF:
 			;UNSUCCESSFUL SEARCH -
 			;RETURN WITH ZERO FLAG SET
 			;LRET,LOW(ARET) = 0FFH
-			mvi a,255! MOV B,A! INR B! jmp staret		;
+			mvi a,255! MOV B,A! INR B! jmp sta$ret		;
 			;
 		SEARCHNM: ; SEARCH NO MATCH ROUTINE
 			MOV A,B! ORA A! JNZ SEARCHN ; FCB(0)?
 			MOV A,M! ORA A! JNZ SEARCHN ; DIR FCB(0)=0?
-			LDA SEARCHUSER0! ORA A! JZ SEARCHN
+			LDA SEARCH$USER0! ORA A! JZ SEARCHN
 			STA USER0PASS
 			;
 IF MPM
@@ -1475,7 +1475,7 @@ swap1:
 	ret
 ENDIF
 ;
-SAVEDCNTPOS2:
+SAVE$DCNT$POS2:
 	; SAVE DIRECTORY POSITION OF MATCHING FCB
 	; UNDER USER 0 WITH MATCHING EXTENT # & MODNUM = 0
 	; A = 0 ON ENTRY
@@ -1483,56 +1483,56 @@ SAVEDCNTPOS2:
 	; CALL IF USER0PASS = 0FFH &
 	;         DIR FCB(EXTNUM) = FCB(EXTNUM)
 	;         DIR FCB(MODNUM) = 0
-SAVEDCNTPOS0:
-	CALL SAVEDCNTPOS ; RETURN TO SEARCHN
-SAVEDCNTPOS1:
+SAVE$DCNT$POS0:
+	CALL SAVE$DCNT$POS ; RETURN TO SEARCHN
+SAVE$DCNT$POS1:
 	; SAVE DIRECTORY POSITION OF FIRST EMPTY FCB
 	; OR THE END OF THE DIRECTORY
 	PUSH H! 
-	LHLD XDCNT! INR H! JNZ SAVEDCNTPOSRET ; RETURN IF H ~= 0FFH
-SAVEDCNTPOS:
+	LHLD XDCNT! INR H! JNZ SAVE$DCNT$POS$RET ; RETURN IF H ~= 0FFH
+SAVE$DCNT$POS:
 	LHLD DCNT! SHLD XDCNT ;
 	LHLD DBLK! SHLD XDBLK ;
-SAVEDCNTPOSRET:
+SAVE$DCNT$POS$RET:
 	POP H! RET
 ;
-INITXFCBSEARCH:
+INIT$XFCB$SEARCH:
 	MVI A,0FFH
-INITXFCBSEARCH1:
-	STA FINDXFCB! MVI A,0FEH! STA XDCNT+1! RET
+INIT$XFCB$SEARCH1:
+	STA FIND$XFCB! MVI A,0FEH! STA XDCNT+1! RET
 
 ;
-DOESXFCBEXIST:
+DOES$XFCB$EXIST:
 	LDA XDCNT+1! CPI 0FEH! RZ
-	CALL SETDCNTDBLK
-	XRA A! CALL INITXFCBSEARCH1
+	CALL SET$DCNT$DBLK
+	XRA A! CALL INIT$XFCB$SEARCH1
 	LHLD SEARCHA! MOV A,M! ORI 10H! MOV M,A
 	MVI C,EXTNUM! CALL SEARCHI1! JMP SEARCHN 
 ;
 delete:
 	;delete the currently addressed file
-	call checkwrite ;write protected?
+	call check$write ;write protected?
 	CALL GETATTS! STA ATTRIBUTES
-	CALL CHKPWS! PUSH A
-	CALL INITXFCBSEARCH
+	CALL CHK$PWS! PUSH A
+	CALL INIT$XFCB$SEARCH
 	MVI C,EXTNUM! CALL SEARCH ;SEARCH THROUGH FILE TYPE
 	POP B! JZ DELETE2
-	MOV A,B! ORA A! JNZ CHKPW1
+	MOV A,B! ORA A! JNZ CHK$PW1
 	LDA ATTRIBUTES! RAL! JC DELETE015
-	LHLD INFO! CALL CHKWILD! JZ DELETE015
+	LHLD INFO! CALL CHK$WILD! JZ DELETE015
 IF MPM
-	call tstolist
+	call tst$olist
 ENDIF
-	CALL CHECKRODIR! JMP DELETE0
+	CALL CHECK$RODIR! JMP DELETE0
 ;
 	DELETE01:
 		;LOOP WHILE DIRECTORY MATCHES
 		JZ DELETE02
 	DELETE015:
 IF MPM
-		call tstolist
+		call tst$olist
 ENDIF
-		CALL CHECKRODIR
+		CALL CHECK$RODIR
 		CALL SEARCHN! JMP DELETE01
 	DELETE02:
 ;
@@ -1546,7 +1546,7 @@ ENDIF
 		;set each non zero disk map entry to 0
 		;in the allocation vector
 IF MPM
-		call chkolist
+		call chk$olist
 ENDIF
 		call getdptra ;HL=.buff(dptr)
 		MOV A,M! ANI 10H
@@ -1556,9 +1556,9 @@ ENDIF
 		call searchn ;to next element
 		jmp delete0 ;for another record
 	DELETE2:
-		CALL DOESXFCBEXIST! JNZ DELETE1! JMP COPYDIRLOC
+		CALL DOES$XFCB$EXIST! JNZ DELETE1! JMP COPYDIRLOC
 ;
-getblock:
+get$block:
 	;given allocation vector position BC, find the zero bit
 	;closest to this position by searching left and right.
 	;if found, set the bit to one and return the bit position
@@ -1595,19 +1595,19 @@ getblock:
 		ora b! jnz lefttst	;also at beginning    
 		lxi h,0000h! ret
 ;
-copydir:
+copy$dir:
 	;copy fcb information starting at C for E bytes
 	;into the currently addressed directory entry
 	MVI D,80H
-COPYDIR0:
-	CALL COPYDIR2
+COPY$DIR0:
+	CALL COPY$DIR2
 	INR C
-COPYDIR1:
-	DCR C! JZ SEEKCOPY
+COPY$DIR1:
+	DCR C! JZ SEEK$COPY
 	MOV A,M! ANA B! PUSH B
 	MOV B,A! LDAX D! ANI 7FH! ORA B! MOV M,A
-	POP B! INX H! INX D! JMP COPYDIR1
-COPYDIR2:
+	POP B! INX H! INX D! JMP COPY$DIR1
+COPY$DIR2:
 	push d ;save length for later
 	mvi b,0 ;double index to BC
 	lhld info ;HL = source for data
@@ -1615,27 +1615,27 @@ COPYDIR2:
 	call getdptra ;HL=.buff(dptr), destination
 	pop b ;DE=source, HL=dest, C=length
 	RET
-seekcopy:
+seek$copy:
 	;enter from close to seek and copy current element
 	call seekdir ;to the directory element
 	jmp wrdir ;write the directory element
 	;ret
 ;
-CHECKWILD:
+CHECK$WILD:
 	;CHECK FOR ? IN FILE NAME OR TYPE
 	LHLD INFO
-CHECKWILD0:	; ENTRY POINT USED BY RENAME
-	CALL CHKWILD! RNZ
+CHECK$WILD0:	; ENTRY POINT USED BY RENAME
+	CALL CHK$WILD! RNZ
 	MVI A,9! POP H ; DISCARD RETURN ADDRESS
-	JMP SETARET
+	JMP SET$ARET
 ;
-CHKWILD:
+CHK$WILD:
 	MVI B,03FH! MVI C,11
-CHKWILD1:
+CHK$WILD1:
 	INX H! MOV A,B! SUB M! ANA B! RZ
-	DCR C! JNZ CHKWILD1! ORA A! RET
+	DCR C! JNZ CHK$WILD1! ORA A! RET
 ;
-COPYUSERNO:
+COPY$USER$NO:
 	LHLD INFO! MOV A,M! LXI B,DSKMAP
 	DAD B! MOV M,A! RET
 ;
@@ -1662,42 +1662,42 @@ rename:
 ;	call check$write
 
 	;VERIFY NO WILD CHARS EXIST IN 1ST FILENAME
-	CALL CHECKWILD
-	CALL CHKPASSWORD
+	CALL CHECK$WILD
+	CALL CHK$PASSWORD
 ;
-	CALL INITXFCBSEARCH
+	CALL INIT$XFCB$SEARCH
 ;
 	;COPY USER NUMBER TO 2ND FILENAME
-	CALL COPYUSERNO
+	CALL COPY$USER$NO
 	;VERIFY NEW FILENAME DOES NOT ALREADY EXIST
 	SHLD SEARCHA
 ;
 	;VERIFY NO WILD CHARS EXIST IN 2ND FILENAME
-	CALL CHECKWILD0
+	CALL CHECK$WILD0
 ;
 	MVI C,EXTNUM! CALL SEARCHI1! CALL SEARCH1
-	JNZ FILEEXISTS ; NEW FILENAME EXISTS
-	CALL DOESXFCBEXIST! CNZ DELETE1
+	JNZ FILE$EXISTS ; NEW FILENAME EXISTS
+	CALL DOES$XFCB$EXIST! CNZ DELETE1
 ;
-	CALL COPYUSERNO
-	CALL INITXFCBSEARCH
+	CALL COPY$USER$NO
+	CALL INIT$XFCB$SEARCH
 	;search up to the extent field
 	mvi c,extnum! call search
 	rz
-	CALL CHECKRODIR ;MAY BE READ-ONLY FILE
+	CALL CHECK$RODIR ;MAY BE READ-ONLY FILE
 IF MPM
-	call chkolist
+	call chk$olist
 ENDIF
 	;copy position 0
 	rename0:
 		;not end of directory, rename next element
-		mvi c,dskmap! mvi e,extnum! call copydir
+		mvi c,dskmap! mvi e,extnum! call copy$dir
 		;element renamed, move to next
 		call searchn
 		JNZ RENAME0
 	RENAME1:
-		CALL DOESXFCBEXIST! JZ COPYDIRLOC
-		CALL COPYUSERNO! JMP RENAME0
+		CALL DOES$XFCB$EXIST! JZ COPYDIRLOC
+		CALL COPY$USER$NO! JMP RENAME0
 ;
 indicators:
 	;set file indicators for current fcb
@@ -1714,12 +1714,12 @@ indicators:
 	mvi c,extnum! call search ;through file type
 	RZ
 IF MPM
-	call chkolist
+	call chk$olist
 ENDIF
 	indic0:
 		;not end of directory, continue to change
 		mvi c,0! mvi e,extnum ;copy name
-		CALL COPYDIR2! CALL MOVE! CALL SEEKCOPY
+		CALL COPY$DIR2! CALL MOVE! CALL SEEK$COPY
 		call searchn
 		JZ COPYDIRLOC
 		jmp indic0
@@ -1730,7 +1730,7 @@ open:
 OPEN1:
 	rz ;return with lret=255 if end
 	;not end of directory, copy fcb information
-opencopy:
+open$copy:
 	;(referenced below to copy fcb info)
 	CALL SETFWF! MOV E,A! PUSH H! DCX H! DCX H
 	MOV D,M! PUSH D ; SAVE EXTENT# & MODULE# WITH FCB WRITE FLAG SET
@@ -1750,7 +1750,7 @@ opencopy:
 	;if fcb ext = dir ext then fcb(reccnt) = fcb(reccnt)
 	;if fcb ext > dir ext then fcb(reccnt) = 0
 	;
-SETRC: ; HL=.FCB(EXT), C=DIREXT
+SET$RC: ; HL=.FCB(EXT), C=DIREXT
 		MVI B,0
 		XCHG! LXI H,(RECCNT-EXTNUM)! DAD D
 		LDAX D! CMP C
@@ -1764,12 +1764,12 @@ SETRC: ; HL=.FCB(EXT), C=DIREXT
 ; Replaced code
 ;		JZ SET$RC2
 
-		MVI A,0! JNC SETRC1
+		MVI A,0! JNC SET$RC1
 		MVI A,128! MOV B,M
-	SETRC1:
+	SET$RC1:
 		MOV M,A
-	SETRC2:
-		MOV A,B! STA ACTUALRC
+	SET$RC2:
+		MOV A,B! STA ACTUAL$RC
 		RET 
 ;
 mergezero:
@@ -1780,51 +1780,51 @@ mergezero:
 	ldax d! mov m,a! dcx d! dcx h ;back to input form
 	ret
 ;
-RESTORERC:
+RESTORE$RC:
 ;	HL = .FCB(EXTNUM)
 ;	IF ACTUAL$RC ~= 0 THEN RCOUNT = ACTUAL$RC
 	PUSH H
-	LDA ACTUALRC! ORA A! JZ RESTORERC1
+	LDA ACTUAL$RC! ORA A! JZ RESTORE$RC1
 	LXI D,(RECCNT-EXTNUM)! DAD D
 	MOV M,A
-RESTORERC1:
+RESTORE$RC1:
 	POP H! RET
 ;
 close:
 	;locate the directory element and re-write it
 	xra a! sta lret ;
 IF MPM
-	sta dontclose
+	sta dont$close
 ENDIF
 	call nowrite! rnz ;skip close if r/o disk
 	;check file write flag - 0 indicates written
 	call getmodnum ;fcb(modnum) in A
 	ani fwfmsk! rnz ;return if bit remains set
 CLOSE1:
-	CALL SETFCBCKSFLAG
+	CALL SET$FCB$CKS$FLAG
 
 ; **** PATCH 2.1
 
-	CALL GETDIREXT! MOV C,A
+	CALL GET$DIR$EXT! MOV C,A
 	MOV B,M! PUSH B
-	CALL CLOSEFCB
-	CALL GETDIREXT! POP B
+	CALL CLOSE$FCB
+	CALL GET$DIR$EXT! POP B
 	CMP B! JNZ CLOSE2
 	CMP C! RZ
 CLOSE2:
-	MOV M,B! MOV C,A! JMP SETRC
+	MOV M,B! MOV C,A! JMP SET$RC
 
 patch00:
-	call setrc2 ; actual$rc = 0
+	call set$rc2 ; actual$rc = 0
 	mov a,m! ora a! rnz ; rc ~= 0
-	call getdirext! cmp m! rc ; dir$ext < ext
+	call get$dir$ext! cmp m! rc ; dir$ext < ext
 	mov a,c! ora a! rz ; no blocks in fcb
 	lda fx! jmp patch000
 
-CLOSEFCB:
-	CALL RESTORERC
-	MOV A,B! CMP C! MOV M,C! CNZ SETRC
-	XRA A! STA ACTUALRC! NOP
+CLOSE$FCB:
+	CALL RESTORE$RC
+	MOV A,B! CMP C! MOV M,C! CNZ SET$RC
+	XRA A! STA ACTUAL$RC! NOP
 
 ; **** Replaced code:
 
@@ -1923,31 +1923,31 @@ ENDIF
 		mov a,m! stax d ;buff(reccnt)=fcb(reccnt)
 endmerge:
 IF MPM
-		lda dontclose! ora a! rnz
+		lda dont$close! ora a! rnz
 ENDIF
 		;SET T3' OFF INDICATING FILE UPDATE
 		CALL GETDPTRA! LXI D,11! DAD D
 		MOV A,M! ANI 7FH! MOV M,A
 		CALL SETFWF
-		jmp seekcopy ;ok to "wrdir" here - 1.4 compat
+		jmp seek$copy ;ok to "wrdir" here - 1.4 compat
 	;		ret				;
 	mergerr:
 		;elements did not merge correctly
-		CALL MAKEFCBINV
+		CALL MAKE$FCB$INV
 		lxi h,lret! dcr m ;=255 non zero flag set
 	ret
 ;
-SETXDCNT:
+SET$XDCNT:
 	LXI H,0FFFFH! SHLD XDCNT! RET
 ;
-SETDCNTDBLK:
-	LHLD XDCNT! MVI A,11111100B! ANA L
+SET$DCNT$DBLK:
+	LHLD XDCNT! MVI A,1111$1100B! ANA L
 	MOV L,A! DCX H! SHLD DCNT ;
 	LHLD XDBLK! SHLD DBLK ;
 	RET
 ;
 IF MPM
-sdcnteqxdcnt:
+sdcnt$eq$xdcnt:
 	lxi h,sdcnt! lxi d,xdcnt! mvi c,4
 	jmp move
 ENDIF
@@ -1956,10 +1956,10 @@ make:
 	;create a new file by creating a directory entry
 	;then opening the file
 ;
-	LXI H,XDCNT! CALL TESTFFFF! JZ LRETEQFF
-	CALL SETDCNTDBLK
+	LXI H,XDCNT! CALL TEST$FFFF! JZ LRET$EQ$FF
+	CALL SET$DCNT$DBLK
 ;
-	call checkwrite ;may be write protected
+	call check$write ;may be write protected
 	lhld info! push h ; save fcb address, look for e5
 	lxi h,efcb! shld info ; info = .empty
 	mvi c,1! 
@@ -1972,7 +1972,7 @@ make:
 	rz ;return with error condition 255 if not found
 ;
 	; RETURN EARLY IF MAKING AN XFCB
-	LDA MAKEXFCB! ORA A! RNZ
+	LDA MAKE$XFCB! ORA A! RNZ
 	;clear the remainder of the fcb
 	;CLEAR S1 BYTE
 	LXI D,13! DAD D! MOV M,D! INX H
@@ -1983,29 +1983,29 @@ make:
 		MOV M,D! inx h! dcr c! jnz make0
 	call setcdr ;may have extended the directory
 	;now copy entry to the directory
-	MVI C,0! LXI D,FCBLEN! CALL COPYDIR0
+	MVI C,0! LXI D,FCBLEN! CALL COPY$DIR0
 	;AND RESTORE THE FILE WRITE FLAG
 	POP H! POP A! MOV M,A
 	;and set the FCB write flag to "1"
-	XRA A! STA ACTUALRC
+	XRA A! STA ACTUAL$RC
 	jmp setfwf
 ;
-openreel:
+open$reel:
 	;close the current extent, and open the next one
 	;if possible.  RMF is true if in read mode
-	CALL GETMODNUM! STA SAVEMOD
+	CALL GETMODNUM! STA SAVE$MOD
 	CALL GETEXTA
 	MOV A,M! MOV C,A ;
 	INR C! CALL COMPEXT ;
-	JZ OPENREEL3
+	JZ OPEN$REEL3
 	PUSH H! PUSH B
 	CALL CLOSE
 	POP B! POP H
 	LDA LRET! INR A! RZ
 	MVI A,MAXEXT! ANA C! MOV M,A; INCR EXTENT FIELD
-	JNZ OPENREEL0 ; JMP IF IN SAME MODULE
+	JNZ OPEN$REEL0 ; JMP IF IN SAME MODULE
 ;
-	openmod:
+	open$mod:
 		;extent number overflow, go to next module
 		INX H! INX H ;HL=.fcb(modnum)
 		inr m ;fcb(modnum)=++1
@@ -2013,38 +2013,38 @@ openreel:
 ;
 		mov a,m! ANI 3FH! ;mask high order bits
 ;
-		JZ OPENRERR ;cannot overflow to zero
+		JZ OPEN$R$ERR ;cannot overflow to zero
 		;otherwise, ok to continue with new module
-	openreel0:
-		CALL SETXDCNT ; RESET XDCNT FOR MAKE
+	open$reel0:
+		CALL SET$XDCNT ; RESET XDCNT FOR MAKE
 IF MPM
-		call setsdcnt
+		call set$sdcnt
 ENDIF
 		mvi c,namlen! call search ;next extent found?
-		jnz openreel1
+		jnz open$reel1
 			;end of file encountered
 			lda rmf! inr a ;0ffh becomes 00 if read
-			jz openrerr ;sets lret = 1
+			jz open$r$err ;sets lret = 1
 			;try to extend the current file
 			call make
 			;cannot be end of directory
 			;call end$of$dir
-			jz openrerr ;with lret = 1
+			jz open$r$err ;with lret = 1
 IF MPM
-			call fixolistitem
+			call fix$olist$item
 ENDIF
-			CALL SETFCBCKSFLAG
-			jmp openreel2
-		openreel1:
+			CALL SET$FCB$CKS$FLAG
+			jmp open$reel2
+		open$reel1:
 			;not end of file, open
-			CALL SETFCBCKSFLAG
-			call opencopy
-		openreel2:
+			CALL SET$FCB$CKS$FLAG
+			call open$copy
+		open$reel2:
 			call getfcb ;set parameters
-			xra a! STA VRECORD! jmp staret ;lret = 0	;
+			xra a! STA VRECORD! jmp sta$ret ;lret = 0	;
 ;			ret ;with lret = 0
-	openrerr:
-		CALL GETMODNUM! LDA SAVEMOD! MOV M,A
+	open$r$err:
+		CALL GETMODNUM! LDA SAVE$MOD! MOV M,A
 
 ; **** PATCH 2.1 
 ; This patch restores the FCB extent field to its value
@@ -2055,16 +2055,16 @@ ENDIF
 ; Replaced code:
 ;		CALL GETEXTA  LDA SAVE$EXT
 
-		MOV M,A! CALL SETFCBCKSFLAG
+		MOV M,A! CALL SET$FCB$CKS$FLAG
 		;cannot move to next extent of this file
 		call setlret1 ;lret = 1
 		jmp setfwf ;ensure that it will not be closed
 		;ret
-	OPENREEL3:
+	OPEN$REEL3:
 		MOV M,C ; INCREMENT EXTENT FIELD
-		CALL GETDIREXT! MOV C,A
-		CALL RESTORERC
-		CALL SETRC! JMP OPENREEL2
+		CALL GET$DIR$EXT! MOV C,A
+		CALL RESTORE$RC
+		CALL SET$RC! JMP OPEN$REEL2
 ;
 seqdiskread:
 	;sequential disk read operation
@@ -2072,10 +2072,10 @@ seqdiskread:
 	;drop through to diskread
 ;
 diskread:	;(may enter from seqdiskread)
-	CALL TSTINVFCB ; CHECK FOR VALID FCB
+	CALL TST$INV$FCB ; CHECK FOR VALID FCB
 	mvi a,true! sta rmf ;read mode flag = true (open$reel)
 IF MPM
-	sta dontclose
+	sta dont$close
 ENDIF
 	;read the next record from the current fcb
 	call getfcb ;sets parameters for the read
@@ -2084,14 +2084,14 @@ DISKREAD0:
 	;skip if rcount > vrecord
 	jc recordok
 IF MPM
-		call testdiskfcb! jnz diskread0
+		call test$disk$fcb! jnz diskread0
 		lda vrecord
 ENDIF
 		;not enough records in the extent
 		;record count must be 128 to continue
 		cpi 128 ;vrecord = 128?
 		JNZ SETLRET1 ;skip if vrecord<>128
-		call openreel ;go to next extent if so
+		call open$reel ;go to next extent if so
 		; xra a  sta vrecord ;vrecord=00 (DONE BY OPEN$REEL)
 		;now check for open ok
 		lda lret! ora a! JNZ SETLRET1 ;stop at eof
@@ -2103,7 +2103,7 @@ ENDIF
 		call allocated ;arecord=0000?
 IF MPM
 		jnz recordok1
-		call testdiskfcb! jnz diskread0
+		call test$disk$fcb! jnz diskread0
 ENDIF
 		JZ SETLRET1
 	RECORDOK1:
@@ -2115,24 +2115,24 @@ ENDIF
 
 IF MPM
 ;
-testunlocked:
-	lda highext! ani 80h! ret
+test$unlocked:
+	lda high$ext! ani 80h! ret
 ;
-testdiskfcb:
-	call testunlocked! rz 
-	lda dontclose! ora a! rz
+test$disk$fcb:
+	call test$unlocked! rz 
+	lda dont$close! ora a! rz
 	call close1
-testdiskfcb1:
+test$disk$fcb1:
 	pop d
-	lxi h,lret! inr m! mvi a,11! jz staret
+	lxi h,lret! inr m! mvi a,11! jz sta$ret
 	mvi m,0
 	push d
 	call getrcnta! mov a,m! sta rcount ; reset rcount
-	xra a! sta dontclose
+	xra a! sta dont$close
 	inr a! ret
 ENDIF
 ;
-RESETFWF:
+RESET$FWF:
 	call getmodnum ;HL=.fcb(modnum), A=fcb(modnum)
 	;reset the file write flag to mark as written fcb
 	ani (not fwfmsk) and 0ffh ;bit reset
@@ -2147,28 +2147,28 @@ seqdiskwrite:
 diskwrite:	;(may enter here from seqdiskwrite above)
 	mvi a,false! sta rmf ;read mode flag
 	;write record to currently selected file
-	call checkwrite ;in case write protected
+	call check$write ;in case write protected
 ;
-	LDA XFCBREADONLY! ORA A
-	MVI A,3! JNZ SETARET
+	LDA XFCB$READ$ONLY! ORA A
+	MVI A,3! JNZ SET$ARET
 ;
-	LDA HIGHEXT! ANI 01000000B
+	LDA HIGH$EXT! ANI 0100$0000B
 	; Z FLAG RESET IF R/O MODE
-	MVI A,3! JNZ SETARET
+	MVI A,3! JNZ SET$ARET
 ;
 	lhld info ;HL = .fcb(0)
-	call checkrofile ;may be a read-only file
+	call check$rofile ;may be a read-only file
 ;
-	CALL TSTINVFCB ; TEST FOR INVALID FCB
+	CALL TST$INV$FCB ; TEST FOR INVALID FCB
 	call getfcb ;to set local parameters
 	lda vrecord! cpi lstrec+1 ;vrecord-128
 	JC DISKWRITE0
-	CALL OPENREEL ;VRECORD = 128, TRY TO OPEN NEXT EXTENT
+	CALL OPEN$REEL ;VRECORD = 128, TRY TO OPEN NEXT EXTENT
 	LDA LRET! ORA A! RNZ ; NO AVAILABLE FCB
 DISKWRITE0:
 ;
 IF MPM
-	mvi a,0ffh! sta dontclose
+	mvi a,0ffh! sta dont$close
 diskwrite1:
 ENDIF
 	;can write the next record, so continue
@@ -2178,27 +2178,27 @@ IF MPM
 	jz diskwrite2
 	;if file is unlocked, verify record is not locked
 	;record has to be allocated to be locked
-	call testunlocked! jz notunlocked
+	call test$unlocked! jz not$unlocked
 	call atran! mov c,a
-	lda multcnt! mov b,a! push b
-	call testlock! pop b
+	lda mult$cnt! mov b,a! push b
+	call test$lock! pop b
 	mov a,c! mvi c,0! push b
 	jmp diskwr10
-notunlocked:
+not$unlocked:
 	inr a
 ENDIF
 	mvi c,0 ;marked as normal write operation for wrbuff
 	jnz diskwr1
 IF MPM
 	diskwrite2:
-		call testdiskfcb! jnz diskwrite1
+		call test$disk$fcb! jnz diskwrite1
 ENDIF
 		;not allocated
 		;the argument to getblock is the starting
 		;position for the disk search, and should be
 		;the last allocated block for this file, or
 		;the value 0 if no space has been allocated
-		call dmposition
+		call dm$position
 		sta dminx ;save for later
 		lxi b,0000h ;may use block zero
 		ora a! jz nopblock ;skip if no previous block
@@ -2208,13 +2208,13 @@ ENDIF
 			mov b,h! mov c,l ;BC=prev block#
 		nopblock:
 			;BC = 0000, or previous block #
-			call getblock ;block # to HL
+			call get$block ;block # to HL
 		;arrive here with block# or zero
 		mov a,l! ora h! jnz blockok
 			;cannot find a block to allocate
-			mvi a,2! jmp staret 	;lret=2	
+			mvi a,2! jmp sta$ret 	;lret=2	
 		blockok:
-		CALL SETFCBCKSFLAG
+		CALL SET$FCB$CKS$FLAG
 		;allocated block number is in HL
 		shld arecord
 		xchg ;block number to DE
@@ -2286,7 +2286,7 @@ WRITE:
 		;rcount <= vrecord
 		mov m,a! inr m ;rcount = vrecord+1
 IF	MPM
-		call testunlocked! jz write1
+		call test$unlocked! jz write1
 	
 		;for unlocked files 
 		;  rcount = rcount & (~ blkmsk) + blkmsk + 1
@@ -2299,23 +2299,23 @@ ENDIF
 	diskwr2:
 	;A has vrecord, C=2 if new block or new record#
 	dcr c! dcr c! jnz noupdate
-		CALL RESETFWF
+		CALL RESET$FWF
 IF MPM
-		call testunlocked! jz noupdate
+		call test$unlocked! jz noupdate
 		lda rcount! call getrcnta! mov m,a
 		call close
-		call testdiskfcb1
+		call test$disk$fcb1
 ENDIF
 
 noupdate:
 ;
 	;SET FILE WRITE FLAG IF RESET
-	CALL GETMODNUM! ANI 01000000B! JNZ DISKWRITE3
-	MOV A,M! ORI 01000000B! MOV M,A
+	CALL GETMODNUM! ANI 0100$0000B! JNZ DISK$WRITE3
+	MOV A,M! ORI 0100$0000B! MOV M,A
 	;RESET FCB FILE WRITE FLAG TO ENSURE T3' GETS
 	;RESET BY THE CLOSE FUNCTION
-	CALL RESETFWF
-DISKWRITE3:
+	CALL RESET$FWF
+DISK$WRITE3:
 	jmp setfcb ;replace parameters
 	;ret
 ;
@@ -2333,13 +2333,13 @@ rseek1:
 		inx h! mov a,m! ral! ani 11111b ;A=ext#
 		mov c,a ;C holds extent number, record stacked
 ;
-		MOV A,M! ANI 11110000B! INX H! ORA M ;
+		MOV A,M! ANI 1111$0000B! INX H! ORA M ;
 		RRC! RRC! RRC! RRC! MOV B,A ; 
 		; B HOLDS MODULE #
 ;
 		; CHECK HIGH BYTE OF RAN REC <= 3
 		MOV A,M
-		ANI 11111100B! POP H! MVI L,6! MOV A,H ;
+		ANI 1111$1100B! POP H! MVI L,6! MOV A,H ;
 ;
 		;produce error 6, seek past physical eod
 		jnz seekerr
@@ -2350,7 +2350,7 @@ rseek1:
 	;the r/w flag is still stacked.  compare fcb values
 	;
 		;CHECK MODULE # FIRST
-		PUSH D! CALL CHKINVFCB! POP D! JZ RANCLOSE
+		PUSH D! CALL CHK$INV$FCB! POP D! JZ RANCLOSE
 		lxi h,modnum! dad d! mov a,b ;B=seek mod#
 		;could be overflow at eof, producing module#
 		;of 90H or 10H, so compare all but fwf
@@ -2374,8 +2374,8 @@ rseek1:
 ; 		MOV C,A
 
 		; HL=.FCB(EXT),C=DIR EXT
-		CALL RESTORERC
-		CALL SETRC
+		CALL RESTORE$RC
+		CALL SET$RC
 		JMP SEEKOK1
 	ranclose:
 		push b! push d ;save seek mod#,ext#, .fcb
@@ -2391,9 +2391,9 @@ rseek1:
 ; Removed code:
 ;		jz badseek
 
-		CALL SETXDCNT ; RESET XDCNT FOR MAKE
+		CALL SET$XDCNT ; RESET XDCNT FOR MAKE
 IF MPM
-		call setsdcnt
+		call set$sdcnt
 ENDIF
 		lxi h,extnum! dad d
 ; **** PATCH 2.1
@@ -2443,7 +2443,7 @@ ENDIF
 
 	SEEKOK1:
 		pop b ;discard r/w flag
-		xra a! jmp staret 	;with zero set	
+		xra a! jmp sta$ret 	;with zero set	
 	badseek:
 		;fcb no longer contains a valid fcb, mark
 		;with 1100$000b in modnum field so that it
@@ -2484,7 +2484,7 @@ randiskwrite:
 	cz diskwrite ;if seek successful
 	ret
 ;
-computerr:
+compute$rr:
 	;compute random record position for getfilesize/setrandom
 	xchg! dad d
 	;DE=.buf(dptr) or .fcb(0), HL = .f(nxtrec/reccnt)
@@ -2498,21 +2498,21 @@ computerr:
 	add a! add a! add a! add a ;cy=m A=mmmm 0000
 ;
 	ORA A! ADD B! MOV B,A! PUSH PSW ; SAVE CARRY
-	MOV A,M! RAR! RAR! RAR! RAR! ANI 00000011B ; A=0000 00mm
+	MOV A,M! RAR! RAR! RAR! RAR! ANI 0000$0011B ; A=0000 00mm
 	MOV L,A! POP PSW! MVI A,0! ADC L ; ADD CARRY
 	RET ;
 ;
 getfilesize:
 	;compute logical file size for current fcb
 	;zero the receiving ranrec field
-	CALL GETRRA! push h ;save position
+	CALL GET$RRA! push h ;save position
 	mov m,d! inx h! mov m,d! inx h! mov m,d;=00 00 00
 	MVI C,EXTNUM! CALL SEARCH
 	getsize:
 		jz setsize
 		;current fcb addressed by dptr
 		call getdptra! lxi d,reccnt ;ready for compute size
-		call computerr
+		call compute$rr
 		;A=0000 00mm BC = mmmm eeee errr rrrr
 		;compare with memory, larger?
 		pop h! push h ;recall, replace .fcb(ranrec)
@@ -2534,7 +2534,7 @@ getfilesize:
 setrandom:
 	;set random record from the current file control block
 	XCHG! lxi d,nxtrec ;ready params for computesize
-	call computerr ;DE=info, A=0000 00mm, BC=mmmm eeee errr rrrr
+	call compute$rr ;DE=info, A=0000 00mm, BC=mmmm eeee errr rrrr
 	lxi h,ranrec! dad d ;HL = .fcb(ranrec)
 	mov m,c! inx h! mov m,b! inx h! mov m,a ;to ranrec
 	ret
@@ -2544,80 +2544,80 @@ TMPSELECT:
 	CALL CURSELECT! POP A! STA SELDSK! RET
 ;
 XCURSELECT:
-	MVI A,0FFH! STA RETURNFFFF 
+	MVI A,0FFH! STA RETURN$FFFF 
 	CALL CURSELECT
-	XRA A! STA RETURNFFFF! RET
+	XRA A! STA RETURN$FFFF! RET
 ;
 CURSELECT:
 	LDA SELDSK! 
-	LXI H,CURDSK! CMP M! JZ TESTFFDSK
+	LXI H,CURDSK! CMP M! JZ TEST$FF$DSK
 	;SKIP IF SELDSK = CURDSK, FALL INTO SELECT
 ;
 select:
 	;select disk info for subsequent input or output ops
-	lhld dlog! CALL TESTVECTOR
+	lhld dlog! CALL TEST$VECTOR
 	MOV E,A! PUSH D ;SEND TO SELDSK, SAVE FOR TEST BELOW
 	call selectdisk! pop h ;recall dlog vector
-	cz selerror ;returns true if select ok
+	cz sel$error ;returns true if select ok
 	;is the disk logged in?
 	mov a,l! ORA A
 IF MPM
 	jz select1
-	lhld rlog! call testvector
-	sta remdrv! ret ; set rem$drv & return
+	lhld rlog! call test$vector
+	sta rem$drv! ret ; set rem$drv & return
 select1:
 ELSE
 	rnz ;return if bit is set
 ENDIF
 	;disk not logged in, set bit and initialize
 	lhld dlog! mov c,l! mov b,h ;call ready
-	call setcdisk! shld dlog ;dlog=set$cdisk(dlog)
+	call set$cdisk! shld dlog ;dlog=set$cdisk(dlog)
 IF MPM
 	lxi h,chksiz+1! mov a,m! ral! mvi a,0! jc select2
 	lhld rlog! mov c,l! mov b,h
-	call setcdisk! shld rlog ;rlog=set$cdisk(rlog)
+	call set$cdisk! shld rlog ;rlog=set$cdisk(rlog)
 	mvi a,1
 select2:
-	sta remdrv
+	sta rem$drv
 ENDIF
 	jmp initialize
 	;ret
 ;
-TESTFFDSK:
-	INR A! JZ SELERROR
+TEST$FF$DSK:
+	INR A! JZ SEL$ERROR
 	RET
 ;
-SETSELDSK:
+SET$SELDSK:
 	LDA LINFO! STA SELDSK! RET
 ;
 RESELECTX:
-	XRA A! STA HIGHEXT! JMP RESELECT1
+	XRA A! STA HIGH$EXT! JMP RESELECT1
 reselect:
 	;check current fcb to see if reselection necessary
 	MVI A,80H! MOV B,A! DCR A! MOV C,A
 	LHLD INFO! LXI D,7! XCHG! DAD D
-	MOV A,M! ANA B! STA XFCBREADONLY
+	MOV A,M! ANA B! STA XFCB$READ$ONLY
 	MOV A,M! ANA C! MOV M,A
 	INX H! LXI D,4
 	MOV A,M! ANA C! CMP M! MOV M,A! MVI A,60H! JNZ RESELECT0
 	DAD D! MVI A,0E0H! ANA M
 RESELECT0:
-	STA HIGHEXT! CALL CLREXT
+	STA HIGH$EXT! CALL CLR$EXT
 	CALL GETRCNTA! MOV A,M! ANA B! JZ RESELECT1
 	MOV A,M! ANA C! MOV M,B
 RESELECT1:
-	STA ACTUALRC
+	STA ACTUAL$RC
 	mvi a,true! sta resel ;mark possible reselect
 	lhld info! mov a,m ;drive select code
-	ani 11111b ;non zero is auto drive select
+	ani 1$1111b ;non zero is auto drive select
 	dcr a ;drive code normalized to 0..30, or 255
 	sta linfo ;save drive code
 	CPI 0FFH! JZ NOSELECT
 		;auto select function, save SELDSK
 		LDA SELDSK! sta olddsk ;olddsk=SELDSK
 		mov a,m! sta fcbdsk ;save drive code
-		ani 11100000b! mov m,a ;preserve hi bits
-		CALL SETSELDSK
+		ani 1110$0000b! mov m,a ;preserve hi bits
+		CALL SET$SELDSK
 	noselect:
 		CALL CURSELECT
 		;set user code
@@ -2625,49 +2625,49 @@ RESELECT1:
 		lhld info! ora m! mov m,a
 		ret
 ;
-CHKPASSWORD:
-	CALL GETDIRMODE! ANI 80H! JNZ CHKPW! RET
+CHK$PASSWORD:
+	CALL GET$DIR$MODE! ANI 80H! JNZ CHK$PW! RET
 ;
-GETDIRMODE:
+GET$DIR$MODE:
 	LHLD DRVLBLA! MOV A,M! RET
 ;
-CHKPW:		; CHECK PASSWORD
+CHK$PW:		; CHECK PASSWORD
 	CALL GETXFCB! RZ ; A = XFCB OPTIONS
-	DCR A! CNZ CMPPW! RZ
-CHKPW1:	; PASSWORD ERROR
-	POP H! MVI A,7! JMP SETARET
+	DCR A! CNZ CMP$PW! RZ
+CHK$PW1:	; PASSWORD ERROR
+	POP H! MVI A,7! JMP SET$ARET
 ;
-CMPPW:		; COMPARE PASSWORDS
+CMP$PW:		; COMPARE PASSWORDS
 	INX H! MOV B,M
-	MOV A,B! ORA A! JNZ CMPPW2
+	MOV A,B! ORA A! JNZ CMP$PW2
 	MOV D,H! MOV E,L! INX H! INX H
 	MVI C,9
-CMPPW1:
+CMP$PW1:
 	INX H! MOV A,M! DCR C! RZ
-	ORA A! JZ CMPPW1
-	CPI 20H! JZ CMPPW1
+	ORA A! JZ CMP$PW1
+	CPI 20H! JZ CMP$PW1
 	XCHG
-CMPPW2:
+CMP$PW2:
 	LXI D,(23-UBYTES)! DAD D! XCHG
 	LHLD XDMAAD! MVI C,8
-CMPPW3:
-	LDAX D! XRA B! CMP M! JNZ CMPPW4
-	DCX D! INX H! DCR C! JNZ CMPPW3
+CMP$PW3:
+	LDAX D! XRA B! CMP M! JNZ CMP$PW4
+	DCX D! INX H! DCR C! JNZ CMP$PW3
 	RET
-CMPPW4:
-	DCX D! DCR C! JNZ CMPPW4
+CMP$PW4:
+	DCX D! DCR C! JNZ CMP$PW4
 	INX D
 IF MPM
-	call getdfpwa! inr a! jnz cmppw5
+	call get$df$pwa! inr a! jnz cmp$pw5
 	inr a! ret
-cmppw5:
+cmp$pw5:
 ELSE
 	LXI H,DFPASSWORD
 ENDIF
 	MVI C,8! JMP COMPARE
 ;
 IF MPM
-getdfpwa:		;A = FF => no df pwa
+get$df$pwa:		;A = FF => no df pwa
 	call rlr! lxi b,console
 
 ; **** PATCH 2.1
@@ -2698,47 +2698,47 @@ patch01:
 		mvi l,5 ;cannot create new extent #5
 		jz badseek ;no dir space
 IF MPM
-		call fixolistitem
+		call fix$olist$item
 ENDIF
 		;file make operation successful
 	seekok:
 		pop b! pop b
-		CALL SETFCBCKSFLAG
+		CALL SET$FCB$CKS$FLAG
 		jmp seekok1
 
 ;
-SETPW:		; SET PASSWORD IN XFCB
+SET$PW:		; SET PASSWORD IN XFCB
 	PUSH H ; SAVE .XFCB(EX) 
 	LXI B,8 ; B = 0, C = 8
 	LXI D,(23-EXTNUM)! DAD D
 	XCHG! LHLD XDMAAD
-SETPW0:
+SET$PW0:
 	XRA A! PUSH A
-SETPW1:
-	MOV A,M! STAX D! ORA A! JZ SETPW2
-	CPI 20H! JZ SETPW2
+SET$PW1:
+	MOV A,M! STAX D! ORA A! JZ SET$PW2
+	CPI 20H! JZ SET$PW2
 	INX SP! INX SP! PUSH A
-SETPW2:
+SET$PW2:
 	ADD B! MOV B,A
-	DCX D! INX H! DCR C! JNZ SETPW1
-	POP A! ORA B! POP H! JNZ SETPW3
+	DCX D! INX H! DCR C! JNZ SET$PW1
+	POP A! ORA B! POP H! JNZ SET$PW3
 	MOV M,A ; ZERO XFCB(EX) - NO PASSWORD
-SETPW3:
+SET$PW3:
 	INX D! MVI C,8
-SETPW4:
-	LDAX D! XRA B! STAX D! INX D! DCR C! JNZ SETPW4
+SET$PW4:
+	LDAX D! XRA B! STAX D! INX D! DCR C! JNZ SET$PW4
 	INX H! RET
 ;
 GETXFCB:
 	MVI B,0
-GETXFCB0:
+GET$XFCB0:
 	LHLD INFO! MOV A,M! PUSH A
 	ORI 010H! MOV M,A! MVI C,EXTNUM
-	XRA A! CMP B! JNZ GETXFCB00
-	CALL SEARCH! JMP GETXFCB01
-GETXFCB00:
+	XRA A! CMP B! JNZ GET$XFCB00
+	CALL SEARCH! JMP GET$XFCB01
+GET$XFCB00:
 	CALL SEARCHN
-GETXFCB01:
+GET$XFCB01:
 	MVI A,0! STA LRET
 	LHLD INFO! POP B! MOV M,B! RZ
 GETXFCB1:
@@ -2746,14 +2746,14 @@ GETXFCB1:
 	LXI H,EXTNUM! DAD D! MOV A,M! ANI 0E0H! ORI 1
 	RET
 ;
-ADJUSTDMAAD:
+ADJUST$DMAAD:
 	PUSH H! LHLD XDMAAD! DAD D
 	SHLD XDMAAD! POP H! RET
 ;
-INITXFCB:
+INIT$XFCB:
 	CALL SETCDR ;MAY HAVE EXTENDED THE DIRECTORY
 	LXI B,1014H ; B=10H, C=20
-INITXFCB0:
+INIT$XFCB0:
 	;B = FCB(0) LOGICAL OR MASK
 	;C = ZERO COUNT
 	PUSH B
@@ -2761,23 +2761,23 @@ INITXFCB0:
 	;ZERO EXTNUM AND MODNUM
 	LDAX D! ORA B! MOV M,A! INX D! INX H
 	MVI C,11! CALL MOVE! POP B! INR C
-INITXFCB1:
+INIT$XFCB1:
 	DCR C! RZ
-	MVI M,0! INX H! JMP INITXFCB1
+	MVI M,0! INX H! JMP INIT$XFCB1
 ;
-CHKXFCBPASSWORD:
+CHK$XFCB$PASSWORD:
 	CALL GETXFCB1! DCR A
-CHKXFCBPASSWORD1:
-	PUSH H! CNZ CMPPW! POP H! RZ
-	JMP CHKPW1
+CHK$XFCB$PASSWORD1:
+	PUSH H! CNZ CMP$PW! POP H! RZ
+	JMP CHK$PW1
 ;
-CHKPWS:
-	CALL GETDIRMODE! ANI 80H! RZ
+CHK$PWS:
+	CALL GET$DIR$MODE! ANI 80H! RZ
 	CALL GETXFCB
-CHKPWS1:
+CHK$PWS1:
 	RZ! DCR A
-	CNZ CMPPW! RNZ
-	MVI B,1! CALL GETXFCB0! JMP CHKPWS1
+	CNZ CMP$PW! RNZ
+	MVI B,1! CALL GET$XFCB0! JMP CHK$PWS1
 ;
 STAMP1:
 	LXI B,24! JMP STAMP3
@@ -2787,7 +2787,7 @@ STAMP3:
 ;
 IF MPM
 	push b!
-	call getstampadd! xchg
+	call get$stamp$add! xchg
 	pop b
 ELSE
 	LXI D,STAMP
@@ -2797,7 +2797,7 @@ ENDIF
 ;
 IF MPM
 ;
-packsdcnt:
+pack$sdcnt:
 ;
 ;packed$dcnt = dblk(low 15 bits) || dcnt(low 9 bits)
 ;
@@ -2811,18 +2811,18 @@ packsdcnt:
 ;	23456789 .......1 ........ sdcnt (low 9 bits)
 ;	........ 9abcdef. 12345678 sdblk (low 15 bits)
 ;
-	lhld sdblk! mov a,h! ora l! jnz packsdcnt1
+	lhld sdblk! mov a,h! ora l! jnz pack$sdcnt1
 	lda blkshf! adi 2! mov c,a! lhld sdcnt
 	call hlrotr
-packsdcnt1:
+pack$sdcnt1:
 	dad h! xchg! lxi h,sdcnt! mvi b,1
 	lda blkmsk! ral! ora b! ral! ora b
-	ana m! sta packeddcnt
-	lda blkshf! cpi 7! jnz packsdcnt2
-	inx h! mov a,m! ana b! jz packsdcnt2
+	ana m! sta packed$dcnt
+	lda blkshf! cpi 7! jnz pack$sdcnt2
+	inx h! mov a,m! ana b! jz pack$sdcnt2
 	mov a,e! ora b! mov e,a
-packsdcnt2:
-	xchg! shld packeddcnt+1
+pack$sdcnt2:
+	xchg! shld packed$dcnt+1
 	ret
 ;
 ;
@@ -2853,14 +2853,14 @@ packsdcnt2:
 ;	pdaddr = process descriptor addr
 ;	.olist$item = address of file's olist item
 ;
-searcholist:
-	lxi h,openroot! jmp srchlist0
-searchllist:
-	lxi h,lockroot! jmp srchlist0
+search$olist:
+	lxi h,open$root! jmp srch$list0
+search$llist:
+	lxi h,lock$root! jmp srch$list0
 searchnlist:
 	lhld curpos
-srchlist0:
-	shld prvpos
+srch$list0:
+	shld prv$pos
 ;
 ;search$olist, search$llist, searchn$list conventions
 ;
@@ -2876,63 +2876,63 @@ srchlist0:
 ;
 ;	olist and llist are maintained in drive order
 ;
-srchlist1:
+srch$list1:
 	mov e,m! inx h! mov d,m! xchg
-	mov a,l! ora h! jz srchlist3
-	xra a! cmp b! jz srchlist6
+	mov a,l! ora h! jz srch$list3
+	xra a! cmp b! jz srch$list6
 	inx h! inx h!
 	lxi d,curdsk! mov a,m! ani 0fh! mov c,a
-	ldax d! sub c! jnz srchlist4
-	mov a,b! dcr a! jz srchlist5
+	ldax d! sub c! jnz srch$list4
+	mov a,b! dcr a! jz srch$list5
 	mov c,b! push h
 	inx d! inx h! call compare
-	pop h! jz srchlist5
-srchlist2:
+	pop h! jz srch$list5
+srch$list2:
 	dcx h! dcx h
-	shld prvpos! jmp srchlist1
-srchlist3:
+	shld prv$pos! jmp srch$list1
+srch$list3:
 	inr a! ret
-srchlist4:
-	jnc srchlist2
-srchlist5:
+srch$list4:
+	jnc srch$list2
+srch$list5:
 	dcx h! dcx h
-srchlist6:
+srch$list6:
 	shld curpos! ret
 ;
-deleteitem: ; HL -> item to be deleted
+delete$item: ; HL -> item to be deleted
 	di
 	push d! push h
 	mov e,m! inx h! mov d,m
-	lhld prvpos! shld curpos
+	lhld prv$pos! shld curpos
 	;prv$pos.link = delete$item.link
 	mov m,e! inx h! mov m,d
 	;
-	lhld freeroot! xchg
+	lhld free$root! xchg
 	;free$root = .delete$item
-	pop h! shld freeroot
+	pop h! shld free$root
 	;delete$item.link = previous free$root
 	mov m,e! inx h! mov m,d
 	pop d! ei! ret
 ;
-createitem: ; HL -> new item if successful
+create$item: ; HL -> new item if successful
 	     ; Z flag set if no free items
-	lhld freeroot! mov a,l! ora h! rz
+	lhld free$root! mov a,l! ora h! rz
 	push d! push h! shld curpos
 	mov e,m! inx h! mov d,m
 	;free$root = free$root.link
-	xchg! shld freeroot
+	xchg! shld free$root
 	;
-	lhld prvpos
+	lhld prv$pos
 	mov e,m! inx h! mov d,m
 	pop h
 	;create$item.link = prv$pos.link
 	mov m,e! inx h! mov m,d! dcx h
-	xchg! lhld prvpos
+	xchg! lhld prv$pos
 	;prv$pos.link = .create$item
 	mov m,e! inx h! mov m,d! xchg
 	pop d! ret
 ;
-setolistitem:
+set$olist$item:
 	; A = attributes
 	; HL = olist entry address
 	inx h! inx h
@@ -2941,16 +2941,16 @@ setolistitem:
 	mvi c,5! call move
 	xra a! mov m,a! inx h! mov m,a! ret
 ;
-setsdcnt:
+set$sdcnt:
  	mvi a,0ffh! sta sdcnt+1! ret
 ;
-tstolist:
-	mvi a,0c9h! sta chkolist05! jmp chkolist0
-chkolist:
-	xra a! sta chkolist05
-chkolist0:
+tst$olist:
+	mvi a,0c9h! sta chk$olist05! jmp chk$olist0
+chk$olist:
+	xra a! sta chk$olist05
+chk$olist0:
 	lxi d,dcnt! lxi h,sdcnt! mvi c,4! call move
-	call packsdcnt! mvi b,3! call searcholist! rnz
+	call pack$sdcnt! mvi b,3! call search$olist! rnz
 
 ; **** PATCH 2.1
 ; Part of following patch
@@ -2967,7 +2967,7 @@ chkolist0:
 ; otherwise default is locked mode.  Branch to openx06
 ; if the open mode is not the default mode.
 
-	CALL GETCMPMODE! CALL PATCH3
+	CALL GET$CMP$MODE! CALL PATCH3
 
 ; Replaced code:
 ;	mov a,m  ani 80h  jz openx06
@@ -2984,7 +2984,7 @@ chkolist0:
 ; on the stack.
 
 	PUSH H
-	CALL COMPAREPDS! XTHL! JNZ OPENX06
+	CALL COMPARE$PDS! XTHL! JNZ OPENX06
 	CALL PATCH13
 
 ; Replaced code:
@@ -2992,7 +2992,7 @@ chkolist0:
 ;	call compare$pds  pop h  pop d  jnz openx06
 ;	push d
 
-chkolist05:
+chk$olist05:
 	nop ; tst$olist changes this instr to ret
 
 ; **** PATCH 2.1
@@ -3009,8 +3009,8 @@ chkolist05:
 ;	call delete$item
 
 	lda pdcnt
-chkolist1:
-	adi 16! jz chkolist1
+chk$olist1:
+	adi 16! jz chk$olist1
 	sta pdcnt
 
 	push a! call rlr
@@ -3019,171 +3019,171 @@ chkolist1:
 
 	ret
 ;
-removefiles:	;BC = pdaddr
+remove$files:	;BC = pdaddr
 	lhld curpos! push h
-	lhld prvpos! push h
-	mov d,b! mov e,c! lxi h,openroot! shld curpos
-removefile1:
-	mvi b,0! push d! call searchnlist! pop d! jnz removefile2
-	lxi b,6! call tsttbllmt! jnz removefile1
+	lhld prv$pos! push h
+	mov d,b! mov e,c! lxi h,open$root! shld curpos
+remove$file1:
+	mvi b,0! push d! call searchnlist! pop d! jnz remove$file2
+	lxi b,6! call tst$tbl$lmt! jnz remove$file1
 	inx h! inx h! mov a,m! ori 10h! mov m,a
-	sta deletedfiles
-	jmp removefile1
-removefile2:
-	pop h! shld prvpos
+	sta deleted$files
+	jmp remove$file1
+remove$file2:
+	pop h! shld prv$pos
 	pop h! shld curpos
 	ret
 ;
-deletefiles:
-	lxi h,openroot! shld curpos
-deletefile1:
+delete$files:
+	lxi h,open$root! shld curpos
+delete$file1:
 	mvi b,0! call searchnlist! rnz
-	inx h! inx h! mov a,m! ani 10h! jz deletefile1
-	dcx h! dcx h! call removelocks! call deleteitem
-	jmp deletefile1
+	inx h! inx h! mov a,m! ani 10h! jz delete$file1
+	dcx h! dcx h! call remove$locks! call delete$item
+	jmp delete$file1
 ;
-flushfiles:
+flush$files:
 	lxi h,flushed! mov a,m! ora a! rnz
 	inr m
-flushfile0:
-	lxi h,openroot! shld curpos
-flushfile1:
+flush$file0:
+	lxi h,open$root! shld curpos
+flush$file1:
 	mvi b,1! call searchnlist! rnz
-	push h! call removelocks! call deleteitem! pop h
+	push h! call remove$locks! call delete$item! pop h
 	lxi d,6! dad d! mov e,m! inx h! mov d,m
-	lxi h,pdcntoff! dad d! mov a,m! ani 1! jnz flushfile1
+	lxi h,pdcntoff! dad d! mov a,m! ani 1! jnz flush$file1
 	mov a,m! ori 1! mov m,a
-	lhld pdaddr! mvi c,2! call compare! jnz flushfile1
-	lda pdcnt! adi 10h! sta pdcnt! jmp flushfile1
+	lhld pdaddr! mvi c,2! call compare! jnz flush$file1
+	lda pdcnt! adi 10h! sta pdcnt! jmp flush$file1
 ;
-freefiles:
+free$files:
 	; free$mode = 1 - remove curdsk files for process
 	;	      0 - remove all files for process
-	lhld pdaddr! xchg! lxi h,openroot! shld curpos
-freefiles1:
-	lda freemode! mov b,a
+	lhld pdaddr! xchg! lxi h,open$root! shld curpos
+free$files1:
+	lda free$mode! mov b,a
 	push d! call searchnlist! pop d! rnz
-	lxi b,6! call tsttbllmt! jnz freefiles1
+	lxi b,6! call tst$tbl$lmt! jnz free$files1
 	push h! inx h! inx h! inx h
-	call testffff! jnz freefiles2
-	call testffff! jz freefiles3
-freefiles2:
-	mvi a,0ffh! sta incrpdcnt
-freefiles3:
-	pop h! call removelocks! call deleteitem
-	jmp freefiles1
+	call test$ffff! jnz free$files2
+	call test$ffff! jz free$files3
+free$files2:
+	mvi a,0ffh! sta incr$pdcnt
+free$files3:
+	pop h! call remove$locks! call delete$item
+	jmp free$files1
 ;
-removelocks:
-	shld fileid
-	inx h! inx h! mov a,m! ani 40h! jz removelock3
-	push d! lhld prvpos! push h
-	lhld fileid! xchg! lxi h,lockroot! shld curpos
-removelock1:
+remove$locks:
+	shld file$id
+	inx h! inx h! mov a,m! ani 40h! jz remove$lock3
+	push d! lhld prv$pos! push h
+	lhld file$id! xchg! lxi h,lock$root! shld curpos
+remove$lock1:
 	mvi b,0! push d! call searchnlist! pop d
-	jnz removelock2
-	lxi b,8! call tsttbllmt! jnz removelock1
-	call deleteitem
-	jmp removelock1
-removelock2:
-	pop h! shld prvpos! pop d
-removelock3:
-	lhld fileid! ret
+	jnz remove$lock2
+	lxi b,8! call tst$tbl$lmt! jnz remove$lock1
+	call delete$item
+	jmp remove$lock1
+remove$lock2:
+	pop h! shld prv$pos! pop d
+remove$lock3:
+	lhld file$id! ret
 ;
-tsttbllmt:
+tst$tbl$lmt:
 	push h! dad b
 	mov a,m! inx h! mov h,m
-	sub e! jnz tsttbllmt1
+	sub e! jnz tst$tbl$lmt1
 	mov a,h! sub d
-tsttbllmt1:
+tst$tbl$lmt1:
 	pop h! ret
 ;
-createolistitem:
-	mvi b,1! call searcholist
+create$olist$item:
+	mvi b,1! call search$olist
 	di
-	call createitem! lda attributes! call setolistitem
+	call create$item! lda attributes! call set$olist$item
 	ei
 	ret
 ;
-countopens:
-	xra a! sta opencnt
-	lhld pdaddr! xchg! lxi h,openroot! shld curpos
-countopen1:
-	mvi b,0! push d! call searchnlist! pop d! jnz countopen2
-	lxi b,6! call tsttbllmt! jnz countopen1
-	lda opencnt! inr a! sta opencnt
-	jmp countopen1
-countopen2:
-	lxi h,openmax! lda opencnt! ret
+count$opens:
+	xra a! sta open$cnt
+	lhld pdaddr! xchg! lxi h,open$root! shld curpos
+count$open1:
+	mvi b,0! push d! call searchnlist! pop d! jnz count$open2
+	lxi b,6! call tst$tbl$lmt! jnz count$open1
+	lda open$cnt! inr a! sta open$cnt
+	jmp count$open1
+count$open2:
+	lxi h,open$max! lda open$cnt! ret
 ;
-countlocks:
-	xra a! sta lockcnt
-	xchg! lxi h,lockroot! shld curpos
-countlock1:
+count$locks:
+	xra a! sta lock$cnt
+	xchg! lxi h,lock$root! shld curpos
+count$lock1:
 	mvi b,0! push d! call searchnlist! pop d! rnz
-	lxi b,8! call tsttbllmt! jnz countlock1
-	lda lockcnt! inr a! sta lockcnt
-	jmp countlock1
+	lxi b,8! call tst$tbl$lmt! jnz count$lock1
+	lda lock$cnt! inr a! sta lock$cnt
+	jmp count$lock1
 ;
-checkfree:
-	lda multcnt! mov e,a
-	mvi d,0! lxi h,freeroot! shld curpos
-checkfree1:
-	mvi b,0! push d! call searchnlist! pop d! jnz checkfree2
-	inr d! mov a,d! sub e! jc checkfree1
+check$free:
+	lda mult$cnt! mov e,a
+	mvi d,0! lxi h,free$root! shld curpos
+check$free1:
+	mvi b,0! push d! call searchnlist! pop d! jnz check$free2
+	inr d! mov a,d! sub e! jc check$free1
 	ret
-checkfree2:
-	pop h! mvi a,14! jmp staret
+check$free2:
+	pop h! mvi a,14! jmp sta$ret
 ;
 lock:				;record lock and unlock 
-	call reselect! call checkfcb
-	call testunlocked
+	call reselect! call check$fcb
+	call test$unlocked
 	rz ; file not opened in unlocked mode
 	lhld xdmaad! mov e,m! inx h! mov d,m
 	xchg! inx h! inx h
 	mov a,m! mov b,a! lda curdsk! sub b
 	ani 0fh! jnz lock8 ; invalid file id
 	mov a,b! ani 40h! jz lock8 ; invalid file id
-	dcx h! dcx h! shld fileid
-	lda lockunlock! inr a! jnz lock1 ; jmp if unlock
-	call countlocks
-	lda lockcnt! mov b,a
-	lda multcnt! add b! mov b,a
-	lda lockmax! cmp b
-	mvi a,12! jc staret ; too many locks by this process
-	call checkfree
+	dcx h! dcx h! shld file$id
+	lda lock$unlock! inr a! jnz lock1 ; jmp if unlock
+	call count$locks
+	lda lock$cnt! mov b,a
+	lda mult$cnt! add b! mov b,a
+	lda lock$max! cmp b
+	mvi a,12! jc sta$ret ; too many locks by this process
+	call check$free
 lock1:
-	call saverr! lxi h,lock9! push h! lda multcnt
+	call save$rr! lxi h,lock9! push h! lda mult$cnt
 lock2:
-	push a! call getlockadd
-	lda lockunlock! inr a! jnz lock3
-	call testlock
+	push a! call get$lock$add
+	lda lock$unlock! inr a! jnz lock3
+	call test$lock
 lock3:
 	pop a! dcr a! jz lock4
-	call incrrr! jmp lock2
+	call incr$rr! jmp lock2
 lock4:
-	call resetrr! lda multcnt
+	call reset$rr! lda mult$cnt
 lock5:
-	push a! call getlockadd
-	lda lockunlock! inr a! jnz lock6
-	call setlock! jmp lock7
+	push a! call get$lock$add
+	lda lock$unlock! inr a! jnz lock6
+	call set$lock! jmp lock7
 lock6:
-	call freelock
+	call free$lock
 lock7:
 	pop a! dcr a! rz
-	call incrrr! jmp lock5
+	call incr$rr! jmp lock5
 lock8:
-	mvi a,13! jmp staret ; invalid file id
+	mvi a,13! jmp sta$ret ; invalid file id
 lock9:
-	call resetrr! ret
+	call reset$rr! ret
 ;
-getlockadd:
-	lxi h,0! dad sp! shld locksp
+get$lock$add:
+	lxi h,0! dad sp! shld lock$sp
 
 ; **** PATCH 2.1
 ; This patch sets Reg. C to FFh
 ; for call to RSEEK
 
-	lxi h,lockshell
+	lxi h,lock$shell
 	mvi c,0ffh ! mov m,c ! push h
 	call rseek
 	pop h ! inr m
@@ -3194,14 +3194,14 @@ getlockadd:
 ;	xra a  sta lock$shell
 
 	call getfcb
-	lhld aret! mov a,l! ora a! jnz lockerr
+	lhld aret! mov a,l! ora a! jnz lock$err
 
 ; **** PATCH 2.1
 ; Verify that block has not been allocated by another
 ; process before returning error code 1 (reading unwritten data)
 
-	CALL PATCH11! CALL PATCH12! JZ LOCKERR
-	CALL PATCH11! JMP LOCKERR
+	CALL PATCH11! CALL PATCH12! JZ LOCK$ERR
+	CALL PATCH11! JMP LOCK$ERR
 
 ; Replaced code:
 ;	call index  call allocated  
@@ -3210,42 +3210,42 @@ getlockadd:
 
 	ret
 ;
-lockperr:
-	xra a! sta lockshell
-	xchg! lhld locksp! sphl! xchg
-lockerr:
+lock$perr:
+	xra a! sta lock$shell
+	xchg! lhld lock$sp! sphl! xchg
+lock$err:
 	pop d ; discard return address
 	pop b ; B = mult$cnt-# recs processed
-	lda multcnt! sub b
+	lda mult$cnt! sub b
 	add a! add a! add a! add a
 	ora h! mov h,a! mov b,a
 	shld aret! ret
 ;
-testlock:
-	call movearecord
-	mvi b,3! call searchllist! rnz
-	call comparepds! rz
-	lxi h,8! jmp lockerr
+test$lock:
+	call move$arecord
+	mvi b,3! call search$llist! rnz
+	call compare$pds! rz
+	lxi h,8! jmp lock$err
 ;
-setlock:
-	call movearecord
-	mvi b,1! call searchllist
+set$lock:
+	call move$arecord
+	mvi b,1! call search$llist
 	di
-	call createitem
-	xra a! call setolistitem
-	xchg! lhld fileid! xchg
+	call create$item
+	xra a! call set$olist$item
+	xchg! lhld file$id! xchg
 	mov m,d! dcx h! mov m,e
 	ei! ret
 ;
-freelock:
-	call movearecord
-	mvi b,5! call searchllist! rnz
-freelock0:
-	call deleteitem
+free$lock:
+	call move$arecord
+	mvi b,5! call search$llist! rnz
+free$lock0:
+	call delete$item
 	mvi b,5! call searchnlist! rnz
-	jmp freelock0
+	jmp free$lock0
 ;
-comparepds:
+compare$pds:
 	lxi d,6! dad d
 
 ; **** PATCH 2.1
@@ -3259,35 +3259,35 @@ comparepds:
 	mvi c,2! jmp compare
 	;ret
 ;
-movearecord:
-	lxi d,arecord! lxi h,packeddcnt
+move$arecord:
+	lxi d,arecord! lxi h,packed$dcnt
 	mvi c,3! jmp move ;ret
 ;
-fixolistitem:
+fix$olist$item:
 	lxi d,xdcnt! lxi h,sdcnt
 	;is xdblk,xdcnt < sdblk,sdcnt
 	mvi c,4! ora a!
-fixol1:
-	ldax d! sbb m! inx h! inx d! dcr c! jnz fixol1
+fix$ol1:
+	ldax d! sbb m! inx h! inx d! dcr c! jnz fix$ol1
 	rnc
 	;yes - update olist entry
-	call swap! call sdcnteqxdcnt
-	lxi h,openroot! shld curpos
+	call swap! call sdcnt$eq$xdcnt
+	lxi h,open$root! shld curpos
 	;find file's olist entry
-fixol2:
-	call swap! call packsdcnt! call swap
+fix$ol2:
+	call swap! call pack$sdcnt! call swap
 	mvi b,3! call searchnlist! rnz
 	;update olist entry with new dcnt value
-	push h! call packsdcnt! pop h
-	inx h! inx h! inx h! lxi d,packeddcnt
-	mvi c,3! call move! jmp fixol2
+	push h! call pack$sdcnt! pop h
+	inx h! inx h! inx h! lxi d,packed$dcnt
+	mvi c,3! call move! jmp fix$ol2
 ;
-hleqhlandde:
+hl$eq$hl$and$de:
 	mov a,l! ana e! mov l,a
 	mov a,h! ana d! mov h,a
 	ret
 ;
-removedrive:
+remove$drive:
 	xchg! lda curdsk! mov c,a! lxi h,1
 	call hlrotl
 	mov a,l! cma! ana e! mov e,a
@@ -3296,10 +3296,10 @@ removedrive:
 ;
 diskreset:
 	lxi h,0! shld ntlog
-	xra a! sta setroflag
+	xra a! sta set$ro$flag
 	lhld info
 intrnldiskreset:
-	xchg! lhld openroot! mov a,h! ora l! rz
+	xchg! lhld open$root! mov a,h! ora l! rz
 	xchg! lda curdsk! push a! mvi b,0
 dskrst1:
 	mov a,l! rar! jc dskrst3
@@ -3331,9 +3331,9 @@ dskrst3:
 ; Replaced code:
 ;	sta curdsk
 
-	lhld rlog! call testvector1! push a
-	lhld rodsk! lda curdsk! call testvector1! mov b,a
-	pop h! lda setroflag! ora b! ora h
+	lhld rlog! call test$vector1! push a
+	lhld rodsk! lda curdsk! call test$vector1! mov b,a
+	pop h! lda set$ro$flag! ora b! ora h
 
 ; **** PATCH 2.1
 ; ORA with shiftr(tlog,curdsk) value pushed on stack
@@ -3344,18 +3344,18 @@ dskrst3:
 ; Replaced code:
 ;	sta check$disk
 
-	lxi h,openroot! shld curpos
+	lxi h,open$root! shld curpos
 dskrst4:
 	mvi b,1! call searchnlist! jnz dskrst6
-	lda checkdisk! ora a! jz dskrst5
-	push h! call comparepds! jz dskrst45
+	lda check$disk! ora a! jz dskrst5
+	push h! call compare$pds! jz dskrst45
 	pop h! xra a! xchg! jmp dskrst6
 dskrst45:
 	lhld ntlog! mov b,h! mov c,l
-	lda curdsk! call setcdisk1! shld ntlog
+	lda curdsk! call set$cdisk1! shld ntlog
 	pop h! jmp dskrst4
 dskrst5:
-	lhld info! call removedrive! shld info
+	lhld info! call remove$drive! shld info
 	ori 1
 dskrst6:
 	pop h! pop b! jnz dskrst2
@@ -3364,7 +3364,7 @@ dskrst6:
 	;for removable drive to be reset
 	pop a! sta curdsk! mov a,b! adi 41h ; A = ASCII drive
 	lxi h,6! dad d! mov c,m! inx h! mov b,m ; BC = pdaddr
-	push psw! call testerrormode! pop d! jnz dskrst7
+	push psw! call test$error$mode! pop d! jnz dskrst7
 	mov a,d
 
 	push b! push psw
@@ -3397,9 +3397,9 @@ ENDIF
 func12:
 	;return version number
 IF MPM
-	lxi h,0100h+dvers! jmp sthlret
+	lxi h,0100h+dvers! jmp sthl$ret
 ELSE
-	mvi a,dvers! jmp staret ;lret = dvers (high = 00)
+	mvi a,dvers! jmp sta$ret ;lret = dvers (high = 00)
 ENDIF
 ;	ret ;jmp goback
 ;
@@ -3416,16 +3416,16 @@ IF MPM
 ;	lhld dlog
 
 	shld info
-	call diskreset! jz resetall
-	call reset37
-	jmp func13cont
-resetall:
+	call diskreset! jz reset$all
+	call reset$37
+	jmp func13$cont
+reset$all:
 ENDIF
 	;reset disk system - initialize to disk 0
 	lxi h,0! shld rodsk! shld dlog
 IF MPM
 	shld rlog! shld tlog
-func13cont:
+func13$cont:
 ENDIF
 	xra a! STA SELDSK ;note that usrcode remains unchanged
 	DCR A! STA CURDSK 
@@ -3445,7 +3445,7 @@ ENDIF
 ;
 func14:	
 	;select disk info
-	CALL SETSELDSK ; SELDSK = LINFO
+	CALL SET$SELDSK ; SELDSK = LINFO
 IF MPM
 	call curselect
 	call rlr! lxi b,diskselect! dad b
@@ -3463,42 +3463,42 @@ func15:
 	call reselect
 IF MPM
 	xra a! sta makeflag
-	call setsdcnt
-	lxi h,openfile! push h
-	mvi a,0c9h! sta checkfcb4
-	call checkfcb1
-	pop h! lda highext! cpi 060h! jnz openfile
-	call home! call setenddir
-	jmp openuserzero
-openfile:
+	call set$sdcnt
+	lxi h,open$file! push h
+	mvi a,0c9h! sta check$fcb4
+	call check$fcb1
+	pop h! lda high$ext! cpi 060h! jnz open$file
+	call home! call set$end$dir
+	jmp open$user$zero
+open$file:
 	lhld info! lda usrcode! mov m,a
-	call setsdcnt
+	call set$sdcnt
 ENDIF
-	CALL RESETCHKSUMFCB ; SET INVALID CHECK SUM
-	CALL CHECKWILD ; CHECK FOR WILD CHARS IN FCB
-	CALL GETATTS! ANI 11000000B ; A = ATTRIBUTES
+	CALL RESET$CHKSUM$FCB ; SET INVALID CHECK SUM
+	CALL CHECK$WILD ; CHECK FOR WILD CHARS IN FCB
+	CALL GETATTS! ANI 1100$0000B ; A = ATTRIBUTES
 IF MPM
- 	cpi 11000000b! jnz attok
+ 	cpi 1100$0000b! jnz att$ok
 ENDIF
-	ANI 01000000B ; MASK OFF UNLOCK MODE 
-ATTOK:
-	STA HIGHEXT
+	ANI 0100$0000B ; MASK OFF UNLOCK MODE 
+ATT$OK:
+	STA HIGH$EXT
 IF MPM
-	mov b,a! ora a! rar! jnz attset
+	mov b,a! ora a! rar! jnz att$set
 	mvi a,80h
-attset:
+att$set:
 	sta attributes! mov a,b
 ENDIF
-	ANI 80H! JNZ CALLOPEN
-	LDA USRCODE! ORA A! JZ CALLOPEN 
-	MVI A,0FEH! STA XDCNT+1! INR A! STA SEARCHUSER0
+	ANI 80H! JNZ CALL$OPEN
+	LDA USRCODE! ORA A! JZ CALL$OPEN 
+	MVI A,0FEH! STA XDCNT+1! INR A! STA SEARCH$USER0
 IF MPM
 	sta sdcnt0+1
 ENDIF
 ;
-CALLOPEN:
+CALL$OPEN:
 	CALL OPEN! CALL OPENX ; RETURNS IF UNSUCCESSFUL, A = 0
-	LXI H,SEARCHUSER0! CMP M! RZ
+	LXI H,SEARCH$USER0! CMP M! RZ
 	MOV M,A! LDA XDCNT+1! CPI 0FEH! RZ 
 ;
 ;	FILE EXISTS UNDER USER 0
@@ -3506,9 +3506,9 @@ CALLOPEN:
 IF MPM
 	call swap
 ENDIF
-	CALL SETDCNTDBLK
-	MVI A,01100000B! STA HIGHEXT
-OPENUSERZERO:
+	CALL SET$DCNT$DBLK
+	MVI A,0110$0000B! STA HIGH$EXT
+OPEN$USER$ZERO:
 	; SET FCB USER # TO ZERO
 	LHLD INFO! MVI M,0
 	MVI C,NAMLEN! CALL SEARCHI! CALL SEARCHN
@@ -3522,7 +3522,7 @@ OPENX:
 	; WAS FILE OPENED UNDER USER 0 AFTER UNSUCCESSFUL
 	; ATTEMPT TO OPEN UNDER USER N
 IF MPM
-	LDA HIGHEXT! CPI 060H! JZ OPENX00 ;YES
+	LDA HIGH$EXT! CPI 060H! JZ OPENX00 ;YES
 	; WAS FILE OPENED IN LOCKED MODE?
 	ORA A! JNZ OPENX0 ; NO
 	; DOES USER = ZERO?
@@ -3545,15 +3545,15 @@ ENDIF
 	LHLD INFO! LXI D,10! DAD D
 	MOV A,M! ANI 80H! JNZ OPENX0 ; YES - OPEN SUCCESSFUL
 	; OPEN FAILS
-	STA HIGHEXT! JMP LRETEQFF
+	STA HIGH$EXT! JMP LRET$EQ$FF
 OPENX0:
-	CALL RESETCHKSUMFCB
+	CALL RESET$CHKSUM$FCB
 	;
 	;DOES DIR LBL EXIST?
 IF MPM
-	call getdirmode! ora a! jz openx1
+	call get$dir$mode! ora a! jz openx1
 ELSE
-	CALL GETDIRMODE! ORA A! JZ SETFCBCKSFLAG
+	CALL GET$DIR$MODE! ORA A! JZ SET$FCB$CKS$FLAG
 ENDIF
 	;YES - IS FILE PASSWORD PROTECTED FOR OPEN?
 	PUSH A! CALL GETXFCB! POP B
@@ -3561,9 +3561,9 @@ ENDIF
 	;YES - HAVE PASSWORDS BEEN ENABLES BY DIR LBL?
 	MOV C,A! MOV A,B! ANI 80H! JZ OPENX1
 	;YES - CHECK PASSWORD
-	PUSH B! CALL CMPPW! POP B! JZ OPENX1
-	MOV A,C! ANI 40H! CZ CHKPW1
-	MVI A,080H! STA XFCBREADONLY
+	PUSH B! CALL CMP$PW! POP B! JZ OPENX1
+	MOV A,C! ANI 40H! CZ CHK$PW1
+	MVI A,080H! STA XFCB$READ$ONLY
 OPENX1:
 ;
 IF MPM
@@ -3578,22 +3578,22 @@ IF MPM
 ;	call pack$sdcnt
 
 	;is this file currently open?
-	mvi b,3! call searcholist! jz openx04
+	mvi b,3! call search$olist! jz openx04
 openx01:
 	;no - is olist full?
-	lhld freeroot! mov a,l! ora h! jnz openx03
+	lhld free$root! mov a,l! ora h! jnz openx03
 	;yes - error
 openx02:
-	mvi a,11! jmp setaret
+	mvi a,11! jmp set$aret
 openx03:
 	;has process exceeded open file maximum?
-	call countopens! sub m! jc openx035
+	call count$opens! sub m! jc openx035
 	;yes - error
 openx034:
-	mvi a,10! jmp setaret
+	mvi a,10! jmp set$aret
 openx035:
 	;create new olist element
-	call createolistitem
+	call create$olist$item
 	jmp openx08
 openx04:
 	;do file attributes match?
@@ -3602,7 +3602,7 @@ openx04:
 	;yes - is open mode locked?
 	ani 80h! jnz openx07
 	;no - has this file been opened by this process?
-	lhld prvpos! shld curpos
+	lhld prv$pos! shld curpos
 	mvi b,5! call searchnlist! jnz openx01
 openx05:
 	;yes - increment open file count
@@ -3611,26 +3611,26 @@ openx05:
 	inx h! inr m! jmp openx08
 openx06:
 	;error - file opened by another process in imcompatible mode
-	mvi a,5! jmp setaret
+	mvi a,5! jmp set$aret
 openx07:
 	;does this olist item belong to this process?
 	dcx h! dcx h! push h
-	call comparepds
+	call compare$pds
 	pop h! jnz openx06 ; no - error
 	jmp openx05 ; yes
 openx08:; open ok
 	;was file opened in unlocked mode?
 	lda attributes! ani 40h! jz openx09 ; no
 	;yes - return .olist$item in ranrec field of fcb
-	call getrra
+	call get$rra
 	lxi d,curpos! mvi c,2! call move
 openx09:
 ;
-	call setfcbcksflag
+	call set$fcb$cks$flag
 	lda makeflag! ora a! rnz
-	call getdirmode
+	call get$dir$mode
 ELSE
-	CALL SETFCBCKSFLAG! MOV A,B
+	CALL SET$FCB$CKS$FLAG! MOV A,B
 ENDIF
 	;IS FILE ACCESS STAMPING ENABLED BY DIR LBL?
 	ANI 40H! RZ
@@ -3640,7 +3640,7 @@ ENDIF
 	;YES - UPDATE FCB ACCESS STAMP
 OPENX2:
 	CALL STAMP1
-	JMP SEEKCOPY
+	JMP SEEK$COPY
 ;
 func16:
 	;close file
@@ -3648,11 +3648,11 @@ func16:
 	CALL GETATTS! STA ATTRIBUTES
 IF MPM
 	lxi h,close00! push h
-	mvi a,0c9h! sta checkfcb4
-	call checkfcb1
+	mvi a,0c9h! sta check$fcb4
+	call check$fcb1
 	pop h
 close000:
-	call setsdcnt
+	call set$sdcnt
 	call getmodnum! ani 80h! jnz close01
 	call close! jmp close02
 close00:
@@ -3669,19 +3669,19 @@ close00:
 
 
 close01:
-	mvi a,0ffh! sta dontclose! call close1
+	mvi a,0ffh! sta dont$close! call close1
 close02:
 ELSE
-	CALL CHEKFCB! MVI A,6! JNZ SETARET
+	CALL CHEK$FCB! MVI A,6! JNZ SET$ARET
 	CALL CLOSE
 ENDIF
 	LDA LRET! INR A! RZ
 	CALL FUNC48 ; FLUSH BUFFERS
-	LDA ATTRIBUTES! ANI 10000000B! RNZ
+	LDA ATTRIBUTES! ANI 1000$0000B! RNZ
 IF MPM
-	call packsdcnt
+	call pack$sdcnt
 	;find olist item for this process & file
-	mvi b,5! call searcholist! jnz close03
+	mvi b,5! call search$olist! jnz close03
 	;is open count = 0ffffh
 
 ; **** PATCH 2.1
@@ -3689,14 +3689,14 @@ IF MPM
 ; If permanent close, dont delete lock list item
 ; if interface attribute F6' = 1.
 
-	CALL GETCMPMODE! RAL! RAL
+	CALL GET$CMP$MODE! RAL! RAL
 	;yes - remove file's olist entry
 	JC CLOSE03
 	PUSH H! LXI D,8! DAD D
 	MOV C,M! INX H! MOV B,M! DCX B
 	MOV M,B! DCX H! MOV M,C! POP D
 	INR B! JNZ CLOSE03
-	CALL PATCH4! CALL DELETEITEM
+	CALL PATCH4! CALL DELETE$ITEM
 
 ; Replaced code:
 ;       push h  lxi d,8  dad d
@@ -3707,20 +3707,20 @@ IF MPM
 ;       call reset$chksum$fcb
 
 	;if unlocked file, remove file's locktbl entries
-	call testunlocked! jz close03
-	lhld fileid! call removelocks
+	call test$unlocked! jz close03
+	lhld file$id! call remove$locks
 close03:
 ENDIF
 	;
 	;HAS FILE BEEN WRITTEN TO SINCE IT WAS OPENED?
 	CALL GETMODNUM! ANI 40H! RZ
 	;YES - IS FILE UPDATE STAMPING ENABLED BY DIR LBL?
-	CALL GETDIRMODE! ANI 20H! RZ
+	CALL GET$DIR$MODE! ANI 20H! RZ
 	;YES - DOES XFCB EXIST FOR FILE?
 	CALL GETXFCB! RZ
 	;YES - UPDATE XFCB UPDATE STAMP
 	CALL STAMP2
-	JMP SEEKCOPY
+	JMP SEEK$COPY
 	;ret ;jmp goback
 ;
 func17:
@@ -3732,14 +3732,14 @@ CSEARCH:
 	CALL CURSELECT! MVI C,0! JMP CSEARCH3
 CSEARCH1:
 	CALL GETEXTA! MOV A,M! CPI '?'! JZ CSEARCH2
-	CALL CLREXT! CALL CLRMODNUM
+	CALL CLR$EXT! CALL CLRMODNUM
 CSEARCH2:
 	CALL RESELECTX
 	MVI C,NAMLEN
 CSEARCH3:
 	POP A
 IF NOT MPM
-	LXI H,DIRTOUSER
+	LXI H,DIR$TO$USER
 	PUSH H
 ENDIF
 	JNZ SEARCHN
@@ -3796,19 +3796,19 @@ func21:
 func22:
 	;make a file
 	CALL GETATTS! STA ATTRIBUTES
-	XRA A! STA FCBEXISTS
-	CALL CLREXT
+	XRA A! STA FCB$EXISTS
+	CALL CLR$EXT
 	call clrmodnum ; FCB MOD = 0
 	call reselect
-	CALL RESETCHKSUMFCB
-	CALL CHECKWILD
-	CALL SETXDCNT ; RESET XDCNT FOR MAKE
+	CALL RESET$CHKSUM$FCB
+	CALL CHECK$WILD
+	CALL SET$XDCNT ; RESET XDCNT FOR MAKE
 IF MPM
-	call setsdcnt
+	call set$sdcnt
 ENDIF
 	CALL OPEN ; VERIFY FILE DOES NOT ALREADY EXIST
-	CALL RESETCHKSUMFCB
-	CALL ENDOFDIR! JNZ FILEEXISTS ; 
+	CALL RESET$CHKSUM$FCB
+	CALL ENDOFDIR! JNZ FILE$EXISTS ; 
 IF MPM
 	lda attributes! ani 80h! rrc! jnz makex00
 	mvi a,80h
@@ -3824,48 +3824,48 @@ makex00:
 ;	sta make$flag
 
 	lda sdcnt+1! inr a! jz makex01
-	call packsdcnt
-	mvi b,3! call searcholist! jz makex02
+	call pack$sdcnt
+	mvi b,3! call search$olist! jz makex02
 makex01:
-	lhld freeroot! mov a,l! ora h! jz openx02
+	lhld free$root! mov a,l! ora h! jz openx02
 	jmp makex03
 makex02:
 	inx h! inx h
 	lda makeflag! ana m! jz openx06
-	dcx h! dcx h! call comparepds! jz makex03
+	dcx h! dcx h! call compare$pds! jz makex03
 	lda makeflag! ral! jc openx06
 makex03:
 ENDIF
 	;DO ANY FCBS FOR FILE EXIST IN THE DIRECTORY?
-	LDA FCBEXISTS! ORA A! JZ MAKEX04
+	LDA FCB$EXISTS! ORA A! JZ MAKEX04
 	;YES - DOES DIR LBL REQUIRE PASSWORDS?
-	CALL GETDIRMODE! ANI 80H! JZ MAKEX04
+	CALL GET$DIR$MODE! ANI 80H! JZ MAKEX04
 	;YES - DOES XFCB EXIST WITH MODE 1 OR 2 PASSWORD?
 	CALL GETXFCB! ANI 0C0H! JZ MAKEX04
 	;YES - CHECK PASSWORD
-	CALL CHKXFCBPASSWORD1
+	CALL CHK$XFCB$PASSWORD1
 MAKEX04:
 ;
 	CALL MAKE
-	CALL RESETCHKSUMFCB
+	CALL RESET$CHKSUM$FCB
 	CALL ENDOFDIR! RZ ; RETURN IF MAKE UNSUCCESSFUL
 	;
 	;DOES DIR LBL EXIST?
-	CALL GETDIRMODE! ORA A! JZ MAKE4
+	CALL GET$DIR$MODE! ORA A! JZ MAKE4
 	;YES - DOES XFCB ALREADY EXIST FOR FILE
 	CALL GETXFCB! JNZ MAKE000
 	;NO - DOES DIR LBL INVOKE AUTO XFCB CREATE
-	CALL GETDIRMODE! ANI 10H! JZ MAKE4
-	MVI A,0FFH! STA MAKEXFCB! CALL MAKE! JNZ MAKE00
+	CALL GET$DIR$MODE! ANI 10H! JZ MAKE4
+	MVI A,0FFH! STA MAKE$XFCB! CALL MAKE! JNZ MAKE00
 	MVI C,NAMLEN! CALL SEARCH	
-	CALL DELETE0! JMP LRETEQFF
+	CALL DELETE0! JMP LRET$EQ$FF
 MAKE000:
 	;YES - IS THIS FIRST FCB FOR FILE?
-	LDA FCBEXISTS! ORA A! JNZ MAKE4
+	LDA FCB$EXISTS! ORA A! JNZ MAKE4
 MAKE00:
-	CALL INITXFCB 
+	CALL INIT$XFCB 
 MAKE1:
-	CALL SETFCBCKSFLAG
+	CALL SET$FCB$CKS$FLAG
 	;DID USER SET PASSWORD ATTRIBUTE
 	LDA ATTRIBUTES! ANI 40H! JZ MAKE3
 	XCHG! LHLD XDMAAD! LXI B,8! DAD B! XCHG
@@ -3873,39 +3873,39 @@ MAKE1:
 	MVI A,80H
 MAKE2:
 	PUSH A! CALL GETXFCB1! POP A! MOV M,A
-	CALL SETPW! MOV M,B
+	CALL SET$PW! MOV M,B
 MAKE3:
 	CALL OPENX2
 MAKE4:
 IF MPM
 	lda makeflag! sta attributes
-	ani 40h! ral! sta highext
+	ani 40h! ral! sta high$ext
 	lda sdcnt+1! inr a! jnz makexx02
-	call sdcnteqxdcnt! call packsdcnt
+	call sdcnt$eq$xdcnt! call pack$sdcnt
 	jmp openx03
 makexx02:
-	call fixolistitem! jmp openx1
+	call fix$olist$item! jmp openx1
 ENDIF
-	JMP SETFCBCKSFLAG
+	JMP SET$FCB$CKS$FLAG
 	;ret ;jmp goback
-FILEEXISTS:
+FILE$EXISTS:
 	MVI A,8! 
-SETARET:
-	MOV C,A! STA ARET+1! CALL LRETEQFF
+SET$ARET:
+	MOV C,A! STA ARET+1! CALL LRET$EQ$FF
 IF MPM
-	call testerrormode! jnz goback
+	call test$error$mode! jnz goback
 ELSE
-	LDA ERRORMODE! INR A! RZ
-	MVI A,40H! ADD C! STA XERRID
+	LDA ERROR$MODE! INR A! RZ
+	MVI A,40H! ADD C! STA XERR$ID
 ENDIF
 IF MPM
 	mov a,c! sui 3
 	mov l,a! mvi h,0! dad h
-	lxi d,xerrlist! dad d
+	lxi d,xerr$list! dad d
 	mov e,m! inx h! mov d,m
-	xchg! jmp reporterr
+	xchg! jmp report$err
 ELSE
-	LXI H,XERROR! JMP REPORTERR
+	LXI H,XERROR! JMP REPORT$ERR
 ENDIF
 ;
 func23:
@@ -3916,12 +3916,12 @@ func23:
 ;
 func24:
 	;return the login vector
-	lhld dlog! jmp sthlret			;
+	lhld dlog! jmp sthl$ret			;
 ;	ret ;jmp goback
 ;
 func25:
 	;return selected disk number
-	LDA SELDSK! jmp staret			;
+	LDA SELDSK! jmp sta$ret			;
 ;	ret ;jmp goback
 ;
 func26:
@@ -3940,34 +3940,34 @@ ENDIF
 func27:
 	;return the login vector address
 	CALL XCURSELECT
-	lhld alloca! jmp sthlret
+	lhld alloca! jmp sthl$ret
 ;	ret ;jmp goback
 ;
 IF MPM
 func28:
 	;write protect current disk
 	;first check for open files on disk
-	mvi a,0ffh! sta setroflag
+	mvi a,0ffh! sta set$ro$flag
 	lda seldsk! mov c,a! lxi h,0001h
 	call hlrotl! call intrnldiskreset
-	jmp setro
+	jmp set$ro
 ELSE
-func28:	equ	setro				;
+func28:	equ	set$ro				;
 	;write protect current disk
 	;ret ;jmp goback
 ENDIF
 ;
 func29:
 	;return r/o bit vector
-	lhld rodsk! jmp sthlret		;
+	lhld rodsk! jmp sthl$ret		;
 ;	ret ;jmp goback
 ;
 func30:
 	;set file indicators
-	CALL CHECKWRITE
-	CALL CHECKWILD
+	CALL CHECK$WRITE
+	CALL CHECK$WILD
 	call reselectx
-	CALL CHKPASSWORD
+	CALL CHK$PASSWORD
 	call indicators
 	jmp copydirloc ;lret=dirloc
 	;ret ;jmp goback
@@ -3976,7 +3976,7 @@ func31:
 	;return address of disk parameter block
 	CALL XCURSELECT
 	lhld dpbaddr
-sthlret:
+sthl$ret:
  	shld aret
 	ret ;jmp goback
 ;
@@ -3984,7 +3984,7 @@ func32:
 	;set user code
         lda linfo! cpi 0ffh! jnz setusrcode
 		;interrogate user code instead
-		lda usrcode! jmp staret ;lret=usrcode	
+		lda usrcode! jmp sta$ret ;lret=usrcode	
 ;		ret ;jmp goback
 	setusrcode:
 		ANI 0FH! sta usrcode
@@ -4029,7 +4029,7 @@ func34:
 func35:
 	;return file size (0-65536)
 	call reselect
-	CALL CHECKWILD
+	CALL CHECK$WILD
 	jmp getfilesize
 	;ret ;jmp goback
 ;
@@ -4040,7 +4040,7 @@ func37:
 ;
 IF MPM
 	call diskreset
-reset37:
+reset$37:
 	lhld info
 ELSE
 	XCHG
@@ -4049,7 +4049,7 @@ ENDIF
 	lhld dlog! ana h! mov d,a! mov a,l! ana e
 	mov e,a! lhld rodsk! xchg! shld dlog
 IF MPM
-	push h! call hleqhlandde
+	push h! call hl$eq$hl$and$de
 ELSE
 	mov a,l! ana e! mov l,a
 	mov a,h! ana d! mov h,a
@@ -4057,9 +4057,9 @@ ENDIF
 	shld rodsk! 
 ;
 IF MPM
-	pop h! xchg! lhld rlog! call hleqhlandde! shld rlog
+	pop h! xchg! lhld rlog! call hl$eq$hl$and$de! shld rlog
 ENDIF
-	LHLD DLOG! LDA CURDSK! CALL TESTVECTOR1
+	LHLD DLOG! LDA CURDSK! CALL TEST$VECTOR1
 	RNZ ; RETURN IF CURDSK NOT RESET
 	MVI A,0FFH! STA CURDSK
 	; FORCE SELECT CALL IN NEXT CURSELECT
@@ -4067,53 +4067,53 @@ ENDIF
 IF MPM
 ;
 func38:				; access drive
-	lxi h,packeddcnt! mvi a,0ffh
+	lxi h,packed$dcnt! mvi a,0ffh
 	mov m,a! inx h! mov m,a! inx h! mov m,a
 	xra a! xchg! lxi b,16
-accdrv0:
-	dad h! adc b! dcr c! jnz accdrv0
+acc$drv0:
+	dad h! adc b! dcr c! jnz acc$drv0
 	ora a! rz
-	sta multcnt! dcr a! push a
-	call accdrv02
+	sta mult$cnt! dcr a! push a
+	call acc$drv02
 	pop a! jmp openx02 ; insufficient free lock list items
-accdrv02:
-	call checkfree! pop h ; discard return addr, free space exists
-	call countopens! pop b! add b! jc openx034
+acc$drv02:
+	call check$free! pop h ; discard return addr, free space exists
+	call count$opens! pop b! add b! jc openx034
 	sub m! jnc openx034 ; openmax exceeded
 	lhld info! lda curdsk! push a! mvi a,16
-accdrv1:
-	dcr a! dad h! jc accdrv2
-accdrv15:
-	ora a! jnz accdrv1
+acc$drv1:
+	dcr a! dad h! jc acc$drv2
+acc$drv15:
+	ora a! jnz acc$drv1
 	pop a! sta curdsk! ret
-accdrv2:
+acc$drv2:
 	push a! push h! sta curdsk
-	call createolistitem
-	pop h! pop a! jmp accdrv15
+	call create$olist$item
+	pop h! pop a! jmp acc$drv15
 ;
 func39:				; free drive
-	lhld openroot! mov a,h! ora l! rz
-	xra a! sta incrpdcnt! inr a! sta freemode
-	lhld info! mov a,h! cmp l! jnz freedrv1
-	inr a! jnz freedrv1
-	sta freemode! call freefiles! jmp freedrv3
-freedrv1:
+	lhld open$root! mov a,h! ora l! rz
+	xra a! sta incr$pdcnt! inr a! sta free$mode
+	lhld info! mov a,h! cmp l! jnz free$drv1
+	inr a! jnz free$drv1
+	sta free$mode! call free$files! jmp free$drv3
+free$drv1:
 	lda curdsk! push a! mvi a,16
-freedrv2:
-	dcr a! dad h! jc freedrv4
-freedrv25:
-	ora a! jnz freedrv2
+free$drv2:
+	dcr a! dad h! jc free$drv4
+free$drv25:
+	ora a! jnz free$drv2
 	pop a! sta curdsk
-freedrv3:
-	lda incrpdcnt! ora a! rz
-	lda pdcnt! jmp chkolist1
-freedrv4:
+free$drv3:
+	lda incr$pdcnt! ora a! rz
+	lda pdcnt! jmp chk$olist1
+free$drv4:
 	push a! push h! sta curdsk
-	call freefiles
-	pop h! pop a! jmp freedrv25
+	call free$files
+	pop h! pop a! jmp free$drv25
 ELSE
-func38 	equ	funcret
-func39	equ	funcret
+func38 	equ	func$ret
+func39	equ	func$ret
 ENDIF
 ;
 func40:
@@ -4134,24 +4134,24 @@ func40:
 	cz	diskwrite	;if seek successful
 	ret
 ;
-func41	equ	funcret	;test & write
+func41	equ	func$ret	;test & write
 IF MPM
 func42:				;record lock
-	mvi a,0ffh! sta lockunlock! jmp lock
+	mvi a,0ffh! sta lock$unlock! jmp lock
 func43:				;record unlock
-	xra a! sta lockunlock! jmp lock
+	xra a! sta lock$unlock! jmp lock
 ELSE
-func42	equ	funcret	;record lock
-func43	equ	funcret	;record unlock
+func42	equ	func$ret	;record lock
+func43	equ	func$ret	;record unlock
 ENDIF
 ;
 func44:				;set multi-sector count
-	mov a,e! ora a! jz lreteqff
-	cpi 17! jnc lreteqff
-	sta multcnt
+	mov a,e! ora a! jz lret$eq$ff
+	cpi 17! jnc lret$eq$ff
+	sta mult$cnt
 IF MPM
 	mov d,a
-	call rlr! lxi b,multcntoff! dad b
+	call rlr! lxi b,mult$cnt$off! dad b
 	mov m,d
 ENDIF
 	ret
@@ -4159,16 +4159,16 @@ ENDIF
 func45:				;set BDOS error mode
 IF MPM
 	call rlr! lxi b,pname+4! dad b
-	call setpflag
+	call set$pflag
 	mov m,a! inx h
-	call setpflag
+	call set$pflag
 	mov m,a! ret
 ;
-setpflag:
+set$pflag:
 	mov a,m! ani 7fh! inr e! rnz
 	ori 80h! ret
 ELSE
-	mov a,e! sta errormode
+	mov a,e! sta error$mode
 ENDIF
 	ret
 ;
@@ -4176,7 +4176,7 @@ func46:				;get free space
 	;perform temporary select of specified drive
 	call tmpselect
 	lhld alloca! xchg ; DE = alloc vector addr
-	call getnalbs ; get # alloc blocks
+	call get$nalbs ; get # alloc blocks
 	; HL = # of allocation vector bytes
 	; count # of true bits in allocation vector
 	lxi b,0 ; BC = true bit accumulator
@@ -4201,14 +4201,14 @@ gsp4:	inx d! dcx h
 	ret
 ;
 IF MPM
-func47	equ	funcret
+func47	equ	func$ret
 ELSE
 func47: 			;chain to program
 	;save user# and seldsk in location 0004h
 	lda usrcode
 	add a! add a! add a! add a! mov b,a
 	lda seldsk! ora b! sta base+0004h
-	mvi a,0ffh! sta chainflg! jmp REBOOTX
+	mvi a,0ffh! sta chain$flg! jmp REBOOTX
 ENDIF
 ;
 func48:				;flush buffers
@@ -4217,15 +4217,15 @@ func48:				;flush buffers
 	pop h! jmp setdata
 ;
 IF MPM
-func49	equ	funcret
+func49	equ	func$ret
 ELSE
 func49:				;ccp chain query
-	lxi h,chainflg! mov a,m! ora a! rz
-	mvi m,0! jmp lreteqff
+	lxi h,chain$flg! mov a,m! ora a! rz
+	mvi m,0! jmp lret$eq$ff
 ENDIF
 ;
 IF MPM
-func50	equ	funcret
+func50	equ	func$ret
 ELSE
 func50:				;direct bios call
 	;DE -> function (1 byte)
@@ -4253,20 +4253,20 @@ func100:			;set directory label
 	;      bit 3 (20h): enable file update stamping
 	;      bit 8 (01h): assign new password to dir lbl
 	call reselectx
-	call checkwrite
+	call check$write
 	;does dir lbl exist on drive?
 	lhld info! mvi m,20h! mvi c,1
-	call setxdcnt! call search! jnz sdl1
+	call set$xdcnt! call search! jnz sdl1
 	;no - make one
-	mvi a,0ffh! sta makexfcb
+	mvi a,0ffh! sta make$xfcb
 	call make! rz ;no dir space
-	call initxfcb! call stamp1 ; create date & time stamp
+	call init$xfcb! call stamp1 ; create date & time stamp
 sdl1:
 	;update date & time stamp
 	call stamp2
 	;verify password - new dir lbl falls through
-	call getxfcb1! call chkxfcbpassword1
-	lxi b,0! call initxfcb0
+	call getxfcb1! call chk$xfcb$password1
+	lxi b,0! call init$xfcb0
 	;set dir lbl dta in extent field
 	ldax d! ori 1h! mov m,a
 	;low bit of dir lbl data set to indicate dir lbl exists
@@ -4274,49 +4274,49 @@ sdl1:
 	push h! lhld drvlbla! mov m,a! pop h
 sdl2:
 	;assign new password to dir lbl or xfcb?
-	ldax d! ani 1! jz seekcopy
+	ldax d! ani 1! jz seek$copy
 	;yes - new password field is in 2nd 8 bytes of dma
-	lxi d,8! call adjustdmaad
-	call setpw! mov m,b
-	lxi d,-8! call adjustdmaad
-	jmp seekcopy
+	lxi d,8! call adjust$dmaad
+	call set$pw! mov m,b
+	lxi d,-8! call adjust$dmaad
+	jmp seek$copy
 ;
 func101:			;return directory label data
 	;perform temporary select of specified drive
 	call tmpselect
-	call getdirmode! jmp staret
+	call get$dir$mode! jmp sta$ret
 ;
 func102:			;read file xfcb
 	call reselectx
-	call checkwild
+	call check$wild
 	;does xfcb exist for file?
-	call getxfcb! mvi a,0ffh! jz staret
+	call getxfcb! mvi a,0ffh! jz sta$ret
 	;yes - copy xfcb to user's fcb
 	lhld info! mvi c,nxtrec! jmp move ;ret
 ;
 func103:			;write or update file xfcb
 	call reselectx
-	call checkwild
+	call check$wild
 	;does xfcb exist for file?
-	call setxdcnt
+	call set$xdcnt
 	call getxfcb! jnz wxfcb1
 	;no - does dir lbl exist in directory?
-	call getdirmode
-	ora a! mvi a,0ffh! jz staret
+	call get$dir$mode
+	ora a! mvi a,0ffh! jz sta$ret
 	;yes - does file exist in directory?
-	sta makexfcb
+	sta make$xfcb
 	mvi c,extnum! call search! rz
 	;yes - attempt to make xfcb for file
 	call make! rz ; no dir space
 	;initialize xfcb
-	call initxfcb 
+	call init$xfcb 
 wxfcb1:
 	;verify password - new xfcb falls through
-	call chkxfcbpassword
+	call chk$xfcb$password
 	;set xfcb options data
 	push h! call getexta! pop d! xchg
 	mov a,m! ora a! jnz wxfcb2
-	ldax d! ani 1! jz seekcopy
+	ldax d! ani 1! jz seek$copy
 wxfcb2:
 	ldax d! ani 0e0h! jnz wxfcb3
 	mvi a,80h
@@ -4325,39 +4325,39 @@ wxfcb3:
 ;
 func104:			;set current date and time
 IF MPM
-	call getstampadd
-	call copystamp
+	call get$stamp$add
+	call copy$stamp
 	mvi m,0! ret
 ELSE
 	lxi h,stamp
-	jmp copystamp
+	jmp copy$stamp
 ENDIF
 ;
 func105:			;get current date and time
 IF MPM
-	call getstampadd
+	call get$stamp$add
 ELSE
 	lxi h,stamp
 ENDIF
 	xchg
-copystamp:
+copy$stamp:
 	mvi c,4! jmp move ;ret
 ;
 IF MPM
-getstampadd:
+get$stamp$add:
 	call rlradr! lxi b,-5! dad b
 	ret
 ENDIF
 ;
 func106:			;set default password
 IF MPM
-	call getdfpwa! inr a! rz
+	call get$df$pwa! inr a! rz
 	lxi b,7! dad b
 ELSE
 	LXI H,DFPASSWORD+7
 ENDIF
 	xchg! lxi b,8! push h
-	jmp setpw0
+	jmp set$pw0
 ;
 func107:			;return serial number
 IF MPM
@@ -4368,22 +4368,22 @@ ENDIF
 	xchg! mvi c,6! jmp move
 ;
 GOBACK0:
-	XRA A! STA RETURNFFFF
+	XRA A! STA RETURN$FFFF
 	LXI H,0FFFFH! SHLD ARET
 goback:
 	;arrive here at end of processing to return to user
 	lda resel! ora a! jz retmon
 		;reselection may have taken place
-		LDA COMPFCBCKS! ORA A! CNZ SETCHKSUMFCB
-		LDA XFCBREADONLY! ORA A! JZ GOBACK05
+		LDA COMP$FCB$CKS! ORA A! CNZ SET$CHKSUM$FCB
+		LDA XFCB$READ$ONLY! ORA A! JZ GOBACK05
 		LHLD INFO! LXI D,7! DAD D
 		ORA M! MOV M,A
 	GOBACK05:
-		CALL GETEXTA! LDA HIGHEXT! CPI 60H! JNZ GOBACK1
+		CALL GETEXTA! LDA HIGH$EXT! CPI 60H! JNZ GOBACK1
 		LXI D,-4! DAD D! MVI A,80H
 	GOBACK1:
 		ORA M! MOV M,A
-		LDA ACTUALRC! ORA A! JZ GOBACK2
+		LDA ACTUAL$RC! ORA A! JZ GOBACK2
 		CALL GETRCNTA! ORA M! MOV M,A
 	GOBACK2:
 		lhld info! mvi m,0 ;fcb(0)=0
@@ -4408,7 +4408,7 @@ IF MPM
 rlog:	dw	0	;removeable logged-in disks
 tlog:	dw	0	;removeable disk test login vector
 ntlog:	dw	0	;new tlog vector
-remdrv: db	0	;curdsk removable drive switch
+rem$drv: db	0	;curdsk removable drive switch
 			;0 = permanent drive, 1 = removable drive
 ENDIF
 IF NOT BNKBDOS
@@ -4445,80 +4445,80 @@ offset:	ds	word	;offset tracks at beginning
 dpblist	equ	$-sectpt	;size of area
 ;
 ;	local variables
-RETURNFFFF:	DS	BYTE	;SEL ERR FLAG FOR FXS 27 & 31
+RETURN$FFFF:	DS	BYTE	;SEL ERR FLAG FOR FXS 27 & 31
 tranv:	ds	word	;address of translate vector
-lockunlock:
+lock$unlock:
 makeflag:
 rmf:	ds	byte	;read mode flag for open$reel
-incrpdcnt:
+incr$pdcnt:
 dirloc:	ds	byte	;directory flag in rename, etc.
-fcbexists:
+fcb$exists:
 	ds	byte	;Make FCB exists flag
-freemode:
+free$mode:
 seqio:	ds	byte	;1 if sequential i/o
 linfo:	ds	byte	;low(info)
 dminx:	ds	byte	;local for diskwrite
 searchl:ds	byte	;search length
 searcha:ds	word	;search address
-ACTUALRC:
+ACTUAL$RC:
 	DS	BYTE	;DIRECTORY EXT RECORD COUNT
-SAVEXFCB:
+SAVE$XFCB:
 	DS	BYTE	;SEARCH XFCB SAVE FLAG
 single:	ds	byte	;set true if single byte allocation map
 SELDSK: DS	BYTE	;CURRENTLY SELECTED DISK 
 olddsk:	ds	byte	;disk on entry to bdos
 rcount:	ds	byte	;record count in current fcb
 extval:	ds	byte	;extent number and extmsk
-SAVEMOD:
+SAVE$MOD:
 	DS	BYTE	;OPEN$REEL MODULE SAVE FIELD
-SAVEEXT:
+SAVE$EXT:
 	DS	BYTE	;OPEN$REEL EXTENT SAVE FIELD
 vrecord:ds	BYTE	;current virtual record
 arecord:ds	word	;current actual record
 	DS	BYTE
 ;			SHELL FCB SAVE AREA
-SAVERANR:	DB	0,0,0	;RANDOM RECORD SAVE AREA
+SAVE$RANR:	DB	0,0,0	;RANDOM RECORD SAVE AREA
 arecord1:	ds	word	;current actual block# * blkmsk
 IF NOT MPM
-MULTCNT:	DB	1	;MULTI-SECTOR COUNT
-ERRORMODE 	DB	0	;BDOS ERROR MODE
+MULT$CNT:	DB	1	;MULTI-SECTOR COUNT
+ERROR$MODE 	DB	0	;BDOS ERROR MODE
 ENDIF
 ATTRIBUTES:	DB	0	;MAKE ATTRIBUTE HOLD AREA
 IF NOT MPM
-CHAINFLG:	DB	0	;CHAIN FLAG
+CHAIN$FLG:	DB	0	;CHAIN FLAG
 STAMP:		DB	0FFH,0FFH,0FFH,0FFH
 ENDIF
 ;
 ;******** Following variable order critical *****************
 IF MPM
-multcnt:	db	1	;multi-sector count
+mult$cnt:	db	1	;multi-sector count
 pdcnt:		db	0	;process descriptor count
 ENDIF
-HIGHEXT:	DB	0	;FCB HIGH EXT BITS
-XFCBREADONLY:	DB	0	;XFCB READ ONLY FLAG
+HIGH$EXT:	DB	0	;FCB HIGH EXT BITS
+XFCB$READ$ONLY:	DB	0	;XFCB READ ONLY FLAG
 CURDSK:		DB	0	;CURRENT DISK
 IF MPM
 ;				MP/M VARIABLES	*
-packeddcnt:	db	0,0,0			;
+packed$dcnt:	db	0,0,0			;
 pdaddr:		dw	0			;
 ;************************************************************
 curpos:	dw	0			;
-prvpos:	dw	0			;
+prv$pos:	dw	0			;
 sdcnt:		dw	0   	 		;
 sdblk:		dw	0   			;
 sdcnt0:		dw	0			;
 sdblk0:		dw	0			;
-dontclose:	db	0			;
-opencnt:			;MP/M temp variaable for open
-lockcnt:	dw	0	;MP/M temp variable for lock
-fileid:	dw	0	;MP/M temp variable for lock
-deletedfiles:	db	0
-lockshell:	db	0
-locksp:	dw	0
-setroflag:	db	0
-checkdisk:	db	0
+dont$close:	db	0			;
+open$cnt:			;MP/M temp variaable for open
+lock$cnt:	dw	0	;MP/M temp variable for lock
+file$id:	dw	0	;MP/M temp variable for lock
+deleted$files:	db	0
+lock$shell:	db	0
+lock$sp:	dw	0
+set$ro$flag:	db	0
+check$disk:	db	0
 flushed:	db	0
-fcbcksvalid:  db	0
+fcb$cks$valid:  db	0
 ;				MP/M VARIABLES  *
 ENDIF
 ;
@@ -4535,10 +4535,10 @@ USER0PASS:
 ;
 resel:		ds	byte	;reselection flag
 fcbdsk:		ds	byte	;disk named in fcb
-COMPFCBCKS:	DS	BYTE	;COMPUTE FCB CHECKSUM FLAG
-SEARCHUSER0:	DS	BYTE	;SEARCH USER 0 FOR FILE (OPEN)
-MAKEXFCB:	DB	BYTE	;MAKE & SEARCH XFCB FLAG
-FINDXFCB:	DB	BYTE	;SEARCH FIND XFCB FLAG
+COMP$FCB$CKS:	DS	BYTE	;COMPUTE FCB CHECKSUM FLAG
+SEARCH$USER0:	DS	BYTE	;SEARCH USER 0 FOR FILE (OPEN)
+MAKE$XFCB:	DB	BYTE	;MAKE & SEARCH XFCB FLAG
+FIND$XFCB:	DB	BYTE	;SEARCH FIND XFCB FLAG
 ;
 DFPASSWORD:	DW	0,0,0,0
 IF MPM
@@ -4568,7 +4568,7 @@ last:
 
 patch00000:
 	dad b! mov a,m! ani 0fh
-	cpi 9! jnc lreteqff! mov a,m
+	cpi 9! jnc lret$eq$ff! mov a,m
 	add a! add a! add a
 	mvi h,0! mov l,a! lxi b,dfpassword
 	dad b
@@ -4576,7 +4576,7 @@ patch00000:
 
 patch0000:
 	jnz dmset1
-	call testunlocked! jz dmset1
+	call test$unlocked! jz dmset1
 	jmp dmset05
 
 patch000:
@@ -4584,12 +4584,12 @@ patch000:
 	call getrcnta! mvi m,128! ret ; rc = 128
 
 patch0:
- 	push b! call getdirext! pop b! cmp c! rnc ; dir$ext > ext
-	call testunlocked! rnz
+ 	push b! call get$dir$ext! pop b! cmp c! rnc ; dir$ext > ext
+	call test$unlocked! rnz
  	pop d! xthl! mov b,l! inr b! xthl! push d! rnz ; write operation
  	inr b! pop d! pop d! jmp setlret1 ; reading beyond written extent
 
-getcmpmode:			; return PD compatibility 
+get$cmp$mode:			; return PD compatibility 
 	push	h		; attribute in A
 	lhld 	pdaddr
 	lxi	d,1dh
@@ -4599,12 +4599,12 @@ getcmpmode:			; return PD compatibility
 	ret
 
 patch1:
-	call	packsdcnt
+	call	pack$sdcnt
 	lxi 	h,attributes	; is open mode default?
 	mov	a,m
 	ral
 	rnc			; no
-	call	getcmpmode	; is comp att F1 = 1?
+	call	get$cmp$mode	; is comp att F1 = 1?
 	ral
 	rnc			; no
 	mvi	m,20h		; set open mode to r/o
@@ -4614,7 +4614,7 @@ patch2:
 	mov	b,a		; is open mode default?
 	ral			
 	jnc	patch21		; no
-	call	getcmpmode	; is comp att F1 = 1
+	call	get$cmp$mode	; is comp att F1 = 1
 	ral
 	jnc	patch21	; no
 	mvi	b,20h		; set open mode to r/o
@@ -4637,10 +4637,10 @@ patch31:
 patch4:		
 	mvi	m,0ffh		; mark lock list item as closed
 	push	d
-	call	resetchksumfcb
+	call	reset$chksum$fcb
 	pop	h
-	shld	fileid		; save addr of lock list item
-	lda	highext	; is open mode default?
+	shld	file$id		; save addr of lock list item
+	lda	high$ext	; is open mode default?
 	ora	a
 	rnz			; no - delete lock list item
 	lda	attributes	; has extended lock been requested?
@@ -4652,22 +4652,22 @@ patch4:
 
 patch5:
 	mov	b,a
-	call 	getcmpmode	; does comp att F3 = 1?
+	call 	get$cmp$mode	; does comp att F3 = 1?
 	ani	20h
 	mov	a,b
-	jz	setaret	; no - report close checksum error
+	jz	set$aret	; no - report close checksum error
 	jmp	close000
 
 patch6:
-	call	getcmpmode	; if comp att F4 = 1 then
+	call	get$cmp$mode	; if comp att F4 = 1 then
 	ani	10h		; dont check FCB checksum
-	jz	checkfcb
+	jz	check$fcb
 	ret
 
 patch8:
 	sta	curdsk		; push shiftr(tlog,curdsk) on stack
 	lhld	tlog
-	call	testvector1
+	call	test$vector1
 	pop	h
 	push	a
 	lda	curdsk
@@ -4677,13 +4677,13 @@ patch9:
 	pop	h		; checkdisk includes tlog
 	pop	d
 	ora	d
-	sta	checkdisk
+	sta	check$disk
 	pchl
 
 patch10:
 	mvi	b,1		; verify no open files exist on curdsk
-	call	searcholist
-	jz	testdir	; open files exist
+	call	search$olist
+	jz	test$dir	; open files exist
 	ret
 
 patch11:
@@ -4696,8 +4696,8 @@ patch11:
 
 patch12:
 	dcr	a		; go to directory to verify block
-	sta	dontclose	; has not been allocated to the file
-	call	testdiskfcb	; by another process
+	sta	dont$close	; has not been allocated to the file
+	call	test$disk$fcb	; by another process
 	lxi	h,1
 	ret
 
@@ -4706,7 +4706,7 @@ patch13:
 	call	searchnlist
 	jz	openx06		; yes - error
 	mvi	b,3		; redo search in case delete is required
-	call	searcholist
+	call	search$olist
 	xchg			; DE = address of lock list item
 	pop	h
 	xthl			; HL = address of open cnt field
@@ -4720,23 +4720,23 @@ patch14:
 	rm			; return if F5' = 1 and opencnt+1 = FF
 	inr	m		; is file lock an extended lock?
 	xchg
-	jz	deleteitem	; yes - delete lock item but dont
+	jz	delete$item	; yes - delete lock item but dont
 				; advance PDCNT for process
 	push	b
-	jmp	deleteitem	; delete and advance PDCNT
+	jmp	delete$item	; delete and advance PDCNT
 
 patch15:
-	call	checkwrite	; check for r/o disk
+	call	check$write	; check for r/o disk
 patch16:
 	call	getatts		; get interface atts f5' - F8'
 	sta	attributes	; save
 	ret
 
-freeroot:	dw	$-$			;
-openroot:	dw	0			;
-lockroot:	dw	0			;
-lockmax:	db	0			;
-openmax:	db	0			;
+free$root:	dw	$-$			;
+open$root:	dw	0			;
+lock$root:	dw	0			;
+lock$max:	db	0			;
+open$max:	db	0			;
 ;
 ;	bios access table
 bios	equ	$		;base of the bios jump table

@@ -243,9 +243,9 @@ clipd:
 	dw	clientrypt	; stkptr
 	db	'c'+80h,'l','i'+80h,'  ',' '+80h,' ',' '+80h ; name
 cliabort equ	$-2	; pd.name(6)- high order bit
-cliconsole:
+cli$console:
 	db	$-$	; console
-climemseg:
+cli$memseg:
 	db	0ffh	; memseg (system)
 	dw	$-$	; b
 	dw	$-$	; thread
@@ -255,7 +255,7 @@ clislctuser:
 	dw	$-$	; dcnt
 	db	$-$	; searchl
 	dw	$-$	; searcha
-clipdcnt:
+cli$pdcnt:
 	ds	2	; drvact
 	ds	20	; registers
 	ds	2	; scratch
@@ -851,7 +851,7 @@ pdinit:
 	MVI	M,0C8H
 	XCHG
 ;      pd.stkptr = .stktbl(rlrpd.memseg).loc(18);
-	lda	climemseg
+	lda	cli$memseg
 	LXI	B,0014H
 	LXI	H,STKTBL-4
 	INR	A
@@ -871,7 +871,7 @@ pdinit:
 	CALL	PMOVE
 ;      pd.console = rlrpd.console;
 	XCHG
-	lxi	h,cliconsole
+	lxi	h,cli$console
 	MOV	A,M
 	STAX	D
 ;      pd.memseg = rlrpd.memseg;
@@ -971,7 +971,7 @@ load:
 ;      pdadr = .pdtbl(rlrpd.memseg);
 
 ;      /* make dispatch call to force memory selection */
-	lda	climemseg
+	lda	cli$memseg
 	LXI	H,PDTBL-34H
 	LXI	B,0034H
 	INR	A
@@ -1196,7 +1196,7 @@ load:
 @14:
 ;        rlrpd.memseg = 0ffh; /* set clipd.memseg back to system */
 	MVI	a,0FFH
-	sta	climemseg
+	sta	cli$memseg
 ;        ret = xdos (create,pdadr);
 	MVI	C,90H
 	JMP	XDOS
@@ -1214,10 +1214,10 @@ load:
 	CALL	MEMFR
 ;        rlrpd.memseg = 0ffh; /* set clipd.memseg back to system */
 	MVI	a,0FFH
-	sta	climemseg
+	sta	cli$memseg
 ;        call print$b (.(
 	POP	B
-	JMP	PRINTBrlsfile
+	JMP	PRINTB$rlsfile
 ;          'Program load error.','$'));
 ;   -or-   'Cli abort.','$'));       
 ;      end;
@@ -1309,7 +1309,7 @@ loadcom:
 ;        call print$b (.('Absolute ',
 @20:
 	LXI	B,abstpana
-	JMP	PRINTBrlsfile
+	JMP	PRINTB$rlsfile
 ;          'TPA is not currently available.','$'));
 ;      end;
 ;    end load$COM;
@@ -1391,7 +1391,7 @@ loadprl:
 ;            call print$b (.(
 ;              'Insufficient relocatable memory to',
 	LXI	B,insufrm
-	JMP	PRINTBrlsfile
+	JMP	PRINTB$rlsfile
 ;              ' load program.','$'));
 ;            return;
 ;          end;
@@ -1405,7 +1405,7 @@ loadprl:
 ;        'Bad PRL header record.','$'));
 ;    end load$PRL;
 
-PRINTBrlsfile:
+PRINTB$rlsfile:
 ; ***** MP/M 2.1 - used by the patch area.  An object file carries the
 ; first six characters of a name, and PRINTB is CLBDOS.ASM's printb.
 prbrls:
@@ -1420,7 +1420,7 @@ rlsfile:
 	lxi	d,0ffffh
 	call	xbdos
 	lxi	h,0
-	shld	clipdcnt	;ZERO THE CLI pdcnt
+	shld	cli$pdcnt	;ZERO THE CLI pdcnt
 	ret
 
 ; open$test:
@@ -1573,9 +1573,9 @@ trysysdisk:			; ***** MP/M 2.1 - used by the patch area
 	extrn	clinofile
 	JMP	clinofile
 ; Replaced code
-;	JMP	PRINTBrlsfile
+;	JMP	PRINTB$rlsfile
 	ELSE
-	JMP	PRINTBrlsfile
+	JMP	PRINTB$rlsfile
 	ENDIF
 ;              'No such file.','$'));
 ;            return;
@@ -1600,7 +1600,7 @@ trysysdisk:			; ***** MP/M 2.1 - used by the patch area
 ;      /* non-blank file type */
 ;        call print$b (.(
 	LXI	B,fltypblnk
-	JMP	PRINTBrlsfile
+	JMP	PRINTB$rlsfile
 ;          'File type must not be specified.','$'));
 ;      end;
 ;    end file$load$execute;
@@ -1742,7 +1742,7 @@ cli:
 ;        pname(0),
 ;        clipd.console = console;
 	LDA	CONSOLE
-	sta	cliconsole
+	sta	cli$console
 	ani	0fh	;mask off printer
 	STA	PNAME
 ;        /* test for console attached to cli */

@@ -66,7 +66,7 @@ memseg		equ	15
 disksetDMA	equ	20
 diskselect	equ	22
 searcha		equ	26
-MULTCNT	EQU	50
+MULT$CNT	EQU	50
 ;
 ;	System Data Page Offsets
 userstackflag	equ	3
@@ -87,10 +87,10 @@ LSTATT		EQU	599
 	jmp	xbdos	;to xbdos handler
 	jmp	bios	;to bios jump table base address
 	JMP	SYINIT
-	JMP	REMOVEFILES
-	JMP	SWITCHUSER
-	JMP	SWITCHZERO
-XREMOVEFILES:
+	JMP	REMOVE$FILES
+	JMP	SWITCH$USER
+	JMP	SWITCH$ZERO
+XREMOVE$FILES:
 	JMP	$-$
 ;
 ;	bdos/xdos initialization code
@@ -101,8 +101,8 @@ syinit:
 	mov a,m! mov d,a! stax b
  	xchg! mvi l,3
 	shld bnkbdosinit
-	MVI L,6! SHLD XREMOVEFILES+1
-	MVI L,9! LXI D,COMMONDMA
+	MVI L,6! SHLD XREMOVE$FILES+1
+	MVI L,9! LXI D,COMMON$DMA
 	MOV M,E! INX H! MOV M,D! INX H
 	XCHG! LHLD SYSDAT! XCHG
 	MOV M,E! INX H! MOV M,D
@@ -276,7 +276,7 @@ restore:
 	xchg! pop h! sphl! xchg ;get user stack pointer
 	ret
 
-tststkswap:
+tst$stk$swap:
 	lda usrstkflg! ora a
 	rz ; if flag set then change stack
 	; get memory segment index
@@ -285,9 +285,9 @@ tststkswap:
 	mvi a,pname+2! add l! mov l,a
 	mvi a,0! adc h! mov h,a
 	mov a,m ; A = pd.name(2)
-	ani 80h! jz tststkswap1 ;no stk chg if name(2) "on"
+	ani 80h! jz tst$stk$swap1 ;no stk chg if name(2) "on"
 	xra a! ret
-tststkswap1:
+tst$stk$swap1:
 	mvi a,memseg-(pname+2)! add l! mov l,a
  	mvi a,0! adc h! mov h,a
 	mov a,m ; A = memory segment index
@@ -295,7 +295,7 @@ tststkswap1:
 	inr a! ret ;no stack change if system process call
 
 notXDOS:
-	call tststkswap! jz BDOS
+	call tst$stk$swap! jz BDOS
 	dcr a! dcr a! add a! adi usrstkregion
 	lhld sysdat! mov l,a
 	mov a,d! mov b,e ;save DE in AB
@@ -371,7 +371,7 @@ BDOS2:
 	rar! jc cpyfcbin
 	jmp nocpyin
     CPYCDMAIN:
-	LXI H,COMMONDMA! PUSH H! MVI B,16! PUSH B
+	LXI H,COMMON$DMA! PUSH H! MVI B,16! PUSH B
 	JMP CPYDMAIN1
     cpydmain:
 	LHLD DIRBUFA! PUSH H! MVI B,128! PUSH B
@@ -387,16 +387,16 @@ BDOS2:
 
     nocpyin:
 	MOV A,C! MVI B,0! CPI 41! JZ SHELL
-	PUSH D! CALL GETMULTCNTADD! POP D
+	PUSH D! CALL GET$MULT$CNT$ADD! POP D
 	MOV A,M! DCR A! JZ BDOSE2
-	LXI H,MULTFXS! INR B
+	LXI H,MULT$FXS! INR B
      BDOSE1:
 	MOV A,M! ORA A! JZ BDOSE2
 	CMP C! JZ SHELL
 	INX H! JMP BDOSE1
      BDOSE2:
 
-	CALL BANKBDOS
+	CALL BANK$BDOS
 
      BDOSE3:
 	POP D ;RESTORE FCB ADDRESS
@@ -419,7 +419,7 @@ BDOS2:
     CDMACPYOUT:
 	PUSH D ;SAVE FCB ADDRESS FOR COPYOUT
 	CALL SETDMABUFA
-        MVI B,3! CALL COPYCDMAOUT
+        MVI B,3! CALL COPY$CDMA$OUT
  	POP D! JMP NOCPYOUT
     dmacpyout:
 	lhld dirbufa! xchg! lhld dmabufa! mvi b,128
@@ -447,7 +447,7 @@ BDOS2:
 	pop h! mov a,l! mov b,h ;BA = HL = aret
 	ret
 
-BANKBDOS:
+BANK$BDOS:
 	push d! push b ;save info & func
 	call getmemseg! sta usermemseg
 	xra a ;set memseg to 0 (memseg #0 must be bank zero)
@@ -461,8 +461,8 @@ bnkbdos equ $+1
 	call getmemseg! lda usermemseg
 	jmp extbnkswt ;ret
 
-COPYCDMAOUT: ;B = 2 | 3
-	LHLD DMABUFA! LXI D,COMMONDMA
+COPY$CDMA$OUT: ;B = 2 | 3
+	LHLD DMABUFA! LXI D,COMMON$DMA
 	;FALLS THROUGH TO MOVE
 
 move:
@@ -475,7 +475,7 @@ move:
 		inx d! inx h
 		jmp move0
 
-MULTFXS:	DB	20,21,33,34,40,0
+MULT$FXS:	DB	20,21,33,34,40,0
 
 ;
 getrlradr:
@@ -486,8 +486,8 @@ rlr:
 	lhld rlradr! mov a,m! inx h! mov h,m! mov l,a
 	ret
 ;
-GETMULTCNTADD:
-	CALL RLR! LXI D,MULTCNT! DAD D! RET
+GET$MULT$CNT$ADD:
+	CALL RLR! LXI D,MULT$CNT! DAD D! RET
 ;
 xgetmemseg:
 	lda usermemseg
@@ -500,10 +500,10 @@ getmemseg:
 	mvi a,0! adc h! mov h,a ;HL = .pd.memseg
 	mov a,m! ret
 ;
-REMOVEFILES:
+REMOVE$FILES:
 	CALL GETMEMSEG! PUSH A! XRA A
 	PUSH B! CALL EXTBNKSWT! POP B
-	CALL XREMOVEFILES
+	CALL XREMOVE$FILES
 	CALL GETMEMSEG! POP A! JMP EXTBNKSWT
 
 ;
@@ -519,7 +519,7 @@ extreboot:
 	LDA USERMEMSEG
 	ORA A! RZ! INR A! RZ ;DON'T TERMINATE IF SYS PROCESS
 xreboot:
-	call tststkswap! jz reboot
+	call tst$stk$swap! jz reboot
 	lxi h,0! dad sp! lxi d,3fh! dad d
 	mov a,l! ani 0c0h! mov l,a! dcx h
 	mov d,m! dcx h! mov e,m! xchg! sphl
@@ -533,11 +533,11 @@ reboot:
 	mvi c,terminate! lxi d,0
 	jmp xdos
 
-SWITCHUSER:
+SWITCH$USER:
 	call getmemseg! lda usermemseg
 	jmp extbnkswt
 
-SWITCHZERO:
+SWITCH$ZERO:
 	call getmemseg! xra a
 	;call extbnkswt
 	;ret
@@ -570,7 +570,7 @@ aret:	ds	2	;address value to return
 commonfcb:
 	ds	36	;fcb copy in common memory
 ;
-COMMONDMA:
+COMMON$DMA:
 	DS	16	;LOCAL DMA FOR PASSWORDS, ETC.
 ;
 ;	Disk Function Copy Table
@@ -661,116 +661,116 @@ xdfctbl:
 	db fcbin+pfcbout	; 107=return serial number
 nxdf equ ($-xdfctbl)+100
 
-getdmaadd:
+get$dma$add:
 	call rlr! lxi d,disksetdma! dad d! ret
 
 setdmabufa:
-	call getdmaadd
+	call get$dma$add
 	mov e,m! inx h! mov d,m
 	xchg! shld dmabufa! ret
 
 shell:
 	sta fx! call setdmabufa
-	shld shelldma
-	call getmultcntadd
-	mov a,m! sta shellcnt
-	lxi h,shellrtn! push h! push b
-	call saverr! call savedma
-	pop psw! ora a! jz tstwrt
-	jmp multio ; HL = .DMA 
+	shld shell$dma
+	call get$mult$cnt$add
+	mov a,m! sta shell$cnt
+	lxi h,shell$rtn! push h! push b
+	call save$rr! call save$dma
+	pop psw! ora a! jz tst$wrt
+	jmp mult$io ; HL = .DMA 
 ;
-shellcnt:	db	0
+shell$cnt:	db	0
 fx:		db	0
-shellrr:	db	0,0,0
+shell$rr:	db	0,0,0
 ;
-holddma:	dw	0
-shelldma:	dw	0
+hold$dma:	dw	0
+shell$dma:	dw	0
 ;
 cbdos:
 	lda fx! mov c,a
 cbdos1:
-	lxi d,commonfcb! call bankbdos! lda aret! ret
+	lxi d,commonfcb! call bank$bdos! lda aret! ret
 ;
-advdma:
-	lhld shelldma
-	lxi d,80h! dad d! shld shelldma
+adv$dma:
+	lhld shell$dma
+	lxi d,80h! dad d! shld shell$dma
 ;
-setprocessdma:
+set$process$dma:
 	push h
-	call getdmaadd! pop d! mov m,e! inx h! mov m,d
+	call get$dma$add! pop d! mov m,e! inx h! mov m,d
 	ret
  ;
-savedma:
-	lhld shelldma! shld holddma! ret
+save$dma:
+	lhld shell$dma! shld hold$dma! ret
 ;
-resetdma:
-	lhld holddma! jmp setprocessdma
+reset$dma:
+	lhld hold$dma! jmp set$process$dma
 ;
-shellerr:
+shell$err:
 	lhld aret
 shellerr1:	; ***** MP/M 2.1 - enter here with the code already in HL
-	lda shellcnt! pop b! sub b
+	lda shell$cnt! pop b! sub b
 	add a! add a! add a! add a
 	ora h! mov h,a! ret
 ;
-shellrtn:
-	shld aret! lda fx! cpi 33! cnc resetrr
-	call resetdma! jmp bdose3
+shell$rtn:
+	shld aret! lda fx! cpi 33! cnc reset$rr
+	call reset$dma! jmp bdose3
 ;
-incrrr:
-	call getrra
+incr$rr:
+	call get$rra
 	inr m! rnz
 	inx h! inr m! rnz
 	inx h! inr m! ret
 ;
-saverr:
-	call saverr2! xchg
-saverr1:
+save$rr:
+	call save$rr2! xchg
+save$rr1:
 	mvi b,3! jmp move ;ret
-saverr2:
-	call getrra! lxi d,shellrr! ret
+save$rr2:
+	call get$rra! lxi d,shell$rr! ret
 ;
-resetrr:
-	call saverr2! jmp saverr1
+reset$rr:
+	call save$rr2! jmp save$rr1
 ;
-tstwrt:
+tst$wrt:
 	lhld dirbufa! xchg
-	mvi c,26! call bankbdos
-	lda shellcnt
-tstwrt1:
+	mvi c,26! call bank$bdos
+	lda shell$cnt
+tst$wrt1:
 	push a! mvi c,33! call cbdos1
-	ora a! jnz shellerr
-	call comparerecs
-	call incrrr
-	lxi d,80h! lhld shelldma! dad d! shld shelldma
-	pop a! dcr a! jnz tstwrt1
-	call setprocessdma
-	call resetrr
+	ora a! jnz shell$err
+	call compare$recs
+	call incr$rr
+	lxi d,80h! lhld shell$dma! dad d! shld shell$dma
+	pop a! dcr a! jnz tst$wrt1
+	call set$process$dma
+	call reset$rr
 	mvi a,34! sta fx ; jmp mult$io
 ;
-multio:
-	lda shellcnt
-multio1:
+mult$io:
+	lda shell$cnt
+mult$io1:
 	push a! call cbdos
-	ora a! jnz shellerr
-	lda fx! cpi 33! cnc incrrr
-	call advdma
-	pop a! dcr a! jnz multio1
+	ora a! jnz shell$err
+	lda fx! cpi 33! cnc incr$rr
+	call adv$dma
+	pop a! dcr a! jnz mult$io1
 	lxi h,0
 	ret
 ;
-comparerecs:
-	lhld shelldma! xchg! lhld dirbufa
+compare$recs:
+	lhld shell$dma! xchg! lhld dirbufa
 	mvi c,128
 	call compare! rz
 	IFDEF	MPM21
 ; ***** MP/M 2.1
-; HL already holds the error code; shellerr would load aret over it
+; HL already holds the error code; shell$err would load aret over it
 	pop h! lxi h,0007! jmp shellerr1
 ; Replaced code
-;	pop h! lxi h,0007! jmp shellerr
+;	pop h! lxi h,0007! jmp shell$err
 	ELSE
-	pop h! lxi h,0007! jmp shellerr
+	pop h! lxi h,0007! jmp shell$err
 	ENDIF
 ;
 compare:
@@ -778,7 +778,7 @@ compare:
 	inx h! inx d! dcr c! rz
 	jmp compare
 ;
-getrra:
+get$rra:
 	lxi h,commonfcb! lxi d,33! dad d! ret
 
 ;******************************************************
