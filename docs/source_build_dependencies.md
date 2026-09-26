@@ -11,8 +11,10 @@ These tools are shipped in `bin/dri/` only. They have no corresponding source co
 | LINK.COM | 15,616 | LINK-80 linker (superseded by ul80) |
 | RMAC.COM | 13,568 | MACRO-80 assembler (superseded by um80) |
 | LIB.COM | 7,168 | Library manager for .REL/.LIB files |
-| LOAD.COM | 5,120 | HEX to COM loader |
 | XREF.COM | 15,488 | Cross-reference generator |
+
+`LOAD.COM`, the HEX to COM loader, is not among them: it is built from
+`UTIL3/LOAD.PLM` (see [What IS Built from Source](#what-is-built-from-source)).
 
 **Note:** LINK.COM and RMAC.COM are not needed for the source build - the build system uses native `ul80` and `um80` tools instead.
 
@@ -172,7 +174,13 @@ With `--tree=src`, these are compiled from `mpm2_external/mpm2src/`:
 - MPMLDR (with serial check disabled via src/overrides/, but for
   `--dri-exact`), with the loader's
   BDOS and skeleton BIOS assembled from DRI's `LDRBDOS.ASM` and `LDRBIOS.ASM`
-- Development tools: ASM, RDT and DDT (assembled twice and put together by `tools/genmod.py`, as DRI did with MAC and GENMOD), GENHEX, GENMOD, GENSYS (GENSYS is built for use inside MP/M; the host build uses `tools/gensys.py`)
+- Development tools: ASM, RDT and DDT (assembled twice and put together by `tools/genmod.py`, as DRI did with MAC and GENMOD), GENHEX and GENMOD (put together as LOAD did), LOAD, GENSYS (GENSYS is built for use inside MP/M; the host build uses `tools/gensys.py`)
+- `LOAD.COM` is a `.COM`, as DRI built it (`UTIL3/LOAD.SUB`: linked with
+  `PLM_WORK/X0100.ASM` and located at 0100H), not a `.PRL`: `LOAD.PLM` reaches
+  the default FCB and buffer at the fixed addresses 005CH and 0080H, which are
+  right only where page zero is at 0000H, and MP/M runs a `.COM` in a memory
+  segment based there. The build used to make it a `.PRL`, which worked only
+  in a segment based at 0000H.
 
 Source overrides in `src/overrides/` customize:
 - MPMLDR - Serial number check disabled (kept, as DRI's, with `--dri-exact`,

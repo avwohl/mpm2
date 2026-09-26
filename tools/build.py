@@ -176,7 +176,15 @@ UTIL6_TARGETS = [
 # UTIL3 - Code Generation Tools
 # ============================================================================
 UTIL3_TARGETS = [
-    BuildTarget("LOAD", "prl", ["LOAD.PLM"], "UTIL3"),
+    # DRI: `link load.obj,x0100,plm80.lib', `locate xload.mod code(0100H)'
+    # and OBJCPM (UTIL3/LOAD.SUB) - a .COM, not a .PRL.  LOAD.PLM reaches
+    # page zero at fixed addresses (FCB AT (005CH), BUFFER AT (0080H)),
+    # which are right only where page zero is at 0000H, and MP/M runs a
+    # .COM in a segment based there.  Bare mode keeps DRI's `JMP LOADCOM'
+    # DATA at 0100H, the program's entry, and calls the BDOS at 0005H;
+    # X0100 is PLM_WORK's, whose MON1 and MON2 are 0005H.
+    BuildTarget("LOAD", "com", ["LOAD.PLM", "PLM_WORK/X0100.ASM"], "UTIL3",
+                plm_mode="bare", skip_runtime=True),
     # UTIL3/GENHEX.SUB, GENMOD.SUB: `mac xgenhex', `load xgenhex'.
     BuildTarget("GENHEX", "com", ["GENHEX.ASM"], "UTIL3", load=True),
     BuildTarget("GENMOD", "com", ["GENMOD.ASM"], "UTIL3", load=True),
@@ -567,14 +575,19 @@ class Builder:
         return self.run(cmd)
 
     def find_source(self, target: BuildTarget, src: str) -> Optional[Path]:
-        """A source file: the local override if there is one, else DRI's."""
+        """A source file: the local override if there is one, else DRI's.
+
+        `src' is in the target's directory, or, if it names one of its own
+        (`PLM_WORK/X0100.ASM'), in that directory of DRI's tree.
+        """
+        rel = Path(src) if "/" in src else Path(target.directory) / src
         for d in (LOCAL_SRC_ROOT, SRC_ROOT):
-            path = d / target.directory / src
+            path = d / rel
             if path.exists():
                 if d == LOCAL_SRC_ROOT:
                     self.debug(f"Using local override: {path}")
                 return path
-        self.log(f"  ERROR: Source file not found: {SRC_ROOT / target.directory / src}")
+        self.log(f"  ERROR: Source file not found: {SRC_ROOT / rel}")
         return None
 
     def assemble_twice(self, target: BuildTarget, sources: list):
@@ -706,9 +719,8 @@ class Builder:
         if target.load:
             return self.build_load(target)
 
-        # Determine source directories (local overrides take precedence)
+        # DRI's directory: an override $INCLUDEs from there (compile_plm)
         src_dir = SRC_ROOT / target.directory
-        local_src_dir = LOCAL_SRC_ROOT / target.directory
 
         # Compile/assemble each source file
         rel_files = []
@@ -719,15 +731,8 @@ class Builder:
             # Concatenate all source files into one
             concat_content = []
             for src in target.sources:
-                local_src_path = local_src_dir / src
-                orig_src_path = src_dir / src
-                if local_src_path.exists():
-                    src_path = local_src_path
-                    self.debug(f"Using local override: {src_path}")
-                elif orig_src_path.exists():
-                    src_path = orig_src_path
-                else:
-                    self.log(f"  ERROR: Source file not found: {orig_src_path}")
+                src_path = self.find_source(target, src)
+                if src_path is None:
                     return False
                 try:
                     content = src_path.read_text(encoding='latin-1')
@@ -752,16 +757,9 @@ class Builder:
         else:
             # Normal case: process each source file separately
             for src in target.sources:
-                # Check local source directory first, then original
-                local_src_path = local_src_dir / src
-                orig_src_path = src_dir / src
-                if local_src_path.exists():
-                    src_path = local_src_path
-                    self.debug(f"Using local override: {src_path}")
-                elif orig_src_path.exists():
-                    src_path = orig_src_path
-                else:
-                    self.log(f"  ERROR: Source file not found: {orig_src_path}")
+                # The local override first, then DRI's
+                src_path = self.find_source(target, src)
+                if src_path is None:
                     all_success = False
                     continue
 

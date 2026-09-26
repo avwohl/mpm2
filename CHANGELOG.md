@@ -87,6 +87,20 @@ shipped would have found it - and 6 are variables before its `patch:`
 routine, which are zero in DRI's file, as if it had been LOADed before
 `patch:` was added. The source release's own rebuild of it,
 `mpm2src/UTIL3/GENHEX.COM`, is the build's byte for byte but for the stack.
+Run under cpmemu on the HEX records the build loads, DRI's own `LOAD.COM`
+writes exactly what `genmod.load` does, for GENHEX, GENMOD and `MPMLDR.COM`.
+
+LOAD is built as `LOAD.COM`, as DRI built it (`UTIL3/LOAD.SUB` links it with
+`PLM_WORK/X0100.ASM` and locates it at 0100H), instead of `LOAD.PRL`.
+`LOAD.PLM` reaches the default FCB and buffer with `AT (005CH)` and
+`AT (0080H)`, fixed addresses no relocation bit map can cover, so the `.PRL`
+read and wrote the wrong page zero in any memory segment not based at 0000H,
+and MP/M runs a `.COM` in a segment based there. It is compiled in uplm80's
+bare mode, which keeps DRI's `JMP LOADCOM` at 0100H, the program's entry, and
+calls the BDOS at 0005H, and linked with PLM_WORK's `X0100.ASM`, whose MON1
+and MON2 are 0005H. On the same HEX records under cpmemu it writes what DRI's
+`LOAD.COM` writes. `docs/source_build_dependencies.md` listed `LOAD.COM` among
+the tools with no source.
 
 ## [0.3.6] - 2026-09-26
 
