@@ -25,7 +25,9 @@ ASM.PRL, RDT.PRL and DDT.COM were made with GENMOD (UTIL1/ASM.SUB,
 DDT.SUB), not a linker.  The two masters carry the same three files.
 (The copies next to their sources in mpm2src/UTIL1 are a later rebuild
 that was never shipped, and are not a reference; see docs/mpm2_v21.md,
-"ASM, RDT and DDT".)
+"ASM, RDT and DDT".)  GENHEX.COM and GENMOD.COM were made with MAC and
+LOAD (UTIL3/GENHEX.SUB, GENMOD.SUB), and so was the part of MPMLDR.COM
+that is DRI's assembler source (MPMLDR/MPMLDR.SUB).
 
 Of MPMLDR.COM only the part MAC assembled is compared (PART below): the
 loader's BDOS and the skeleton of its BIOS.  The rest is PL/M, and uplm80
@@ -56,6 +58,8 @@ TARGETS = [
     ("ASM", "ASM.PRL", BOTH),
     ("RDT", "RDT.PRL", BOTH),
     ("DDT", "DDT.COM", BOTH),
+    ("GENHEX", "GENHEX.COM", BOTH),
+    ("GENMOD", "GENMOD.COM", BOTH),
     ("MPMLDR", "MPMLDR.COM", BOTH),
 ]
 
@@ -74,13 +78,26 @@ NOT_COMPARED = {
 # since both masters carry the same file.  See docs/mpm2_v21.md, "ASM, RDT
 # and DDT".
 #
-# MPMLDR.COM was put together by LOAD (MPMLDR/MPMLDR.SUB), which kept what
-# was in memory wherever no HEX record loads a byte: LDRBDOS's DS areas at
-# 0E8CH-0EBDH and 0EC0H-0EC3H, and 164DH-16FFH, its variables and the gap
-# after them up to LDRBIOS at 1700H.  The build has zeros there.
+# LOAD writes a byte no HEX record loads from its 256-byte buffer, as the
+# last byte stored at the same low address (genmod.load), and so does the
+# build; GENMOD.COM and the part of MPMLDR.COM compared come out DRI's.
+# But in the first 256 bytes of a program that is what the buffer held when
+# LOAD started.  In GENHEX.COM that is GENHEX's stack, `DS 64' at
+# 0126H-0165H, which in DRI's file holds MAC.COM's code from 0C62H-0CA1H.
+# The LOAD.COM DRI shipped keeps its buffer at 0C37H, where it would find
+# MAC's 0C5DH-0C9CH after a MAC run, and XREF.COM's after GENHEX.SUB's
+# `mac xgenhex', `xref xgenhex': which LOAD made DRI's file, after what, is
+# not known, and the build has zeros.  GENHEX's variables at 03EAH-03EFH
+# (OBP, OFFSET and a `ds 3') are zeros in DRI's file, which is what LOAD
+# writes after the last byte loaded if the program ends at 03E9H - before
+# `patch:', which DRI's file has at 03F0H all the same.  LOAD of the
+# source as it stands gives them the bytes at 02EAH-02EFH, as the build
+# does.  The source release's own rebuild, mpm2src/UTIL3/GENHEX.COM, is
+# the build's byte for byte but for the stack, which holds XREF.COM's
+# 0C5DH-0C9CH: GENHEX.SUB run as it stands.
 UNSET = {
     "ASM.PRL": "0BC9 0BD8-0BD9 0C0C-0C0E 0C17-0C18 0C21-0C23",
-    "MPMLDR.COM": "0D8C-0DBD 0DC0-0DC3 154D-15FF",
+    "GENHEX.COM": "0026-0065 02EA-02EF",
 }
 
 # Files of which only part is DRI's assembler source, as file offsets.

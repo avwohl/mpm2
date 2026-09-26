@@ -6,8 +6,8 @@ Builds MP/M II from source using:
 - um80: Assembler (.ASM/.MAC -> .REL)
 - ul80: Linker (.REL -> .COM/.PRL)
 - cpmemu + PLM80: PL/M compiler (.PLM -> .REL) [via CP/M emulator]
-- tools/genmod.py: DRI's GENMOD, GENHEX and PRLCOM, for the programs DRI
-  built without a linker (ASM, RDT, DDT)
+- tools/genmod.py: DRI's GENMOD, GENHEX, PRLCOM and LOAD, for the programs
+  DRI built without a linker (ASM, RDT, DDT, GENHEX, GENMOD, MPMLDR's BDOS)
 
 Usage:
     python build.py [--clean] [--verbose] [target...]
@@ -108,6 +108,10 @@ class BuildTarget:
                                  # the target's own sources load after it.
     genmod_zeros: bool = False   # GENMOD's $Z: a byte that is zero in the
                                  # second copy is never compared.
+    load: bool = False           # Built the way DRI built it, with no linker:
+                                 # `mac x', `load x' - assembled as MAC
+                                 # assembles it and put together as LOAD did
+                                 # (Builder.build_load).
 
 # Source files that produce differently-named binaries
 NAME_MAPPING = {
@@ -173,8 +177,9 @@ UTIL6_TARGETS = [
 # ============================================================================
 UTIL3_TARGETS = [
     BuildTarget("LOAD", "prl", ["LOAD.PLM"], "UTIL3"),
-    BuildTarget("GENHEX", "com", ["GENHEX.ASM"], "UTIL3", asm_absolute=True, skip_runtime=True),
-    BuildTarget("GENMOD", "com", ["GENMOD.ASM"], "UTIL3", asm_absolute=True, skip_runtime=True),
+    # UTIL3/GENHEX.SUB, GENMOD.SUB: `mac xgenhex', `load xgenhex'.
+    BuildTarget("GENHEX", "com", ["GENHEX.ASM"], "UTIL3", load=True),
+    BuildTarget("GENMOD", "com", ["GENMOD.ASM"], "UTIL3", load=True),
 ]
 
 # ============================================================================
@@ -655,6 +660,40 @@ class Builder:
         self.log(f"  Created {output_file}")
         return True
 
+    def build_load(self, target: BuildTarget) -> bool:
+        """Build a .COM the way UTIL3's submit files do: MAC and LOAD.
+
+        No linker: `mac xgenhex' and `load xgenhex'.  Each source is
+        assembled as MAC assembles it (um80 --dri --aseg), and
+        genmod.load() puts what it loads together as LOAD did, a byte no
+        statement loads - GENHEX's stack, GENMOD's variables - from LOAD's
+        buffer.  In the first 256 bytes that is what the buffer held when
+        LOAD started, which is zero here: in DRI's GENHEX.COM, 64 bytes of
+        MAC.COM (tools/verify_dri.py, UNSET).
+        """
+        records = []
+        for src in target.sources:
+            path = self.find_source(target, src)
+            if path is None:
+                return False
+            rel = self.build_dir / (Path(src).stem + ".REL")
+            if not self.assemble(path, rel, absolute=True, dri=True):
+                return False
+            try:
+                records += genmod.rel_bytes(rel)
+            except genmod.GenmodError as e:
+                self.log(f"  ERROR: {e}")
+                return False
+        try:
+            data = genmod.load(records)
+        except genmod.GenmodError as e:
+            self.log(f"  ERROR: LOAD: {e}")
+            return False
+        output_file = self.output_dir / f"{target.name}.{target.output_type.upper()}"
+        output_file.write_bytes(data)
+        self.log(f"  Created {output_file}")
+        return True
+
     def build_target(self, target: BuildTarget) -> bool:
         """Build a single target"""
         self.log(f"Building {target.name}.{target.output_type}...")
@@ -664,6 +703,8 @@ class Builder:
             extra = target.prl_extra_v21
         if target.genmod:
             return self.build_genmod(target, extra)
+        if target.load:
+            return self.build_load(target)
 
         # Determine source directories (local overrides take precedence)
         src_dir = SRC_ROOT / target.directory
@@ -825,20 +866,23 @@ class Builder:
         `pip mpmldr.hex=impmldr.hex[I],ldrbdos.hex[I],ldrbios.hex[H]' and
         `load mpmldr': the linked loader at 0100H, and LDRBDOS.ASM and
         LDRBIOS.ASM at their own ORGs, each assembled as MAC assembles it
-        (um80 --dri --aseg).  LOAD wrote memory from 0100H to the end of
-        the record that holds the last byte loaded, and a byte no HEX
-        record loads kept whatever was in memory.  In DRI's file those are
-        LDRBDOS's DS areas at 0E8CH-0EBDH and 0EC0H-0EC3H and, from 164DH
-        up to LDRBIOS at 1700H, its variables and the gap after them; here
-        they are zero.  Every byte a statement loads is DRI's
+        (um80 --dri --aseg), put together by genmod.load() as LOAD did.
+        LOAD wrote the file from its 256-byte buffer to the end of the
+        record that holds the last byte loaded, so a byte no HEX record
+        loads is the last one stored 256 bytes below it, or 512: in DRI's
+        file, and here, LDRBDOS's DS areas at 0E8CH-0EBDH and 0EC0H-0EC3H
+        are a copy of 0D8CH-0DBDH and 0DC0H-0DC3H, and 164DH-16FFH, its
+        variables and the gap up to LDRBIOS at 1700H, of 154DH-15FFH.  The
+        part MAC assembled, 0D00H-177FH, is DRI's byte for byte
         (tools/verify_dri.py).  MPMLDR.linked is the loader alone.
         """
-        image = bytearray(output_file.read_bytes())
+        image = output_file.read_bytes()
         shutil.copy(output_file, output_file.with_suffix(".linked"))
         if 0x100 + len(image) > LDRBDOS_ORG:
             self.log(f"  ERROR: the loader runs to {0x100 + len(image) - 1:04X}H, "
                      f"into LDRBDOS at {LDRBDOS_ORG:04X}H")
             return False
+        records = genmod.genhex(image, 0x100)
         loaded = set()
         for src in MPMLDR_MAC_SOURCES:
             path = self.find_source(target, src)
@@ -858,11 +902,12 @@ class Builder:
                              "something before it has loaded")
                     return False
                 loaded.add(addr)
-                offset = addr - 0x100
-                if offset >= len(image):
-                    image.extend(bytes(offset + 1 - len(image)))
-                image[offset] = byte
-        image.extend(bytes(-len(image) % 128))      # whole records, as LOAD wrote
+            records += data
+        try:
+            image = genmod.load(records)
+        except genmod.GenmodError as e:
+            self.log(f"  ERROR: LOAD: {e}")
+            return False
         output_file.write_bytes(image)
         self.debug(f"MPMLDR.COM: 0100H-{0x100 + len(image) - 1:04X}H")
         return True

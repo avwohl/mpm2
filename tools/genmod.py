@@ -18,6 +18,8 @@ This module does what those tools did, for the build (tools/build.py):
     genmod        UTIL3/GENMOD.ASM: two copies in, a .PRL out
     genhex        UTIL3/GENHEX.ASM: a file back to HEX records at an offset
     prlcom        UTIL5/PRLCM.PLM: a .PRL's image as a .COM
+    load          UTIL3/LOAD.PLM: HEX records to a .COM, for GENHEX, GENMOD
+                  and MPMLDR, which DRI made with MAC and LOAD
 
 Each is a copy of the DRI program's logic, down to the memory GENMOD
 works in: it builds the image at 0700H, after its own code and the
@@ -300,6 +302,51 @@ def prlcom(prl):
     size = prl[1] | (prl[2] << 8)
     records = (size + 0x7F) >> 7
     return bytes(prl[0x100:0x100 + records * 0x80])
+
+
+def load(records, buffer=None):
+    """UTIL3/LOAD.PLM: a .COM file from HEX records, as LOAD wrote it.
+
+    `records` is a list of (address, byte) in the order of the HEX file,
+    as rel_bytes() gives them.  LOAD does not build the program in
+    memory: it keeps a 256-byte buffer, MBUFF, stores each byte at the
+    index of its address's low byte, and writes the buffer to the file a
+    128-byte record at a time as the load address moves past it.  So a
+    byte no record loads - a DS area, or the gap before a later ORG - is
+    written from the buffer as it stands: the last byte stored at that
+    index, which is the one 256 bytes below, or 512, or, in the first 256
+    bytes of the program, what the buffer held when LOAD started.
+    `buffer` is that, 256 bytes; zeros if None.  At the end LOAD stores
+    zeros from the address after the last record's last byte until the
+    record that holds it has been written, and the file ends there.
+
+    A record below one already written out is LOAD's "INVERTED LOAD
+    ADDRESS", and stops it.
+    """
+    mbuff = bytearray(buffer if buffer is not None else 0x100)
+    if len(mbuff) != 0x100:
+        raise GenmodError("LOAD's buffer is 256 bytes")
+    out = bytearray()
+    base = 0x100                        # L: the next address to be written
+
+    def setmem(address, byte):
+        nonlocal base
+        if address < base:
+            raise GenmodError(f"INVERTED LOAD ADDRESS {address:04X}H")
+        while address > base + 0xFF:    # write a record
+            out.extend(mbuff[(base + i) & 0xFF] for i in range(0x80))
+            base += 0x80
+        mbuff[address & 0xFF] = byte
+
+    address = 0x100                     # LA
+    for address, byte in records:
+        setmem(address, byte)
+        address += 1
+    end = address                       # FIN: TA = LA
+    while base < end:
+        setmem(address, 0)
+        address += 1
+    return bytes(out)
 
 
 def prior_memory(programs):

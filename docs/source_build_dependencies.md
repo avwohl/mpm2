@@ -120,10 +120,11 @@ skeleton loader BIOS DRI put at 1700H from `MPMLDR/LDRBIOS.ASM`, both with
 `um80 --dri --aseg`, as MAC assembled them; they are the same in V2.0 and
 V2.1. `tools/build.py` puts `MPMLDR.COM` together the way DRI's `MPMLDR.SUB`
 did: the linked PL/M loader at 0100H, LDRBDOS at 0D00H and LDRBIOS at 1700H,
-to the end of the last 128-byte record. Every byte a statement loads is
-DRI's (`tools/verify_dri.py`); the DS areas and the gap before LDRBIOS, where
-DRI's file has whatever LOAD found in memory, are zero. At boot the
-emulator's own LDRBIOS (`asm/ldrbios.asm`) is loaded over the skeleton.
+to the end of the last 128-byte record, and writes a byte no statement
+loads - the DS areas and the gap before LDRBIOS - as LOAD did, from its
+256-byte buffer (`tools/genmod.py`, `load`). 0D00H-177FH is DRI's byte for
+byte (`tools/verify_dri.py`). At boot the emulator's own LDRBIOS
+(`asm/ldrbios.asm`) is loaded over the skeleton.
 
 ## Macro Libraries and Documentation
 

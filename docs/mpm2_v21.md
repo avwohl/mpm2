@@ -56,9 +56,9 @@ python3 tools/verify_dri.py
 ```
 
 builds both releases with `--dri-exact` and compares the nucleus,
-BNKBDOS, `ABORT.RSP`, `DUMP.PRL`, UTIL1's assembler and debugger, and
-the loader's BDOS and BIOS in `MPMLDR.COM` against the matching
-reference:
+BNKBDOS, `ABORT.RSP`, `DUMP.PRL`, UTIL1's assembler and debugger,
+GENHEX and GENMOD, and the loader's BDOS and BIOS in `MPMLDR.COM`
+against the matching reference:
 
 ```
 MP/M II V2.0:
@@ -72,7 +72,9 @@ MP/M II V2.0:
   ASM.PRL      identical to DRI 2.0 but for 11 bytes no source sets
   RDT.PRL      identical to DRI 2.0
   DDT.COM      identical to DRI 2.0
-  MPMLDR.COM   identical to DRI 2.0 in 0C00-167F but for 233 bytes no source sets
+  GENHEX.COM   identical to DRI 2.0 but for 70 bytes no source sets
+  GENMOD.COM   identical to DRI 2.0
+  MPMLDR.COM   identical to DRI 2.0 in 0C00-167F
 MP/M II V2.1:
   XDOS.SPR     identical to DRI 2.1
   BNKXDOS.SPR  identical to DRI 2.1
@@ -84,7 +86,9 @@ MP/M II V2.1:
   ASM.PRL      identical to DRI 2.1 but for 11 bytes no source sets
   RDT.PRL      identical to DRI 2.1
   DDT.COM      identical to DRI 2.1
-  MPMLDR.COM   identical to DRI 2.1 in 0C00-167F but for 233 bytes no source sets
+  GENHEX.COM   identical to DRI 2.1 but for 70 bytes no source sets
+  GENMOD.COM   identical to DRI 2.1
+  MPMLDR.COM   identical to DRI 2.1 in 0C00-167F
 ```
 
 Every file is compared whole: for an `.SPR`, `.RSP` or `.PRL` the
@@ -99,11 +103,14 @@ shipped is V2.1's (see
 [BNKBDOS](#bnkbdos---the-shipped-source-is-already-v21)).  The bytes of
 `ASM.PRL` it lets through are explained under
 [ASM, RDT and DDT](#asm-rdt-and-ddt---no-change).  `CONTROL` and
-`mpm2dist` carry the same `ASM.PRL`, `RDT.PRL`, `DDT.COM`, `ABORT.RSP`
-and `DUMP.PRL`, so the V2.0 and V2.1 references for them are one and
-the same.  Of `MPMLDR.COM` only the part DRI
-assembled with MAC is compared, file offsets 0C00-167F (0D00H-177FH);
-the rest is PL/M (see below).
+`mpm2dist` carry the same `ASM.PRL`, `RDT.PRL`, `DDT.COM`, `ABORT.RSP`,
+`DUMP.PRL`, `GENHEX.COM` and `GENMOD.COM`, so the V2.0 and V2.1
+references for them are one and the same.  Of `MPMLDR.COM` only the part
+DRI assembled with MAC is compared, file offsets 0C00-167F
+(0D00H-177FH); the rest is PL/M.  How LOAD put `MPMLDR.COM`,
+`GENHEX.COM` and `GENMOD.COM` together, and the bytes of `GENHEX.COM`
+the comparison lets through, are explained
+[below](#what-changed-between-the-releases).
 
 ## What changed between the releases
 
@@ -153,11 +160,36 @@ in the PL/M loader.  The rest of the file, 0D00H-177FH, is the loader's
 BDOS and the skeleton of its BIOS, MAC sources (`MPMLDR/LDRBDOS.ASM`,
 `LDRBIOS.ASM`) that are the same in both releases.  `MPMLDR.SUB`
 assembled them and LOADed them after the loader, and the build does the
-same with `um80 --dri --aseg`.  `verify_dri.py` compares that part of the
-file: every byte a statement loads is DRI's, and the 233 that none does
-- LDRBDOS's DS areas at 0E8CH-0EBDH and 0EC0H-0EC3H, and 164DH-16FFH,
-its variables and the gap up to LDRBIOS - hold what was in LOAD's
-memory in DRI's file and are zero in the build.
+same with `um80 --dri --aseg` and `tools/genmod.py`'s copy of LOAD.
+`verify_dri.py` compares that part of the file, and all of it is DRI's,
+the 233 bytes no statement loads included - LDRBDOS's DS areas at
+0E8CH-0EBDH and 0EC0H-0EC3H, and 164DH-16FFH, its variables and the gap
+up to LDRBIOS.  LOAD (`UTIL3/LOAD.PLM`) does not build the program in
+memory: it stores each byte in a 256-byte buffer at the index of its
+address's low byte and writes the buffer out a record at a time as the
+load address moves on, so a byte no record loads is written as the last
+byte stored at that index - here the one 256 bytes below, LDRBDOS's
+0D8CH-0DBDH, 0DC0H-0DC3H and 154DH-15FFH.  The build used to write
+zeros there, taking them for whatever was in memory.
+
+`GENHEX.COM` and `GENMOD.COM` are made the same way, `mac` and `load`
+(`UTIL3/GENHEX.SUB`, `GENMOD.SUB`), and so is the build's.  `GENMOD.COM`
+is DRI's byte for byte: 0584H-05EFH, its variables and stack, hold its
+own bytes from 256 below, 0484H-04EFH.  `GENHEX.COM` is DRI's but for 70 bytes no
+source sets.  64 are its stack, `DS 64` at 0126H-0165H, in the first 256
+bytes, where LOAD writes what its buffer held when it started.  DRI's
+file has MAC.COM's code from 0C62H-0CA1H there, but the LOAD.COM DRI
+shipped keeps its buffer at 0C37H, where it would find MAC's
+0C5DH-0C9CH, so which LOAD made the file, after what, is not known; the
+build has zeros.  The other 6 are its variables at 03EAH-03EFH, before
+the `patch:` routine at 03F0H.  LOAD of the source as it stands writes
+the bytes 256 below them there, as the build does, but DRI's file has
+zeros - what LOAD writes after the end of a program that stops at
+03E9H, before `patch:`, which DRI's file has all the same.  The source
+release's own rebuild, `mpm2src/UTIL3/GENHEX.COM`, is the build's byte
+for byte but for the stack, which holds XREF.COM's 0C5DH-0C9CH: what the
+shipped LOAD's buffer finds after `GENHEX.SUB`'s `mac xgenhex` and
+`xref xgenhex`.
 
 ## The nucleus changes
 

@@ -11,9 +11,11 @@ rather than empty.
 
 ### Added
 
-`tools/verify_dri.py` compares three more files with DRI's: `ABORT.RSP` and
-`DUMP.PRL` in both releases, and `BNKBDOS.SPR` in V2.1, the release whose
-source DRI shipped (see Known issues under 0.3.6). All three are identical.
+`tools/verify_dri.py` compares five more files with DRI's: `ABORT.RSP`,
+`DUMP.PRL`, `GENHEX.COM` and `GENMOD.COM` in both releases, and
+`BNKBDOS.SPR` in V2.1, the release whose source DRI shipped (see Known issues
+under 0.3.6). All but `GENHEX.COM` are identical, and `GENHEX.COM` is but for
+70 bytes no source sets (see Fixed).
 Every file is now compared whole, the header page and the padding of the
 last record included, and a difference is reported by the part it is in -
 header, image, bit map or padding - at its offset in that part.
@@ -29,6 +31,25 @@ after the relocation bit map, as DRI's do; ul80 fills it with zeros. So
 those stay as they are. The padding is past the bit map, where no loader
 reads. `verify_dri.py` used to stop at the end of an `.SPR`'s bit map
 because "DRI's linker left stale bytes" there; they were the ^Z padding.
+
+GENHEX, GENMOD and the part of `MPMLDR.COM` that is DRI's assembler source are
+put together as DRI's submit files did it, with MAC and LOAD, and a byte no
+statement loads - a DS area, the gap before a later ORG - is now what LOAD
+wrote there, not zero. LOAD (`UTIL3/LOAD.PLM`) keeps a 256-byte buffer,
+stores each byte at the index of its address's low byte and writes the buffer
+out a record at a time, so a byte nothing loads is the last one stored at that
+index, 256 bytes below it; `tools/genmod.py` has a copy of it, `load`.
+`GENMOD.COM` was 102 bytes from DRI's, its variables and stack at
+0584H-05EFH, and is now DRI's byte for byte. The 233 bytes of `MPMLDR.COM`
+that `verify_dri.py` let through as "no source sets" - LDRBDOS's DS areas and
+the gap up to LDRBIOS - are DRI's too, so all of 0D00H-177FH is. `GENHEX.COM`
+is DRI's but for 70 bytes, which the build cannot know: 64 are its stack, in
+the first 256 bytes of the program, where LOAD writes what its buffer held
+when it started - in DRI's file part of MAC.COM, but not where the LOAD DRI
+shipped would have found it - and 6 are variables before its `patch:`
+routine, which are zero in DRI's file, as if it had been LOADed before
+`patch:` was added. The source release's own rebuild of it,
+`mpm2src/UTIL3/GENHEX.COM`, is the build's byte for byte but for the stack.
 
 ## [0.3.6] - 2026-09-26
 

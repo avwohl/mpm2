@@ -192,7 +192,8 @@ linked: DRI built them with MAC and GENMOD (`UTIL1/ASM.SUB`, `DDT.SUB`), each
 module assembled twice, the second time 100H higher, and GENMOD taking the
 relocation bits from the bytes that differ. The build does the same - `um80
 --aseg` for the two assemblies, and `tools/genmod.py` for GENMOD, GENHEX and
-PRLCOM.
+PRLCOM. DRI made GENHEX and GENMOD themselves with MAC and LOAD
+(`UTIL3/GENHEX.SUB`, `GENMOD.SUB`), and `genmod.py` does what LOAD did too.
 
 Every one of DRI's assembler sources is assembled with `um80 --dri`, which
 reads it as MAC and RMAC do: a `$` inside a name is ignored (DRI's text
@@ -257,10 +258,12 @@ byte identical to Digital Research's own V2.0 and V2.1 binaries, the padding
 of their last record included, and so do BNKBDOS (V2.1's), the resident
 `ABORT.RSP`, `DUMP.PRL`, the debugger, `RDT.PRL` and `DDT.COM`, and the
 assembler, `ASM.PRL`, but for 11 bytes of it that no source sets and GENMOD
-took from the memory MAC had left. So does the part of `MPMLDR.COM` that DRI assembled with MAC, the
-loader's BDOS and the skeleton of its BIOS at 0D00H-177FH, but for 233 bytes
-no source sets either - DS areas and the gap before the BIOS, where LOAD left
-whatever was in memory and the build has zeros.
+took from the memory MAC had left. So do `GENMOD.COM` and the part of
+`MPMLDR.COM` that DRI assembled with MAC, the loader's BDOS and the skeleton
+of its BIOS at 0D00H-177FH, DS areas included: LOAD wrote a byte no statement
+loads from its 256-byte buffer, as the byte 256 below it, and so does the
+build. `GENHEX.COM` does but for 70 bytes no source sets, 64 of which, its
+stack, held what LOAD's buffer found in memory.
 
 Outside the nucleus, V2.1 changed MPMLDR, SHOW, PRINTER, SCHED.RSP, SPOOL.PRL,
 SPOOL.BRS, SDIR, PIP and GENSYS, and all of them are reconstructed. They are
@@ -631,7 +634,7 @@ mpm2/
 │   └── ssh_session_libssh.cpp # SSH/SFTP server
 ├── tools/
 │   ├── build.py          # Source build script (Python)
-│   ├── genmod.py         # GENMOD, GENHEX and PRLCOM, for ASM, RDT and DDT
+│   ├── genmod.py         # GENMOD, GENHEX, PRLCOM and LOAD, for ASM, RDT, DDT, GENHEX, GENMOD, MPMLDR
 │   ├── gensys.py         # MP/M II system generator (replaces DRI GENSYS)
 │   ├── verify_dri.py     # Compare a --dri-exact build with DRI's binaries
 │   ├── v21/              # Tools the V2.1 reconstruction was done with
