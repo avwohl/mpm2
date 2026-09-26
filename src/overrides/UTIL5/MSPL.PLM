@@ -1,4 +1,4 @@
-$title('MP/M II Spool Program')
+$title('MP/M II V2.0  Spool Program')
 spool:
 do;
 

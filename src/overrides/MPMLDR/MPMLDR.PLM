@@ -1,4 +1,8 @@
-$title ('MP/M II Loader')
+$if MPM21
+$title ('MP/M II V2.1  Loader')
+$else
+$title ('MP/M II V2.0  Loader')
+$endif
 mpmldr:
 do;
 

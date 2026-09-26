@@ -1,4 +1,4 @@
-	title	'MP/M II Patch Area'
+	title	'MP/M II V2.0 Patch Area'
 	name	'patch'
 	cseg
 @patch:
@@ -187,3 +187,4 @@ clinofile:
 	ENDIF
 
 	end
+

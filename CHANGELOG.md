@@ -38,6 +38,17 @@ emulator, a `--dri-exact` V2.0 and V2.1 system each loads and prints its
 banner; the same V2.0 loader with its serial set back to `654321` stops with
 "MPMLDR error: Synchronization: Serial numbers do not match".
 
+More of the overrides are DRI's text. `DSPTCH.ASM`, `DATAPG.ASM`,
+`PATCH.ASM` and `MPMLDR/LDRLWR.ASM` end in DRI's ^Z padding again (4, 61, 56
+and 117 bytes), as the other overrides do. Six had a listing title with the
+version taken out; they have DRI's V2.0 title back - `MSPL.PLM`,
+`PRINT.PLM` and `PATCH.ASM` unconditionally, since V2.1 changed no version
+text in what they build (V2.1's `SPOOL.PRL` still says "MP/M II V2.0
+Spooler"), and `GENSYS.PLM`, `MPMLDR.PLM` and `VER.ASM` with V2.1's behind
+`MPM21`, since V2.1's GENSYS, MPMLDR and XDOS say V2.1. `VER.ASM`'s
+"MP/M II V2.0   Version" comment is DRI's again. What they build is the
+same, in both releases.
+
 ### Fixed
 
 The files DRI made with LINK, RMAC's linker - XDOS, BNKXDOS, RESBDOS, TMP,

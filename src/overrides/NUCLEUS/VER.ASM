@@ -1,10 +1,14 @@
-	title	'MP/M II Version & Revision Date'
+	IFDEF	MPM21
+	title	'MP/M II V2.1 Version & Revision Date'
+	ELSE
+	title	'MP/M II V2.0 Version & Revision Date'
+	ENDIF
 	name	'ver'
 	cseg
 @ver:
 	public	@ver
 ;
-;  MP/M II Version
+;  MP/M II V2.0   Version
 ;
 
 ;/*

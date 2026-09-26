@@ -1,4 +1,8 @@
-$title('MP/M II System Generation')
+$if MPM21
+$title('MP/M II V2.1 System Generation')
+$else
+$title('MP/M II V2.0 System Generation')
+$endif
 gensys:
 do;
 
