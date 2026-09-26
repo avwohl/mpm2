@@ -15,10 +15,11 @@ rather than empty.
 `DUMP.PRL`, `GENHEX.COM` and `GENMOD.COM` in both releases, and
 `BNKBDOS.SPR` in V2.1, the release whose source DRI shipped (see Known issues
 under 0.3.6). All but `GENHEX.COM` are identical, and `GENHEX.COM` is but for
-70 bytes no source sets (see Fixed). Every file is now compared whole, the
-header page and the padding of the last record included, and a difference is
-reported by the part it is in - header, image, bit map or padding - at its
-offset in that part.
+70 bytes no source sets (see Fixed). Every file but `MPMLDR.COM`, which is
+compared in 0C00H-167FH, is now compared whole, the header page and the
+padding of the last record included, and a difference is reported by the
+part it is in - header, image, bit map or padding - at its offset in that
+part.
 
 ### Changed
 
@@ -61,9 +62,10 @@ PL/M loader and LDRBDOS, the loader itself unchanged; and `LOAD.PRL` is
 
 ### Fixed
 
-The files DRI made with LINK, RMAC's linker - XDOS, BNKXDOS, RESBDOS, TMP,
-BNKBDOS, `ABORT.RSP` and `DUMP.PRL` - end their last record with ^Z (1AH)
-after the relocation bit map, as DRI's do; ul80 fills it with zeros. So
+The files DRI made with LINK, RMAC's linker - XDOS, BNKXDOS, TMP, BNKBDOS,
+`ABORT.RSP` and `DUMP.PRL` - end their last record with ^Z (1AH) after the
+relocation bit map, as DRI's do (RESBDOS's bit map ends on a record
+boundary, so it has none); ul80 fills it with zeros. So
 `tools/build.py` pads the output of every target DRI linked (an `.SPR`,
 `.RSP` or `.PRL` of assembler modules alone) with 1AH. DRI made its PL/M
 `.PRL`, `.RSP` and `.BRS` files with GENMOD, which fills with zeros, and

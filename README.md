@@ -214,7 +214,8 @@ stops at a name two modules define (ul80 `--fatal-mult-def`); the loader
 BIOS and the boot sector are one module each.
 
 The PL/M programs link with DRI's own interface modules, unmodified, as
-DRI's submit files linked them: every `.PRL` with `PLM_WORK/X0100.ASM`,
+DRI's submit files linked them: every `.PRL`, and `LOAD.COM`, with
+`PLM_WORK/X0100.ASM`,
 whose `MON1` to `MON3` are `equ 0005h` and whose `FCB`, `TBUFF` and the rest
 are the page-zero addresses; every `.BRS` with `UTIL2/BRSPBI.ASM`, which
 reaches the BDOS through the `.RSP`; `MPMLDR.COM` with `MPMLDR/LDMONX.ASM`,
@@ -577,8 +578,9 @@ given 180.  `src` rebuilds `bin/src` (see
 [Building from Source](#building-from-source)).
 
 `python3 tools/verify_dri.py` builds the nucleus, BNKBDOS, `ABORT.RSP`,
-`DUMP.PRL`, the assembler, the debugger and the loader of both releases with
-`--dri-exact` and compares them with Digital Research's binaries.
+`DUMP.PRL`, `GENHEX.COM`, `GENMOD.COM`, the assembler, the debugger and the
+loader of both releases with `--dri-exact` and compares them with Digital
+Research's binaries.
 
 ## Access Logging
 
