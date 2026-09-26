@@ -44,9 +44,10 @@ image. What the older releases get wrong here:
   buffer. The source build now compiles all of that code as DRI wrote it.
 - um80 before 0.3.51 has no `--dri`, with which the source build reads every
   one of DRI's assembler sources as MAC and RMAC read it, and ul80 before
-  0.3.51 no `--fatal-mult-def`, which every build's SPR and PRL links pass (see
-  Changed). um80 before 0.3.50 cannot cut PUBLIC and EXTRN names to six
-  characters (`-t`), as RMAC does; the nucleus does not link without it. Before
+  0.3.51 no `--fatal-mult-def`, which every link `tools/build.py` makes
+  passes, and the BNKXIOS and SFTP links too (see Changed). um80 before
+  0.3.50 cannot cut PUBLIC and EXTRN names to six characters (`-t`), as RMAC
+  does; the nucleus does not link without it. Before
   0.3.49 it assembled `LOW()` of a relocatable address as an absolute byte,
   read a forward `EQU` of a later label as 0, and kept only the last of two
   constants added to an external; ul80 before 0.3.49 left references to

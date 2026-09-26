@@ -117,10 +117,10 @@ modules - `X0100.ASM`, `BRSPBI.ASM`, `LDMONX.ASM` - which the build links as
 DRI's submit files did, and the SFTP RSP's glue takes its arguments in
 registers too; and uplm80 0.4.0 refuses an upeepz80 before 0.2.6, which
 turned `push ... / call p / ret` into `jp p`, so that p took its return
-address for its first argument. um80
-before 0.3.51 has no `--dri`, with which the source build reads every one of
-DRI's assembler sources the way MAC and RMAC read them, and ul80 before
-0.3.51 no `--fatal-mult-def`, which every build's SPR and PRL links pass;
+address for its first argument. um80 before 0.3.51 has no `--dri`, with
+which the source build reads every one of DRI's assembler sources the way MAC
+and RMAC read them, and ul80 before 0.3.51 no `--fatal-mult-def`, which every
+link `tools/build.py` makes passes, and the BNKXIOS and SFTP links too;
 before 0.3.50 um80 cannot give DRI's sources RMAC's six-character PUBLIC and
 EXTRN names (`-t`), without which the nucleus does not link. An older uplm80
 miscompiles DRI's own text of SUBMIT, SPOOL and the resident system
@@ -205,8 +205,9 @@ did change from overrides that are DRI's text but for the V2.1 changes, the
 serial number, and in `TMPSUB.ASM` the one local fix `--dri-exact` leaves
 out. `MPMLDR.COM` is put together as DRI's `MPMLDR.SUB` did it, the PL/M
 loader at 0100H, the loader's BDOS at 0D00H and DRI's skeleton loader BIOS at
-1700H. Every link stops at a name two modules define (ul80
-`--fatal-mult-def`).
+1700H. Every link `tools/build.py` makes, and the BNKXIOS and SFTP links,
+stops at a name two modules define (ul80 `--fatal-mult-def`); the loader
+BIOS and the boot sector are one module each.
 
 The PL/M programs link with DRI's own interface modules, unmodified, as
 DRI's submit files linked them: every `.PRL` with `PLM_WORK/X0100.ASM`,
@@ -614,7 +615,7 @@ mpm2/
 │   └── src/              # Source-built binaries (generated)
 ├── src/
 │   ├── overrides/        # Source code modifications, V2.1 recovery and
-│   │   │                 # compiler workarounds, by DRI source directory
+│   │   │                 # local fixes, by DRI source directory
 │   │   ├── MPMLDR/       # MPMLDR with disabled serial check, GENSYS V2.1
 │   │   ├── NUCLEUS/      # Kernel source overrides
 │   │   └── UTIL2, UTIL4..UTIL7/ # RSPs and transients
