@@ -319,7 +319,7 @@ dcl i byte,
 end match;
 
 dcl hash$table$size lit '128',               /* must be power of 2         */
-    hash$table (hash$table$size) address public at (.memory),
+    hash$tablå (hash$table$size© address public at (.memory),
                                              /* must be initialized on each*/
     hash$entry$adr address,                  /* disk scan                  */
     hash$entry based hash$entry$adr address; /* where to put a new entry's */

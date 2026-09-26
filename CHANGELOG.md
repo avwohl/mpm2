@@ -218,9 +218,11 @@ carry the V2.1 reconstruction, the serial number and a few local fixes:
 - The ones that carry the V2.1 reconstruction are DRI's text apart from their
   V2.1 changes: `SPBRS.PLM` has DRI's `restarts` stack and its `DO` loop,
   `SCRSP.PLM` DRI's `DATA` and `INITIAL` lists, `UTIL5/MSPL.PLM` its message
-  at `.tbuff-1` and its buffer at `.dummy$buffer`, and `MPMLDR/LDRLWR.ASM` its
-  `low()` immediates. `MPMLDR.PLM` also keeps its disabled serial check, with
-  DRI's loop under the early return.
+  at `.tbuff-1` and its buffer at `.dummy$buffer`, `MPMLDR/LDRLWR.ASM` its
+  `low()` immediates, and `UTIL7/DSE.PLM` the two bytes of `hash$table`'s
+  declaration that DRI's file has with the parity bit set, which uplm80
+  clears as it reads a source, as PL/M-80 did. `MPMLDR.PLM` also keeps its
+  disabled serial check, with DRI's loop under the early return.
 - `tools/build.py` assembles DRI's `.ASM` sources with six-character PUBLIC and
   EXTRN names (um80 `-t`), as RMAC wrote them into the object file. DRI's
   nucleus depends on that: `DSPTCH.ASM` refers to `DATAPG.ASM`'s `memseg` as
