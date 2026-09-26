@@ -90,12 +90,13 @@ index, 256 bytes below it; `tools/genmod.py` has a copy of it, `load`.
 0584H-05EFH, and is now DRI's byte for byte. The 233 bytes of `MPMLDR.COM`
 that `verify_dri.py` let through as "no source sets" - LDRBDOS's DS areas and
 the gap up to LDRBIOS - are DRI's too, so all of 0D00H-177FH is. `GENHEX.COM`
-is DRI's but for 70 bytes, which the build cannot know: 64 are its stack, in
-the first 256 bytes of the program, where LOAD writes what its buffer held
-when it started - in DRI's file part of MAC.COM, but not where the LOAD DRI
-shipped would have found it - and 6 are variables before its `patch:`
-routine, which are zero in DRI's file, as if it had been LOADed before
-`patch:` was added. The source release's own rebuild of it,
+is DRI's but for 70 bytes no source sets. 64 are its stack, in the first 256
+bytes of the program, where LOAD writes what its buffer held when it started:
+in DRI's file part of MAC.COM, but not where the LOAD DRI shipped would have
+found it, so the build cannot know them and has zeros. 6 are variables before
+its `patch:` routine, which LOAD of the source writes as the bytes 256 below
+them, as the build does, but which are zero in DRI's file, as if it had been
+LOADed before `patch:` was added. The source release's own rebuild of it,
 `mpm2src/UTIL3/GENHEX.COM`, is the build's byte for byte but for the stack.
 Run under cpmemu on the HEX records the build loads, DRI's own `LOAD.COM`
 writes exactly what `genmod.load` does, for GENHEX, GENMOD and `MPMLDR.COM`.
@@ -109,7 +110,8 @@ and MP/M runs a `.COM` in a segment based there. It is compiled in uplm80's
 bare mode, which keeps DRI's `JMP LOADCOM` at 0100H, the program's entry, and
 calls the BDOS at 0005H, and linked with PLM_WORK's `X0100.ASM`, whose MON1
 and MON2 are 0005H. On the same HEX records under cpmemu it writes what DRI's
-`LOAD.COM` writes. `docs/source_build_dependencies.md` listed `LOAD.COM` among
+`LOAD.COM` writes, and run by MP/M over SSH on a HEX file of GENHEX it writes
+the build's `GENHEX.COM`. `docs/source_build_dependencies.md` listed `LOAD.COM` among
 the tools with no source.
 
 ## [0.3.6] - 2026-09-26

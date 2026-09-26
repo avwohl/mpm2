@@ -264,8 +264,9 @@ took from the memory MAC had left. So do `GENMOD.COM` and the part of
 `MPMLDR.COM` that DRI assembled with MAC, the loader's BDOS and the skeleton
 of its BIOS at 0D00H-177FH, DS areas included: LOAD wrote a byte no statement
 loads from its 256-byte buffer, as the byte 256 below it, and so does the
-build. `GENHEX.COM` does but for 70 bytes no source sets, 64 of which, its
-stack, held what LOAD's buffer found in memory.
+build. `GENHEX.COM` does but for 70 bytes no source sets: 64, its stack,
+held what LOAD's buffer found in memory, and 6 are zero in DRI's file where
+LOAD of the source writes the bytes 256 below.
 
 Outside the nucleus, V2.1 changed MPMLDR, SHOW, PRINTER, SCHED.RSP, SPOOL.PRL,
 SPOOL.BRS, SDIR, PIP and GENSYS, and all of them are reconstructed. They are

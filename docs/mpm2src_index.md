@@ -140,9 +140,9 @@ segment 0.
 
 | Source File | Builds | Description |
 |-------------|--------|-------------|
-| LOAD.PLM | LOAD.PRL | HEX file loader - loads .HEX to .COM |
-| GENHEX.ASM | GENHEX.COM | Generate HEX - converts binary to Intel HEX |
-| GENMOD.ASM | GENMOD.COM | Generate Module - creates relocatable .PRL/.RSP/.SPR |
+| LOAD.PLM | LOAD.COM | HEX file loader - loads .HEX to .COM; a `.COM`, as `LOAD.SUB` built it, since it reaches page zero at fixed addresses |
+| GENHEX.ASM | GENHEX.COM | Generate HEX - converts binary to Intel HEX; MAC and LOAD, as `GENHEX.SUB` |
+| GENMOD.ASM | GENMOD.COM | Generate Module - creates relocatable .PRL/.RSP/.SPR; MAC and LOAD, as `GENMOD.SUB` |
 
 ---
 
