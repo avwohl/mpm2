@@ -7,7 +7,7 @@ release notes; they are summarised below from their commits, in less detail
 than they would have carried at the time, so the record before 0.3.5 is short
 rather than empty.
 
-## [0.3.6] - 2026-09-25
+## [0.3.6] - 2026-09-26
 
 MP/M II V2.1 now builds from source as well as V2.0. In both releases XDOS,
 BNKXDOS, RESBDOS and TMP come back byte for byte identical to Digital
