@@ -155,7 +155,8 @@ These reference files are always copied from `bin/dri/` regardless of build tree
 
 3. **Boot sector** (`build_asm.sh`):
    - Assembles LDRBIOS, BNKXIOS, cold boot loader from source
-   - Uses MPMLDR (source-built with serial check disabled)
+   - Uses MPMLDR (source-built with serial check disabled, but for
+     `--dri-exact`)
 
 4. **System generation** (`gensys.sh`):
    - Uses `tools/gensys.py` on the host (see above)
@@ -168,12 +169,14 @@ With `--tree=src`, these are compiled from `mpm2_external/mpm2src/`:
 - All PRL utilities (DIR, STAT, PIP, TYPE, ERA, REN, etc.)
 - All SPR system components (BNKBDOS, BNKXDOS, RESBDOS, XDOS, etc.)
 - The resident system processes: ABORT.RSP, and MPMSTAT, SCHED and SPOOL each as an `.RSP` and a `.BRS`
-- MPMLDR (with serial check disabled via src/overrides/), with the loader's
+- MPMLDR (with serial check disabled via src/overrides/, but for
+  `--dri-exact`), with the loader's
   BDOS and skeleton BIOS assembled from DRI's `LDRBDOS.ASM` and `LDRBIOS.ASM`
 - Development tools: ASM, RDT and DDT (assembled twice and put together by `tools/genmod.py`, as DRI did with MAC and GENMOD), GENHEX, GENMOD, GENSYS (GENSYS is built for use inside MP/M; the host build uses `tools/gensys.py`)
 
 Source overrides in `src/overrides/` customize:
-- MPMLDR - Serial number check disabled
+- MPMLDR - Serial number check disabled (kept, as DRI's, with `--dri-exact`,
+  which builds DRI's serial number into the loader and the nucleus)
 - NUCLEUS components
 - The V2.1 changes, behind `MPM21`, in the nucleus, MPMLDR, GENSYS and the
   UTIL2, UTIL4, UTIL5, UTIL6 and UTIL7 utilities

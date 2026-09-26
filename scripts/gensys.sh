@@ -239,7 +239,9 @@ echo "MPM.SYS created ($(wc -c < mpm.sys | tr -d ' ') bytes)"
 # Get MPMLDR.COM based on tree selection
 echo "Setting up MPMLDR.COM..."
 if [ "$TREE" = "src" ]; then
-    # Source-built MPMLDR has serial check disabled - no patching needed
+    # Source-built MPMLDR has serial check disabled - no patching needed.
+    # With --dri-exact it checks, as DRI's does, and carries DRI's serial
+    # number, as the source-built nucleus then does too.
     if [ ! -f "$BIN_DIR/MPMLDR.COM" ]; then
         echo "Error: Source-built MPMLDR.COM not found at $BIN_DIR/MPMLDR.COM"
         echo "Run scripts/build_src.sh first"

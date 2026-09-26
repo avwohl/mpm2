@@ -39,17 +39,22 @@ switches exist for checking the result against Digital Research's own
 binaries:
 
 * `--serial dri` builds in the serial number from DRI's master instead
-  of the `654321` placeholder the nucleus sources carry.
+  of the `654321` placeholder the sources carry, in the nucleus and in
+  `MPMLDR.COM` alike.
 * `--dri-exact` implies `--serial dri` and additionally leaves out the
   local fixes this repository carries on top of DRI's code, so that the
   output can be compared byte for byte, or at least does what DRI
   shipped.  It defines `DRIEXACT` for both tools.  At present there are
-  two such fixes: the stack-pointer save and restore in `TMPSUB.ASM`, 25
-  bytes that DRI had commented out, and, in V2.1's `PIP.PLM`, MULTCOPY's
+  three such fixes: the stack-pointer save and restore in `TMPSUB.ASM`,
+  25 bytes that DRI had commented out; in V2.1's `PIP.PLM`, MULTCOPY's
   file-not-found test, which DRI's patch (`PIP.PRL` 1FE1) cut down to
   the low byte of `NCOPIED` - so a copy that matched a multiple of 256
-  files ends in FILE NOT FOUND.  The default build tests the whole word,
-  as V2.0 did.
+  files ends in FILE NOT FOUND, where the default build tests the whole
+  word, as V2.0 did; and the early return that turns off `MPMLDR.PLM`'s
+  `match$serial`, the loader's check that the system it loads carries
+  its own serial number ("Synchronization: Serial numbers do not
+  match").  With `--dri-exact` the loader and the nucleus both carry
+  DRI's serial, so DRI's check passes.
 
 ```
 python3 tools/verify_dri.py

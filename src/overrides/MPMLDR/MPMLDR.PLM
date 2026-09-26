@@ -45,7 +45,16 @@ $endif
   declare company$name (*) byte data (
     ' DIGITAL RESEARCH ');
   declare serial$number (6) byte data (
+$if DRISERIAL
+  /* the serial number on DRI's master, which its nucleus carries too */
+$if MPM21
+    000h,014h,001h,000h,009h,02fh);
+$else
+    000h,014h,001h,000h,000h,001h);
+$endif
+$else
     '654321');
+$endif
 
   declare err$msgadr address initial (.default$err$msg);
   declare err$msg based err$msgadr (1) byte;
@@ -219,8 +228,11 @@ $endif
       declare cpyrt based cpyrtadr (1) byte;
       declare mem based memadr (1) byte;
 
-      /* Serial check disabled for source build */
+$if DRIEXACT
+$else
+      /* Serial check disabled for source build, but for --dri-exact */
       return;
+$endif
 
       do forever;
         i,j = -1;

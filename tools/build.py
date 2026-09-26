@@ -954,14 +954,17 @@ def main():
                              "PL/M compiler, which selects the V2.1 code in "
                              "the conditional blocks.")
     parser.add_argument("--serial", choices=["none", "dri"], default="none",
-                        help="Serial number to build into the nucleus: "
+                        help="Serial number to build into the nucleus "
+                             "and MPMLDR: "
                              "'none' leaves DRI's unserialized 654321 "
                              "placeholder, 'dri' uses the serial stamped on "
                              "DRI's own distribution master.")
     parser.add_argument("--dri-exact", action="store_true",
                         help="Build exactly what Digital Research shipped: "
                              "take DRI's serial number, leave out the "
-                             "local fixes this repository carries, and give "
+                             "local fixes this repository carries (MPMLDR "
+                             "checks the serial numbers, as DRI's does), "
+                             "and give "
                              "the bytes GENMOD leaves unset (ASM, RDT, DDT) "
                              "what DRI's GENMOD found in memory (MAC.COM), "
                              "so the output can be compared byte for byte "

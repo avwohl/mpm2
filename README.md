@@ -180,8 +180,10 @@ source code using modern cross-compilers:
 
 The source build system supports local modifications in `src/overrides/` that take
 precedence over the original source. For example, the MPMLDR has its serial number
-check disabled in `src/overrides/MPMLDR/MPMLDR.PLM`. The overrides also carry the
-V2.1 changes, behind `MPM21` (see [below](#mpm-ii-v20-and-v21)).
+check disabled in `src/overrides/MPMLDR/MPMLDR.PLM`, except with `--dri-exact`,
+which keeps DRI's check and builds DRI's serial number into the loader and the
+nucleus alike. The overrides also carry the V2.1 changes, behind `MPM21` (see
+[below](#mpm-ii-v20-and-v21)).
 
 `build_src.sh` - and so `build_all.sh --tree=src` and `run_tests.sh src` - writes
 what it builds to `bin/src/`, over the committed binaries there. Those are
@@ -298,8 +300,8 @@ XDOS never reads the byte, and `gensys.py` leaves it zero there with a note.
 | `--tree=dri\|src` | Binaries to build the system from (default `dri`) |
 | `--version=2.0\|2.1` | Release to build from source (default 2.0); `--tree=src` only |
 | `--compat-attributes[=yes\|no]` | Answer to V2.1 GENSYS's "Enable Compatibility Attributes" (default no) |
-| `--serial=none\|dri` | Serial number in a source-built nucleus: the sources' `654321` placeholder (default) or the one on DRI's master; `--tree=src` only |
-| `--dri-exact` | Build what DRI shipped: DRI's serial number, without the local fixes `src/overrides` keeps behind `DRIEXACT`, and with what DRI's GENMOD found in memory (MAC.COM) in the bytes of ASM, RDT and DDT no source sets; `--tree=src` only |
+| `--serial=none\|dri` | Serial number in a source-built nucleus and MPMLDR: the sources' `654321` placeholder (default) or the one on DRI's master; `--tree=src` only |
+| `--dri-exact` | Build what DRI shipped: DRI's serial number, without the local fixes `src/overrides` keeps behind `DRIEXACT` (MPMLDR checks the serial numbers, as DRI's does), and with what DRI's GENMOD found in memory (MAC.COM) in the bytes of ASM, RDT and DDT no source sets; `--tree=src` only |
 
 ### Modern GENSYS
 
@@ -621,7 +623,7 @@ mpm2/
 ├── src/
 │   ├── overrides/        # Source code modifications, V2.1 recovery and
 │   │   │                 # local fixes, by DRI source directory
-│   │   ├── MPMLDR/       # MPMLDR with disabled serial check, GENSYS V2.1
+│   │   ├── MPMLDR/       # MPMLDR's serial check off (not --dri-exact), GENSYS V2.1
 │   │   ├── NUCLEUS/      # Kernel source overrides
 │   │   └── UTIL2, UTIL4..UTIL7/ # RSPs and transients
 │   ├── mpm_pagezero.mac  # uplm80's own page-zero symbols (??BDOS, ??BOOT,

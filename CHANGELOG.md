@@ -29,6 +29,15 @@ put on `sys.path` from `../um80_and_friends`. Their listings go to
 `build/v21` in the checkout (`V21` still overrides it) instead of `/tmp/v21`,
 so two checkouts do not assemble into each other's.
 
+`--dri-exact` builds MPMLDR with DRI's serial number check, which the
+`MPMLDR.PLM` override turns off with an early return in `match$serial`; the
+default build keeps it off. And `--serial dri`, which `--dri-exact` implies,
+now builds DRI's serial number into `MPMLDR.COM` as well as the nucleus, at
+the same address as in DRI's file (0181H), so the check passes. Booted on the
+emulator, a `--dri-exact` V2.0 and V2.1 system each loads and prints its
+banner; the same V2.0 loader with its serial set back to `654321` stops with
+"MPMLDR error: Synchronization: Serial numbers do not match".
+
 ### Fixed
 
 The files DRI made with LINK, RMAC's linker - XDOS, BNKXDOS, RESBDOS, TMP,
