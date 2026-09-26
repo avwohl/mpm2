@@ -1,27 +1,22 @@
-; Runtime for the banked half of a resident system process (.BRS)
+; The compiler's own BDOS entry for the banked half of a resident system
+; process (.BRS)
 ;
-; This is DRI's UTIL2/BRSPBI.ASM, "Banked Resident System Process BDOS
-; Interface", for uplm80's calling conventions.  DRI linked every *BRS.PLM as
+; DRI linked every *BRS.PLM as
 ;
 ;       link xxbrs.obj,brspbi,plm80.lib to xxbrs.mod
 ;
-; A BRS runs in bank 0 and has no page zero of its own to find the BDOS
-; through.  It reaches it through OS, the word at offset 0 of the .BRS: GENSYS
-; stores the base of the process's .RSP there, and when MP/M creates the
-; process at boot it stores its BDOS entry in the first word of that .RSP.
-; BRSPBI's MON1/MON2/MON2A are the double indirection
-;
-;       lhld os / mov a,m / inx h / mov h,m / mov l,a / pchl
-;
-; taking the function in C and the parameter in DE, as PL/M-80 passed them.
+; and so does the build: UTIL2/BRSPBI.ASM, "Banked Resident System Process
+; BDOS Interface", unmodified.  A BRS runs in bank 0 and has no page zero of
+; its own to find the BDOS through.  It reaches it through OS, the word at
+; offset 0 of the .BRS: GENSYS stores the base of the process's .RSP there,
+; and when MP/M creates the process at boot it stores its BDOS entry in the
+; first word of that .RSP.  BRSPBI's MON1/MON2/MON2A are that double
+; indirection, taking the function in C and the parameter in DE, which is how
+; uplm80 passes them.
 ;
 ; uplm80 in MP/M mode open-codes a MON1 or MON2 call whose function number is a
-; constant as `ld de,info / ld c,func / call ??BDOS', which is exactly that
-; register interface, so here ??BDOS is BRSPBI's code rather than the 0005H of
-; mpm_pagezero.mac.  A call the compiler cannot open-code - MON2A, or a
-; function number that is not a constant - pushes its arguments, left to right
-; and widened to 16 bits, and calls MON1/MON2/MON2A; those pick them up the way
-; mpm_runtime.mac does and fall into ??BDOS.
+; constant as `ld de,info / ld c,func / call ??BDOS', so ??BDOS is the same
+; code as BRSPBI's rather than the 0005H of mpm_pagezero.mac.
 ;
 ; ??BOOT is where uplm80's program entry goes if the procedure it called ever
 ; returns.  A BRS process never does, but if it did, BDOS function 0 in a
@@ -33,21 +28,6 @@
         extrn   OS              ; offset 0 of the .BRS, the .RSP's base
 
         cseg
-
-MON1:                           ; void return
-        public  MON1
-MON2:                           ; BYTE return, in A
-        public  MON2
-MON2A:                          ; ADDRESS return, in HL
-        public  MON2A
-        ld      hl,2            ; skip the return address
-        add     hl,sp
-        ld      e,(hl)          ; info, low
-        inc     hl
-        ld      d,(hl)          ; info, high
-        inc     hl
-        ld      c,(hl)          ; func (a BYTE widened to 16 bits)
-                                ; fall into ??BDOS: it returns to our caller
 
 ??BDOS:                         ; C = function, DE = parameter
         public  ??BDOS

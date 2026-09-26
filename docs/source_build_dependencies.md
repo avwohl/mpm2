@@ -43,15 +43,19 @@ the compiler must not emit those addresses as literals. DRI solved this by
 linking each utility twice against `PLM_WORK/X0100.ASM` and `X0200.ASM`, which
 differ only in an `offset` equate, and diffing the two images with GENMOD.
 
-The equivalent here is `uplm80 --mode mpm` plus `src/mpm_pagezero.mac`: the
-page-zero addresses are published from a module of their own so that a
-reference from the runtime or from compiled code crosses a module boundary and
-is recorded. The compiler reaches the BDOS entry, the stack top and the
-warm-boot jump through names of its own, `??BDOS`, `??MAXB` and `??BOOT`, which
-no PL/M identifier can capture; `BDOS` itself is not published, because
-`UTIL7/DM.PLM` declares a public variable of that name (DRI's `X0100.ASM` does
-not publish it either). `.SPR` and `.RSP` images are still linked at 0
-(`ul80 --spr`), because those *are* loaded at the segment base.
+The equivalent here is `uplm80 --mode mpm`, linked with DRI's own
+`PLM_WORK/X0100.ASM`, unmodified, and `src/mpm_pagezero.mac`: the page-zero
+addresses are published from modules of their own so that a reference from
+compiled code crosses a module boundary and is recorded. uplm80 (0.4.0 on)
+passes arguments as PL/M-80 does, the function in C and the parameter in DE,
+so X0100's `mon1 equ 0005h+offset` is all MON1 needs to be, as it was for
+DRI. The compiler reaches the BDOS entry, the stack top and the warm-boot jump
+through names of its own, `??BDOS`, `??MAXB` and `??BOOT`, which
+`mpm_pagezero.mac` publishes and no PL/M identifier can capture; `BDOS` itself
+is not published, because `UTIL7/DM.PLM` declares a public variable of that
+name (DRI's `X0100.ASM` does not publish it either). `.SPR` and `.RSP` images
+are still linked at 0 (`ul80 --spr`), because those *are* loaded at the
+segment base.
 
 With that fixed, source-built utilities work. On an otherwise all-DRI system,
 source-built `USER.PRL` prints `User Number = 0` and `CONSOLE.PRL` prints

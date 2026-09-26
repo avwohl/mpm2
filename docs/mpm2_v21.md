@@ -708,8 +708,9 @@ breakpoint vector through the system data page.
     are now built the way DRI's `UTIL2/*.SUB` build them: each `*.RSP`
     from `*RSP.PLM` alone - offset 0 the word MP/M sets to the BDOS entry,
     the descriptor at 2 and the queue at 2+52 - and the code as a
-    separate `*.BRS` (a new build output) from `*BRS.PLM` and
-    `src/brs_runtime.mac`, which stands in for `BRSPBI.ASM`.  A BRS's
+    separate `*.BRS` (a new build output) from `*BRS.PLM` and DRI's
+    `BRSPBI.ASM`, with `src/brs_runtime.mac` for uplm80's own `??BDOS`
+    and `??BOOT`.  A BRS's
     offset 0 is OS, offset 2 the stack pointer and offset 4 the name.
   * Against DRI's files, `ABORT.RSP`'s header, image and relocation bits
     are identical; only the padding after the bit map differs (DRI's is

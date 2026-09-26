@@ -74,8 +74,8 @@ Source files from `mpm2_external/mpm2src/` - the original Digital Research MP/M 
 | LDRBDOS.ASM | MPMLDR.COM | Loader BDOS - minimal BDOS for boot phase |
 | LDRBIOS.ASM | (skeleton) | Loader BIOS skeleton - OEM customization required |
 | LDRLWR.ASM | GENSYS.COM | Load, relocate and write an SPR, RSP or BRS (`LdRl`, `FxWr`) |
-| LDMONX.ASM | MPMLDR.COM | Loader monitor interface |
-| X0100.ASM | GENSYS.COM | PL/M-80 interface: `mon1`, `mon2` and the page-zero publics |
+| LDMONX.ASM | MPMLDR.COM | Loader monitor interface: `ldmon1` and `ldmon2` are `equ 0d06h`, the loader BDOS; linked unmodified |
+| X0100.ASM | GENSYS.COM | PL/M-80 interface: `mon1`, `mon2` and the page-zero publics (PLM_WORK's copy is linked into every .PRL) |
 
 ---
 
@@ -127,7 +127,7 @@ DDT".
 | SPBRS.PLM | SPOOL.BRS | SPOOL - banked portion (print spooler) |
 | SPRSP.PLM | SPOOL.RSP | SPOOL - RSP portion (process descriptor and queues) |
 | ABORT.ASM | ABORT.RSP | Abort RSP handler (no banked portion) |
-| BRSPBI.ASM | (each .BRS) | Banked RSP header and BDOS interface; the build uses `src/brs_runtime.mac` in its place |
+| BRSPBI.ASM | (each .BRS) | Banked RSP BDOS interface, linked unmodified; `src/brs_runtime.mac` adds uplm80's own `??BDOS` and `??BOOT` |
 
 Each `.RSP` is its `*RSP.PLM` alone and each `.BRS` its `*BRS.PLM` with
 `BRSPBI`, as `SCHED.SUB`, `SPOOL.SUB` and `MPMSTAT.SUB` build them; GENSYS

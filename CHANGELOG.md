@@ -17,7 +17,7 @@ Every generated system now carries DRI's four resident system processes, and
 on the way the emulator's disk transfers, its XIOS results and SFTP and HTTP
 file access were put right.
 
-This release needs uplm80 0.3.7 or later, upeepz80 0.2.5 or later,
+This release needs uplm80 0.4.0 or later, upeepz80 0.2.6 or later,
 um80_and_friends 0.3.51 or later and cpmemu 4.10.0. uplm80 and upeepz80
 compile the SFTP resident system process in every build, as well as the
 utilities of a `--tree=src` build; um80 and ul80 assemble and link the XIOS,
@@ -25,6 +25,14 @@ the loader BIOS and the whole of a `--tree=src` build; cpmemu provides the
 emulator's Z80 (`libqkz80`) and `util/cpm_disk.py`, which writes the disk
 image. What the older releases get wrong here:
 
+- uplm80 before 0.4.0 passes a procedure's arguments on the stack, or
+  writes them into the procedure's own storage, where PL/M-80 passes the last
+  in DE and the one before it in BC. What it compiles does not work with
+  DRI's `X0100.ASM`, `BRSPBI.ASM` and `LDMONX.ASM`, which the source build
+  now links as DRI did (see Changed), or with the SFTP RSP's glue, which
+  takes its arguments in registers too. uplm80 0.4.0 refuses an upeepz80
+  before 0.2.6, which made `push ... / call p / ret` into `jp p`, after
+  which p took its return address for its first argument.
 - uplm80 before 0.3.7 computes `x MOD 0` as 0 where PL/M-80 gives `x`, so
   every source-built SDIR reprinted its heading before each line of output
   (SDIR's default page length is 0). It also laid out the initial values of
@@ -151,9 +159,10 @@ selected tree. Before, `sched 12/31/99 23:59 dir` answered "Resident portion of
 scheduler is not in memory", and `abort` and `mpmstat` ran as transients.
 `tools/build.py` builds a resident system process the way DRI's `UTIL2/*.SUB`
 files do: the `.RSP` from `xxRSP.PLM` alone, and the banked code as a new
-`.BRS` output type, from `xxBRS.PLM` and `src/brs_runtime.mac`, which stands in
-for DRI's `BRSPBI.ASM`. It used to link the two into one `.RSP`, with the BRS's
-header and a CP/M program entry where MP/M expects the process descriptor.
+`.BRS` output type, from `xxBRS.PLM` and DRI's `BRSPBI.ASM`, with
+`src/brs_runtime.mac` for the compiler's own BDOS entry. It used to link the
+two into one `.RSP`, with the BRS's header and a CP/M program entry where
+MP/M expects the process descriptor.
 `ABORT.RSP`'s header, image and relocation bits are now DRI's, and the other
 three `.RSP` files match every byte DRI's declarations define.
 `tools/gensys.py` follows DRI's GENSYS in two more ways: it loads a `.BRS`
@@ -201,11 +210,10 @@ program's load line and then dropped the session, whatever the program was.
 More of the source build is DRI's own text. SUBMIT (`UTIL5/SUB.PLM`), the
 banked halves of the scheduler and MPMSTAT (`UTIL2/SCBRS.PLM`, `MSBRS.PLM`) and
 the resident halves of the spooler and MPMSTAT (`UTIL2/SPRSP.PLM`, `MSRSP.PLM`)
-build from DRI's files as they stand, and so do BNKBDOS, `NUCLEUS/MEMMGR.ASM`
-and the loader's BDOS (see below). The overrides that are left carry the V2.1
-reconstruction, the serial number, a few local fixes, and
-`MPMLDR/LDMONX.ASM`, which uplm80's calling convention needs (see Known
-issues):
+build from DRI's files as they stand, and so do BNKBDOS, `NUCLEUS/MEMMGR.ASM`,
+the loader's BDOS (see below) and `MPMLDR/LDMONX.ASM`, the loader's BDOS
+interface (see the calling convention, below). The overrides that are left
+carry the V2.1 reconstruction, the serial number and a few local fixes:
 
 - The ones that carry the V2.1 reconstruction are DRI's text apart from their
   V2.1 changes: `SPBRS.PLM` has DRI's `restarts` stack and its `DO` loop,
@@ -277,13 +285,37 @@ stops the link. LINK-80, and ul80 without the flag, warn, use the first
 definition and write the program, which is how an exported `PRINTBrlsfile`
 in CLI, six characters of which are `PRINTB`, once took CLI's and ATTACH's
 calls to CLBDOS's `printb` (see above). GENSYS was the one link with such a
-name: `X0100.ASM` and `cpm_runtime.mac` both define BDISK, BOOT, BUFF, FCB,
-FCB16, MAXB, MON1, MON2, MON2A and TBUFF, and the first, X0100's, won. GENSYS
-now links what DRI's `GENSYS.SUB` linked, GENSYS, LDRLWR and X0100, and no
-runtime, which it needs nothing from. Its data sits 12 bytes lower, without
-the runtime's stack-convention MON1, which nothing called; run under cpmemu
-with the same answers, it prints the same dialogue and writes the same
-MPM.SYS and SYSTEM.DAT as before, in V2.0 and V2.1.
+name: `X0100.ASM` and the CP/M runtime, `src/cpm_runtime.mac`, both defined
+BDISK, BOOT, BUFF, FCB, FCB16, MAXB, MON1, MON2, MON2A and TBUFF, and the
+first, X0100's, won. GENSYS now links what DRI's `GENSYS.SUB` linked,
+GENSYS, LDRLWR and X0100, and nothing else. Run under cpmemu with every
+question answered by default, beside DRI's GENSYS.COM with the same SPR and
+RSP files, the rebuilt one prints DRI's dialogue and writes DRI's MPM.SYS and
+SYSTEM.DAT but for the six bytes of the serial number, in V2.0 and V2.1.
+
+The PL/M programs link with DRI's own interface modules, unmodified, as DRI's
+submit files linked them. uplm80 0.4.0 passes a procedure's arguments the
+way Intel's PL/M-80 does - the last in DE, the one before it in BC, any
+others pushed and taken off by the procedure - so a `MON1 (f, a)` it cannot
+open-code arrives with the function in C and the parameter in DE, which is
+what the BDOS wants. Every `.PRL` now links `PLM_WORK/X0100.ASM`, whose MON1,
+MON2, MON2A and MON3 are `equ 0005h` and whose FCB, TBUFF and the rest are
+the page-zero addresses, from a module of their own so that the relocation
+bit map gets them; every `.BRS` links `UTIL2/BRSPBI.ASM`, which jumps to the
+BDOS through the `.RSP`; and `MPMLDR.COM` links DRI's `MPMLDR/LDMONX.ASM`,
+whose LDMON1 and LDMON2 are the loader BDOS at 0D06H. What stood in for them,
+for uplm80's old stack convention, is gone: `src/cpm_runtime.mac`,
+`src/mpm_runtime.mac`, the MON1 to MON2A of `src/brs_runtime.mac` and the
+override of `LDMONX.ASM`. `src/mpm_pagezero.mac` keeps only the compiler's
+own `??BDOS`, `??BOOT` and `??MAXB`, and `src/brs_runtime.mac` only `??BDOS`
+and `??BOOT`. A `.PRL` is 12 bytes shorter than it was, a `.BRS` 1 and the
+PL/M loader in `MPMLDR.COM` 33. `tools/build.py` reads X0100 and BRSPBI as
+it reads DRI's other assembler sources (`--dri -t`) and assembles the
+runtime modules into `build/src/runtime/`, since GENSYS assembles
+`MPMLDR/X0100.ASM`, which is not PLM_WORK's, into `build/src`. The SFTP RSP's
+glue, `asm/sftp_glue.asm`, takes its arguments in BC and DE, as
+`sftp_brs.plm` now passes them, and loses `COPYFCBNAME`, which nothing
+called.
 
 `tools/genmod.py` no longer refuses an ORG in column 1, which um80 0.3.51
 assembles as an ORG, as MAC does.
@@ -382,14 +414,17 @@ assembles to the same bytes as DRI's own `XDOS.SPR`.
 The PL/M runtime took its arguments in the wrong place. `MON1`/`MON2`/`MON2A`/
 `MON3` read the BDOS function from `C` and the parameter from `DE`, which is
 DRI's PL/M-80 convention — it is why `PLM_WORK/X0100.ASM` can define all three
-as `EQU 0005H` — but uplm80 passes arguments to an external `PROCEDURE` on the
-stack. It open-codes `MON1` and `MON2` when the function number is a constant,
-which is why this went unseen: the routines were only reached when it could
-not, and then they ran on whatever `C` and `DE` happened to hold. `DIR.PLM`'s
+as `EQU 0005H` — but uplm80 before 0.4.0 passes arguments to an external
+`PROCEDURE` on the stack. It open-codes `MON1` and `MON2` when the function
+number is a constant, which is why this went unseen: the routines were only
+reached when it could not, and then they ran on whatever `C` and `DE`
+happened to hold. `DIR.PLM`'s
 `parse` (XDOS 152, through `mon3`) was one such call, so DIR parsed its command
-line from garbage. Both runtimes now take the arguments from the stack, and all
-four are one routine: the BDOS returns a byte in `A` and an address in `HL`,
-which is what uplm80 reads for a `BYTE` and an `ADDRESS` result.
+line from garbage. uplm80 0.4.0 passes the arguments in `C` and `DE`, as
+PL/M-80 did, and the runtimes are gone: the programs link DRI's `X0100.ASM`,
+whose `MON1` to `MON3` are the BDOS entry itself (see Changed). The BDOS
+returns a byte in `A` and an address in `HL`, which is what uplm80 reads for
+a `BYTE` and an `ADDRESS` result.
 
 Assignments of a comparison lost their store, through a defect in upeepz80's
 dead-store elimination — it treated the compiler's own `??` join label as a
@@ -413,10 +448,10 @@ process's memory segment, so the BDOS entry at 0005H, the default FCB at 005CH
 and the DMA buffer at 0080H have to be relocated with everything else; DRI's
 `DIR.PRL` marks twelve `CALL 5` sites in its bitmap. Only a resolved symbol
 reference can reach the bitmap, so the addresses must not be assembled as
-literals. New `src/mpm_pagezero.mac` publishes them from a module of their own,
-the BDOS entry under the compiler's own name `??BDOS` (DRI's `X0100.ASM` does
-not publish `BDOS`, and `UTIL7/DM.PLM` declares a variable of that name), and
-`src/mpm_runtime.mac` reaches them across that module boundary; `.PRL`
+literals. They now come from modules of their own: DRI's `X0100.ASM` for the
+program's names (see Changed), and new `src/mpm_pagezero.mac` for the
+compiler's own, the BDOS entry as `??BDOS` (DRI's `X0100.ASM` does not
+publish `BDOS`, and `UTIL7/DM.PLM` declares a variable of that name); `.PRL`
 targets are now compiled with `uplm80 --mode mpm`, which emits the BDOS call,
 the stack fetch from 0006H and the warm-boot jump as those symbols instead of
 literals. This is the same split DRI used: `PLM_WORK/X0100.ASM` and
@@ -595,8 +630,8 @@ the default DMA buffer. DRI's `X0100.ASM`, linked into every MP/M II PL/M
 transient, has them at 0050H-0056H, which MP/M II's CLI zeroes for a
 transient. So DRI's ED, TYPE and ERAQ, which test `len0 <> 0`, never take
 their password path, and the source-built ones read the command tail's length
-there and took it whenever a file was named. Both runtimes now carry DRI's
-values; `ED.PRL`, `TYPE.PRL` and `ERAQ.PRL` each change in that one operand.
+there and took it whenever a file was named. The source build now links
+`X0100.ASM` itself (see Changed), with DRI's values.
 
 DUMP, the one transient written in assembler, is linked as DRI linked it,
 `link dump,extrn[op]`, with `UTIL5/EXTRN.ASM` for its `bdos`, `fcb` and `buff`
@@ -610,10 +645,10 @@ and 1500H for RDT, in the `.PRL` header. The source build now asks for the
 same. SDIR is the exception: V2.0's asks for none, as in both of DRI's V2.0
 binaries and `UTIL7/SDIR.SUB`, and V2.1's for 1000H (see Added).
 
-`tools/build.py` assembled `cpm_runtime.mac`, `mpm_runtime.mac` and
-`mpm_pagezero.mac` only when their `.rel` did not exist yet, so once a
-checkout had built anything, an edit to a runtime changed nothing and nothing
-said so. Each runtime is now assembled once per run.
+`tools/build.py` assembled the runtime modules only when their `.rel` did
+not exist yet, so once a checkout had built anything, an edit to a runtime
+changed nothing and nothing said so. Each runtime module is now assembled
+once per run.
 
 On macOS a fresh checkout built an emulator that linked cleanly and then would
 not start: "dyld: Library not loaded: /usr/local/lib/libqkz80.4.dylib". With
@@ -636,11 +671,7 @@ fixes across 26 regions of it, which has not been done.
 The transients are compiled by uplm80, not by DRI's PL/M-80, so none of them
 is byte for byte DRI's, in either release; the V2.1 ones were checked by what
 they do. uplm80's code is larger, which matters only for the `.BRS` files, in
-bank 0: `SCHED.BRS` is 06B1H bytes against DRI's 043DH.
-
-`MPMLDR/LDMONX.ASM` is an override, and not DRI's text: uplm80 passes an
-external procedure's arguments on the stack, where DRI's PL/M-80 passes the
-last two in BC and DE.
+bank 0: `SCHED.BRS` is 06ABH bytes against DRI's 043DH.
 
 `tools/gensys.py` does not write the same file as DRI's GENSYS for the same
 answers, although it places and relocates every module the same way. It also

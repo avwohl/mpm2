@@ -45,23 +45,29 @@ LOCAL_SRC_ROOT = PROJECT_ROOT / "src" / "overrides"  # Local source overrides
 BUILD_DIR = PROJECT_ROOT / "build" / "src"  # Separate from C++ build
 OUTPUT_DIR = PROJECT_ROOT / "bin" / "src"   # Source-built binaries
 
-# Runtime library for PL/M programs.
+# Runtime modules for PL/M programs.
 #
-# .COM programs use the CP/M runtime, which reaches page zero through absolute
-# equates.  MP/M .PRL transients cannot: page zero belongs to the process's
-# memory segment, so the addresses have to be relocated at load time, and only
-# a resolved *symbol* reference reaches the relocation bitmap.  The MP/M runtime
-# therefore splits the page-zero equates into their own module and refers to
-# them across the module boundary.
-CPM_RUNTIME_SRC = PROJECT_ROOT / "src" / "cpm_runtime.mac"
-CPM_RUNTIME_REL = BUILD_DIR / "cpm_runtime.rel"
-MPM_RUNTIME_SRCS = [PROJECT_ROOT / "src" / "mpm_runtime.mac",
+# uplm80 (0.4.0 on) calls a procedure the way Intel's PL/M-80 does - the last
+# argument in DE, the one before it in BC - so the programs link with DRI's own
+# interface modules, unmodified, as DRI linked them.
+#
+# A .PRL transient links with PLM_WORK/X0100.ASM, whose MON1, MON2, MON2A and
+# MON3 are `equ 0005h' and whose FCB, TBUFF, BOOT and the rest are page-zero
+# equates.  Under MP/M page zero belongs to the process's memory segment, so
+# those addresses have to be relocated at load time, and only a resolved
+# *symbol* reference reaches the relocation bitmap: they are published from a
+# module of their own, which X0100 is.  mpm_pagezero.mac adds the compiler's
+# own page-zero names, ??BDOS, ??BOOT and ??MAXB, the same way.
+MPM_RUNTIME_SRCS = [SRC_ROOT / "PLM_WORK" / "X0100.ASM",
                     PROJECT_ROOT / "src" / "mpm_pagezero.mac"]
 
 # The banked half of a resident system process has no page zero of its own and
 # reaches the BDOS through the .RSP instead: DRI linked each one with
-# BRSPBI.ASM, which this is for uplm80's conventions.
-BRS_RUNTIME_SRCS = [PROJECT_ROOT / "src" / "brs_runtime.mac"]
+# UTIL2/BRSPBI.ASM, whose MON1, MON2 and MON2A jump through the .RSP's first
+# word.  brs_runtime.mac gives the compiler's own ??BDOS and ??BOOT the same
+# way in.
+BRS_RUNTIME_SRCS = [SRC_ROOT / "UTIL2" / "BRSPBI.ASM",
+                    PROJECT_ROOT / "src" / "brs_runtime.mac"]
 
 # Include paths for assembler
 INCLUDE_PATHS = [
@@ -90,7 +96,7 @@ class BuildTarget:
                                  # passed this to GENMOD: `genmod ed.hex
                                  # xed.prl $1000'.
     prl_extra_v21: Optional[str] = None  # The V2.1 figure, where V2.1 changed it.
-    skip_runtime: bool = False   # If True, don't link with cpm_runtime
+    skip_runtime: bool = False   # If True, don't link the runtime modules
     post_build: Optional[str] = None  # Special post-build action (e.g., "mpmldr")
     genmod: bool = False         # Built the way DRI built it, with no linker:
                                  # every source assembled twice, the second
@@ -224,8 +230,9 @@ UTIL7_TARGETS = [
 MPMLDR_TARGETS = [
     # MPMLDR needs special handling:
     # - Uses --mode bare for proper stack initialization
-    # - Uses modified LDMONX.ASM wrapper for BDOS calls
-    # - Doesn't link with cpm_runtime
+    # - Links with DRI's LDMONX.ASM, whose LDMON1 and LDMON2 are `equ 0d06h',
+    #   the loader BDOS's entry, which takes C and DE as a call passes them
+    # - Links no runtime module
     # - Post-build puts LDRBDOS and LDRBIOS after it, as MPMLDR.SUB did
     #   (post_build_mpmldr)
     BuildTarget("MPMLDR", "com", ["MPMLDR.PLM", "LDMONX.ASM"], "MPMLDR",
@@ -234,10 +241,8 @@ MPMLDR_TARGETS = [
     # LDRLWR.ASM is LDRL and FXWR, and X0100.ASM the page-zero names the
     # two use: FCB, FCB16, TBUFF and MAXB for GENSYS, and MON1 as 0005H
     # for LDRLWR, which calls it with the function in C, as PL/M-80 did.
-    # The CP/M runtime is not linked: it defines all ten of X0100's names
-    # again, its MON1 for uplm80's stack convention, and GENSYS needs
-    # nothing else from it - uplm80 open-codes every BDOS call GENSYS
-    # makes and puts the arithmetic routines in the module.
+    # No runtime module is linked: X0100 is all GENSYS needs, and uplm80
+    # puts the arithmetic routines in the module.
     BuildTarget("GENSYS", "com", ["GENSYS.PLM", "LDRLWR.ASM", "X0100.ASM"], "MPMLDR",
                 skip_runtime=True),
 ]
@@ -280,11 +285,11 @@ XDOS_MODULES = [
 ]
 
 NUCLEUS_TARGETS = [
-    # The nucleus is pure assembly and must not pull in cpm_runtime: those
-    # PL/M helpers add 18 bytes, which is enough to push each module over a
-    # 256-byte page boundary and cost it a whole page. With them out, every
-    # SPR here is the same length as the DRI original, and GENSYS lays the
-    # system out the way it was designed to.
+    # The nucleus is pure assembly and must not pull in a PL/M runtime
+    # module: the CP/M one it once got added 18 bytes, which is enough to
+    # push each module over a 256-byte page boundary and cost it a whole
+    # page. With it out, every SPR here is the same length as the DRI
+    # original, and GENSYS lays the system out the way it was designed to.
     BuildTarget("XDOS", "spr", XDOS_MODULES, "NUCLEUS", skip_runtime=True),
     BuildTarget("BNKXDOS", "spr", ["BNKXDOS.ASM"], "NUCLEUS", skip_runtime=True),
     # RESBDOS is built from RESBDOS1.ASM + CONBDOS.ASM concatenated
@@ -316,8 +321,9 @@ BNKBDOS_TARGETS = [
 #           puts it in bank 0.  Offset 0 is OS, which GENSYS sets to the .RSP's
 #           base, offset 2 the initial stack pointer, offset 4 the process
 #           name; the code follows.  The BRS finds its descriptor at OS+2.
-#           Here brs_runtime.mac stands in for BRSPBI, and uplm80 puts the
-#           PLM80.LIB routines it needs into the module itself.  uplm80 also
+#           Here it links with DRI's BRSPBI.ASM, and brs_runtime.mac gives
+#           uplm80's own ??BDOS and ??BOOT; uplm80 puts the PLM80.LIB
+#           routines it needs into the module itself.  uplm80 also
 #           gives the module its own program entry and a 512-byte stack; MP/M
 #           never runs them - it enters the process at the address the stack
 #           pointer word points at - so they cost bank-0 memory and no more.
@@ -414,9 +420,10 @@ class Builder:
         """Assemble a .ASM file to .REL using um80.
 
         ``dri`` reads the source as DRI's MAC and RMAC read it (um80
-        --dri).  Every .ASM a target names is DRI's, or an override of
-        one, and is read that way; the runtimes in src/ and what uplm80
-        writes are MACRO-80's and are not.  MAC and RMAC ignore a `$'
+        --dri).  Every .ASM a target names or links as a runtime module
+        (X0100.ASM, BRSPBI.ASM) is DRI's, or an override of one, and is
+        read that way; the .mac modules in src/ and what uplm80 writes are
+        MACRO-80's and are not.  MAC and RMAC ignore a `$'
         inside a name, and DRI's text counts on it, spelling one name two
         ways - MPM.ASM stores to `nmb$lst', which DATAPG.ASM defines as
         `nmblst', and BNKBDOS.ASM calls `seek$dir' for `seekdir:'.  The
@@ -496,12 +503,14 @@ class Builder:
 
     @staticmethod
     def runtime_sources(target: "BuildTarget") -> list:
-        """Runtime modules to link into this target."""
+        """Runtime modules to link into this target.  A .COM links none: the
+        ones built here that are PL/M name what they need among their own
+        sources, as GENSYS names X0100.ASM."""
         if target.output_type == "prl":
             return MPM_RUNTIME_SRCS
         if target.output_type == "brs":
             return BRS_RUNTIME_SRCS
-        return [CPM_RUNTIME_SRC]
+        return []
 
     @staticmethod
     def plm_mode(target: "BuildTarget") -> str:
@@ -738,17 +747,24 @@ class Builder:
             self.log(f"  ERROR: No object files produced for {target.name}")
             return False
 
-        # Include the runtime library (provides standard CP/M symbols) unless
-        # skip_runtime is set (e.g., for MPMLDR which has its own BDOS).
+        # Link the runtime modules - DRI's interface module and the
+        # compiler's own page-zero names - unless skip_runtime is set (the
+        # nucleus, the .RSPs, DUMP, MPMLDR and GENSYS, which name their own).
         if not target.skip_runtime:
             for src in self.runtime_sources(target):
-                rel = BUILD_DIR / (src.stem + ".rel")
+                # In a directory of their own: GENSYS assembles MPMLDR's
+                # X0100.ASM, which is not PLM_WORK's, into build/src.
+                rel = BUILD_DIR / "runtime" / (src.stem + ".rel")
+                rel.parent.mkdir(parents=True, exist_ok=True)
                 # Assembled once per run, not once per checkout: a .rel left
                 # over from an earlier build would otherwise be linked after
                 # its source had changed, and nothing would say so.
                 if src not in self.runtimes_built:
                     self.debug(f"Building runtime library {src.name}...")
-                    if not self.assemble(src, rel):
+                    # DRI's own modules are read as RMAC read them, and keep
+                    # its six-character names, as every .ASM a target names.
+                    dri = src.suffix.upper() == ".ASM"
+                    if not self.assemble(src, rel, dri_names=dri, dri=dri):
                         self.log(f"  ERROR: Failed to build {src.name}")
                         return False
                     self.runtimes_built.add(src)

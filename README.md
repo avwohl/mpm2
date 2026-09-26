@@ -105,12 +105,19 @@ it uses. This release needs:
 
 | Tool | Release | Needed for |
 |------|---------|------------|
-| uplm80 | 0.3.7 or later | every build (the SFTP RSP is PL/M) and `--tree=src` |
-| upeepz80 | 0.2.5 or later | the same: it is uplm80's peephole optimizer |
+| uplm80 | 0.4.0 or later | every build (the SFTP RSP is PL/M) and `--tree=src` |
+| upeepz80 | 0.2.6 or later | the same: it is uplm80's peephole optimizer |
 | um80_and_friends | 0.3.51 or later | every build (LDRBIOS, BNKXIOS, the SFTP RSP) and `--tree=src` |
 | cpmemu | 4.10.0 | every build (the emulator's Z80 and the disk image) |
 
-Older releases get parts of the system wrong, or cannot build it. um80
+Older releases get parts of the system wrong, or cannot build it. uplm80
+before 0.4.0 does not pass a procedure's arguments the way PL/M-80 does, in
+BC and DE, so what it compiles does not work with DRI's own interface
+modules - `X0100.ASM`, `BRSPBI.ASM`, `LDMONX.ASM` - which the build links as
+DRI's submit files did, and the SFTP RSP's glue takes its arguments in
+registers too; and uplm80 0.4.0 refuses an upeepz80 before 0.2.6, which
+turned `push ... / call p / ret` into `jp p`, so that p took its return
+address for its first argument. um80
 before 0.3.51 has no `--dri`, with which the source build reads every one of
 DRI's assembler sources the way MAC and RMAC read them, and ul80 before
 0.3.51 no `--fatal-mult-def`, which every build's SPR and PRL links pass;
@@ -200,6 +207,19 @@ out. `MPMLDR.COM` is put together as DRI's `MPMLDR.SUB` did it, the PL/M
 loader at 0100H, the loader's BDOS at 0D00H and DRI's skeleton loader BIOS at
 1700H. Every link stops at a name two modules define (ul80
 `--fatal-mult-def`).
+
+The PL/M programs link with DRI's own interface modules, unmodified, as
+DRI's submit files linked them: every `.PRL` with `PLM_WORK/X0100.ASM`,
+whose `MON1` to `MON3` are `equ 0005h` and whose `FCB`, `TBUFF` and the rest
+are the page-zero addresses; every `.BRS` with `UTIL2/BRSPBI.ASM`, which
+reaches the BDOS through the `.RSP`; `MPMLDR.COM` with `MPMLDR/LDMONX.ASM`,
+whose `LDMON1` and `LDMON2` are the loader BDOS at 0D06H; `GENSYS.COM` with
+`MPMLDR/X0100.ASM`; and `DUMP.PRL` with `UTIL5/EXTRN.ASM`. uplm80 passes a
+call's arguments as PL/M-80 does, the last in DE and the one before it in
+BC, so the BDOS gets the function in C and the parameter in DE with nothing
+in between. `src/mpm_pagezero.mac` and `src/brs_runtime.mac` add only the
+names uplm80 gives its own references to the BDOS, the stack top and the
+warm-boot jump.
 
 With `--tree=src`, the entire MP/M II operating system is built from source. Only 4
 development tools are binary-only (no source available):
@@ -466,7 +486,8 @@ SFTP operations are handled by an RSP (Resident System Process) running inside M
 
 Files involved:
 - `asm/sftp_brs.plm` - Z80 RSP code (PL/M-80)
-- `asm/sftp_glue.asm` - Assembly glue for BDOS calls
+- `asm/sftp_glue.asm` - Assembly glue for BDOS calls, taking its arguments
+  as PL/M-80 passes them (BC, DE)
 - `src/sftp_bridge.cpp` - C++ request/reply bridge
 - `src/ssh_session_libssh.cpp` - SFTP protocol handling
 
@@ -597,10 +618,10 @@ mpm2/
 │   │   ├── MPMLDR/       # MPMLDR with disabled serial check, GENSYS V2.1
 │   │   ├── NUCLEUS/      # Kernel source overrides
 │   │   └── UTIL2, UTIL4..UTIL7/ # RSPs and transients
-│   ├── cpm_runtime.mac   # PL/M runtime for .COM programs
-│   ├── mpm_runtime.mac   # PL/M runtime for .PRL transients (MON1..MON3)
-│   ├── mpm_pagezero.mac  # Page-zero symbols a .PRL relocates
-│   ├── brs_runtime.mac   # Banked RSP interface, in place of DRI's BRSPBI
+│   ├── mpm_pagezero.mac  # uplm80's own page-zero symbols (??BDOS, ??BOOT,
+│   │                     # ??MAXB), linked with DRI's PLM_WORK/X0100.ASM
+│   ├── brs_runtime.mac   # uplm80's ??BDOS and ??BOOT for a banked RSP,
+│   │                     # linked with DRI's UTIL2/BRSPBI.ASM
 │   ├── main.cpp          # Emulator entry point and main loop
 │   ├── http_server.cpp   # HTTP file browser
 │   ├── sftp_bridge.cpp   # SFTP/HTTP to Z80 bridge
@@ -618,7 +639,7 @@ mpm2/
 │   ├── bnkxios.asm       # Runtime XIOS (I/O port dispatch)
 │   ├── sftp_rsp.plm      # SFTP RSP process descriptor (common memory)
 │   ├── sftp_brs.plm      # SFTP RSP banked code (PL/M-80)
-│   ├── sftp_glue.asm     # SFTP assembly glue for BDOS calls
+│   ├── sftp_glue.asm     # SFTP assembly glue for BDOS calls (BC, DE in)
 │   └── sftp_brs_header.asm # SFTP RSP header and entry point
 ├── include/              # C++ headers
 │   └── logger.h          # Access logging
