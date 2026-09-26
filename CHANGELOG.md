@@ -15,10 +15,19 @@ rather than empty.
 `DUMP.PRL`, `GENHEX.COM` and `GENMOD.COM` in both releases, and
 `BNKBDOS.SPR` in V2.1, the release whose source DRI shipped (see Known issues
 under 0.3.6). All but `GENHEX.COM` are identical, and `GENHEX.COM` is but for
-70 bytes no source sets (see Fixed).
-Every file is now compared whole, the header page and the padding of the
-last record included, and a difference is reported by the part it is in -
-header, image, bit map or padding - at its offset in that part.
+70 bytes no source sets (see Fixed). Every file is now compared whole, the
+header page and the padding of the last record included, and a difference is
+reported by the part it is in - header, image, bit map or padding - at its
+offset in that part.
+
+### Changed
+
+`tools/v21/where.py` reads the sources of the checkout it is in, not a fixed
+`/Users/wohl/src/mpm2`, which from another checkout mapped offsets against
+that checkout's files; it and `syms.py` use the installed um80, not a copy
+put on `sys.path` from `../um80_and_friends`. Their listings go to
+`build/v21` in the checkout (`V21` still overrides it) instead of `/tmp/v21`,
+so two checkouts do not assemble into each other's.
 
 ### Fixed
 

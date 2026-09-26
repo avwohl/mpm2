@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """where.py TARGET [offsets...] - map linked-image offsets back to (module, line, text).
 
-TARGET is XDOS, RESBDOS, BNKXDOS or BNKBDOS.  With no offsets, dumps the whole
-map as JSON to <scratch>/<TARGET>.map.json.
+TARGET is XDOS, RESBDOS, BNKXDOS, BNKBDOS or TMP.  With no offsets, dumps the
+whole map as JSON to <scratch>/<TARGET>.map.json.  The sources are the
+checkout this script is in; um80 and ul80 are the installed ones.
 """
 import json, os, pathlib, re, subprocess, sys
 
-ROOT = pathlib.Path("/Users/wohl/src/mpm2")
+from um80.ul80 import Linker
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 EXT  = ROOT / "mpm2_external/mpm2src"
 OVR  = ROOT / "src/overrides"
-OUT  = pathlib.Path(os.environ.get("V21", "/tmp/v21")) / "lst2"
+# Under the checkout's build/, not a fixed /tmp path, so two checkouts do
+# not assemble into each other's listings.
+OUT  = pathlib.Path(os.environ.get("V21", ROOT / "build/v21")) / "lst2"
 OUT.mkdir(parents=True, exist_ok=True)
 
 XDOS_MODULES = ["VER","DATAPG","MPM","RLSMX","RLSDEV","CLI","TICK","CLOCK","ATTACH",
@@ -86,8 +91,6 @@ def build(target):
         if not prn.exists():
             sys.exit(f"um80 failed on {path}:\n{r.stdout}\n{r.stderr}")
         rows[name] = listing_rows(prn)
-    sys.path.insert(0, "/Users/wohl/src/um80_and_friends")
-    from um80.ul80 import Linker
     lk = Linker(); lk.code_base = 0
     for name, _ in files:
         lk.load_rel(str(OUT / f"{name}.rel"))

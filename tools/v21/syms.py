@@ -7,7 +7,7 @@ import where
 target = sys.argv[1]
 sub, mods, concat = where.TARGETS[target]
 bases, amap, files = where.build(target)          # also writes the concat file
-from um80.ul80 import Linker                       # where.build() put um80 on the path
+from um80.ul80 import Linker                       # the installed um80, as where.py's
 from um80.relformat import ADDR_PROGRAM_REL, ADDR_DATA_REL
 inc = ["-I", str(where.EXT / "UTIL8"), "-I", str(where.EXT / sub), "-I", str(where.OVR / sub)]
 # um80 -g makes every label PUBLIC.  With -t as well it would cut them all to

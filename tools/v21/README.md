@@ -27,7 +27,8 @@ python3 tools/v21/disasm.py mpm2_external/mpm2dist/PIP.PRL 1fe1 2040
 
 Two knobs:
 
-* `V21=<dir>` is where listings and `.rel` files go (default `/tmp/v21`).
+* `V21=<dir>` is where listings and `.rel` files go (default `build/v21` in
+  the checkout the scripts are in).
 * `PRISTINE=1` makes `where.py` ignore `src/overrides` and use the untouched
   `mpm2_external` sources.  Wanted for `TMP`, whose override carries 25 bytes
   of local fix that shift every offset after `00CD`.  For the others it makes
@@ -44,5 +45,7 @@ Two knobs:
 one cannot be mapped.  The only place that bites is `pdtbl` entry 0's `ds 36`
 in `DATAPG.ASM`; the `db 0ffh` in front of it identifies the spot.
 
-The paths to the repository and to `um80_and_friends` are hardcoded, and
-`where.py` imports `um80.ul80.Linker` to get each module's segment bases.
+The sources are the ones in the checkout the scripts are in, and `um80` is
+the installed one: `where.py` and `syms.py` run the `um80` on the `PATH` and
+import `um80.ul80.Linker`, to get each module's segment bases, from the
+installed package.
