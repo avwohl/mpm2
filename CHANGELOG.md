@@ -341,6 +341,16 @@ not checked for a media change — and the room they took in common memory is
 what DRI's four RSPs need: with the RSPs in, GENSYS stopped with "XIOS common
 base BD4BH below configured common base C000H".
 
+`bin/src` is rebuilt with uplm80 0.4.0, um80 and ul80 0.3.51 and upeepz80
+0.2.6: V2.0, `build_src.sh`'s default. It was last rebuilt before any of this
+release's other changes and now has them all: the resident system processes
+as DRI's `.RSP` and `.BRS` pairs (`MPMSTAT.BRS`, `SCHED.BRS` and `SPOOL.BRS`
+are new), `ABORT.RSP` and `DUMP.PRL` as DRI linked them, `ASM.PRL`,
+`RDT.PRL` and `DDT.COM` made with GENMOD, `MPMLDR.COM` with the loader's
+BDOS assembled from DRI's source, and every PL/M program as uplm80 0.4.0
+compiles it, linked with DRI's interface modules. XDOS, BNKXDOS, RESBDOS,
+TMP, BNKBDOS, GENHEX and GENMOD are the same as before.
+
 ### Fixed
 
 Every PL/M utility now prints what DRI's own binary prints. The remaining

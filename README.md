@@ -184,7 +184,8 @@ check disabled in `src/overrides/MPMLDR/MPMLDR.PLM`. The overrides also carry th
 V2.1 changes, behind `MPM21` (see [below](#mpm-ii-v20-and-v21)).
 
 `build_src.sh` - and so `build_all.sh --tree=src` and `run_tests.sh src` - writes
-what it builds to `bin/src/`, over the committed binaries there.
+what it builds to `bin/src/`, over the committed binaries there. Those are
+V2.0's, the default, built with the toolchain releases above.
 
 The assembler (`ASM.PRL`) and the debugger (`RDT.PRL`, `DDT.COM`) are not
 linked: DRI built them with MAC and GENMOD (`UTIL1/ASM.SUB`, `DDT.SUB`), each
