@@ -49,6 +49,16 @@ Spooler"), and `GENSYS.PLM`, `MPMLDR.PLM` and `VER.ASM` with V2.1's behind
 "MP/M II V2.0   Version" comment is DRI's again. What they build is the
 same, in both releases.
 
+`bin/src` is rebuilt, V2.0 as before, with the same toolchain (uplm80 0.4.0,
+um80 and ul80 0.3.51, upeepz80 0.2.6), and differs only as the fixes below
+make it: `XDOS.SPR`, `BNKXDOS.SPR`, `TMP.SPR`, `BNKBDOS.SPR`, `ABORT.RSP` and
+`DUMP.PRL` end in ^Z where they ended in zeros, after the bit map;
+`GENMOD.COM` is DRI's, 102 bytes of its variables and stack changed;
+`GENHEX.COM` has LOAD's bytes in 6 variables at 03EAH-03EFH; `MPMLDR.COM`
+has DRI's bytes in 226 of LDRBDOS's and LOAD's in 67 of the gap between the
+PL/M loader and LDRBDOS, the loader itself unchanged; and `LOAD.PRL` is
+`LOAD.COM`. Nothing else changes.
+
 ### Fixed
 
 The files DRI made with LINK, RMAC's linker - XDOS, BNKXDOS, RESBDOS, TMP,
