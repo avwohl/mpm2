@@ -7,7 +7,7 @@ release notes; they are summarised below from their commits, in less detail
 than they would have carried at the time, so the record before 0.3.5 is short
 rather than empty.
 
-## [Unreleased]
+## [0.3.7] - 2026-09-26
 
 ### Added
 

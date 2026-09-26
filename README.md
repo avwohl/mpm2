@@ -30,8 +30,8 @@ Pre-built packages are available for Linux systems. Download the appropriate pac
 
 ```bash
 # Download and install
-wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2-emu-0.3.6-Linux.deb
-sudo dpkg -i mpm2-emu-0.3.6-Linux.deb
+wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2-emu-0.3.7-Linux.deb
+sudo dpkg -i mpm2-emu-0.3.7-Linux.deb
 sudo apt-get install -f  # Install dependencies if needed
 
 # Download disk image
@@ -45,8 +45,8 @@ mpm2_emu -l -d A:mpm2_system.img
 
 ```bash
 # Download and install
-wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2-emu-0.3.6-Linux.rpm
-sudo dnf install ./mpm2-emu-0.3.6-Linux.rpm
+wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2-emu-0.3.7-Linux.rpm
+sudo dnf install ./mpm2-emu-0.3.7-Linux.rpm
 
 # Download disk image
 wget https://github.com/avwohl/mpm2/releases/latest/download/mpm2_system.img
