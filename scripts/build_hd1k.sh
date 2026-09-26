@@ -22,7 +22,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 MPM2_DISKS="$PROJECT_DIR/mpm2_external/mpm2disks"
 OUTPUT_DIR="$PROJECT_DIR/disks"
-CPM_DISK="${CPM_DISK:-$HOME/src/cpmemu/util/cpm_disk.py}"
+# cpm_disk.py (from cpmemu): $CPM_DISK if set, else a cpmemu checkout beside
+# this one (how CI lays the repositories out), else ~/src/cpmemu.
+if [ -z "${CPM_DISK:-}" ]; then
+    for _c in "$PROJECT_DIR/../cpmemu/util/cpm_disk.py" "$HOME/src/cpmemu/util/cpm_disk.py"; do
+        if [ -f "$_c" ]; then CPM_DISK="$_c"; break; fi
+    done
+    CPM_DISK="${CPM_DISK:-$PROJECT_DIR/../cpmemu/util/cpm_disk.py}"
+fi
 TEMP_DIR=""
 
 # Binary tree selection (dri or src)

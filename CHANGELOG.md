@@ -62,6 +62,15 @@ PL/M loader and LDRBDOS, the loader itself unchanged; and `LOAD.PRL` is
 
 ### Fixed
 
+CI's source-build test never tested the source-built system. The step that
+runs `run_tests.sh src` did not set `CPM_DISK`, and `build_hd1k.sh` and
+`gensys.sh` looked for cpmemu's `cpm_disk.py` only under `~/src/cpmemu`, so
+the disk image could not be made; the old `run_tests.sh` carried on and ran
+the tests on the image the DRI-tree step had left. Now a failed build fails
+`src` (see below), the job sets `CPM_DISK` for every step, and all three
+scripts that make an image look for `cpm_disk.py` in `$CPM_DISK`, then in a
+cpmemu checkout beside this one, then under `~/src/cpmemu`.
+
 The files DRI made with LINK, RMAC's linker - XDOS, BNKXDOS, TMP, BNKBDOS,
 `ABORT.RSP` and `DUMP.PRL` - end their last record with ^Z (1AH) after the
 relocation bit map, as DRI's do (RESBDOS's bit map ends on a record

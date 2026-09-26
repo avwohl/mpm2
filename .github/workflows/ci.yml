@@ -9,6 +9,10 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    env:
+      # Every step that makes a disk image needs cpmemu's cpm_disk.py; the
+      # repositories are moved beside mpm2 before any of them runs.
+      CPM_DISK: ${{ github.workspace }}/../cpmemu/util/cpm_disk.py
     steps:
       - name: Checkout mpm2
         uses: actions/checkout@v4

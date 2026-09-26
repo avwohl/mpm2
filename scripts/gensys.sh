@@ -37,7 +37,14 @@ TOOLS_DIR="$PROJECT_DIR/tools"
 # Under build/, not a fixed /tmp path, so two checkouts can generate a
 # system at the same time without clearing each other's work directory.
 WORK_DIR="${GENSYS_WORK:-$BUILD_DIR/gensys_work}"
-CPM_DISK="${CPM_DISK:-$HOME/src/cpmemu/util/cpm_disk.py}"
+# cpm_disk.py (from cpmemu): $CPM_DISK if set, else a cpmemu checkout beside
+# this one (how CI lays the repositories out), else ~/src/cpmemu.
+if [ -z "${CPM_DISK:-}" ]; then
+    for _c in "$PROJECT_DIR/../cpmemu/util/cpm_disk.py" "$HOME/src/cpmemu/util/cpm_disk.py"; do
+        if [ -f "$_c" ]; then CPM_DISK="$_c"; break; fi
+    done
+    CPM_DISK="${CPM_DISK:-$PROJECT_DIR/../cpmemu/util/cpm_disk.py}"
+fi
 
 # Parse arguments
 TREE="dri"  # Default to DRI binaries

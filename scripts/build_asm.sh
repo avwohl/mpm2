@@ -210,7 +210,14 @@ if [ ! -f "$MPMLDR" ]; then
     exit 1
 fi
 
-CPM_DISK="$PROJECT_DIR/../cpmemu/util/cpm_disk.py"
+# cpm_disk.py (from cpmemu): $CPM_DISK if set, else a cpmemu checkout beside
+# this one (how CI lays the repositories out), else ~/src/cpmemu.
+if [ -z "${CPM_DISK:-}" ]; then
+    for _c in "$PROJECT_DIR/../cpmemu/util/cpm_disk.py" "$HOME/src/cpmemu/util/cpm_disk.py"; do
+        if [ -f "$_c" ]; then CPM_DISK="$_c"; break; fi
+    done
+    CPM_DISK="${CPM_DISK:-$PROJECT_DIR/../cpmemu/util/cpm_disk.py}"
+fi
 DISK_IMAGE="$DISKS_DIR/mpm2_hd1k.img"
 
 if [ -f "$DISK_IMAGE" ] && [ -f "$CPM_DISK" ]; then
