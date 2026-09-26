@@ -56,8 +56,9 @@ python3 tools/verify_dri.py
 ```
 
 builds both releases with `--dri-exact` and compares the nucleus,
-UTIL1's assembler and debugger, and the loader's BDOS and BIOS in
-`MPMLDR.COM` against the matching reference:
+BNKBDOS, `ABORT.RSP`, `DUMP.PRL`, UTIL1's assembler and debugger, and
+the loader's BDOS and BIOS in `MPMLDR.COM` against the matching
+reference:
 
 ```
 MP/M II V2.0:
@@ -65,6 +66,9 @@ MP/M II V2.0:
   BNKXDOS.SPR  identical to DRI 2.0
   RESBDOS.SPR  identical to DRI 2.0
   TMP.SPR      identical to DRI 2.0
+  BNKBDOS.SPR  not compared: the BNKBDOS.ASM DRI shipped is V2.1's
+  ABORT.RSP    identical to DRI 2.0
+  DUMP.PRL     identical to DRI 2.0
   ASM.PRL      identical to DRI 2.0 but for 11 bytes no source sets
   RDT.PRL      identical to DRI 2.0
   DDT.COM      identical to DRI 2.0
@@ -74,21 +78,30 @@ MP/M II V2.1:
   BNKXDOS.SPR  identical to DRI 2.1
   RESBDOS.SPR  identical to DRI 2.1
   TMP.SPR      identical to DRI 2.1
+  BNKBDOS.SPR  identical to DRI 2.1
+  ABORT.RSP    identical to DRI 2.1
+  DUMP.PRL     identical to DRI 2.1
   ASM.PRL      identical to DRI 2.1 but for 11 bytes no source sets
   RDT.PRL      identical to DRI 2.1
   DDT.COM      identical to DRI 2.1
   MPMLDR.COM   identical to DRI 2.1 in 0C00-167F but for 233 bytes no source sets
 ```
 
-For an `.SPR` the comparison covers the program image and the
-relocation bits that describe it.  It stops at the end of the program:
-DRI's linker left stale bytes in the tail of the bitmap, which no loader
-reads and no assembler can be made to reproduce.  `ASM.PRL`, `RDT.PRL`
-and `DDT.COM` are compared whole, header and bitmap included; the bytes
-of `ASM.PRL` it lets through are explained under
+Every file is compared whole: for an `.SPR`, `.RSP` or `.PRL` the
+header page, the program image, its relocation bit map and the padding
+of the last record, and a difference is reported by the part it is in.
+The nucleus, BNKBDOS, `ABORT.RSP` and `DUMP.PRL` are RMAC modules DRI
+linked with LINK, which fills the rest of the last record with ^Z, 1AH,
+after the bit map; `tools/build.py` does the same for the files DRI
+linked (ul80 fills it with zeros, as GENMOD did for DRI's PL/M
+programs).  `BNKBDOS.SPR` is compared in V2.1 only, since the source DRI
+shipped is V2.1's (see
+[BNKBDOS](#bnkbdos---the-shipped-source-is-already-v21)).  The bytes of
+`ASM.PRL` it lets through are explained under
 [ASM, RDT and DDT](#asm-rdt-and-ddt---no-change).  `CONTROL` and
-`mpm2dist` carry the same three files, so the V2.0 and V2.1 references
-for them are one and the same.  Of `MPMLDR.COM` only the part DRI
+`mpm2dist` carry the same `ASM.PRL`, `RDT.PRL`, `DDT.COM`, `ABORT.RSP`
+and `DUMP.PRL`, so the V2.0 and V2.1 references for them are one and
+the same.  Of `MPMLDR.COM` only the part DRI
 assembled with MAC is compared, file offsets 0C00-167F (0D00H-177FH);
 the rest is PL/M (see below).
 

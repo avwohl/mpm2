@@ -253,10 +253,11 @@ python3 tools/verify_dri.py                       # both, against DRI's binaries
 ```
 
 All four nucleus SPRs — XDOS, BNKXDOS, RESBDOS and TMP — come back byte for
-byte identical to Digital Research's own V2.0 and V2.1 binaries, and so do
-the debugger, `RDT.PRL` and `DDT.COM`, and the assembler, `ASM.PRL`, but for
-11 bytes of it that no source sets and GENMOD took from the memory MAC had
-left. So does the part of `MPMLDR.COM` that DRI assembled with MAC, the
+byte identical to Digital Research's own V2.0 and V2.1 binaries, the padding
+of their last record included, and so do BNKBDOS (V2.1's), the resident
+`ABORT.RSP`, `DUMP.PRL`, the debugger, `RDT.PRL` and `DDT.COM`, and the
+assembler, `ASM.PRL`, but for 11 bytes of it that no source sets and GENMOD
+took from the memory MAC had left. So does the part of `MPMLDR.COM` that DRI assembled with MAC, the
 loader's BDOS and the skeleton of its BIOS at 0D00H-177FH, but for 233 bytes
 no source sets either - DS areas and the gap before the BIOS, where LOAD left
 whatever was in memory and the build has zeros.
@@ -569,9 +570,9 @@ the Z80 RSP a record at a time and so at the emulated machine's speed, is
 given 180.  `src` rebuilds `bin/src` (see
 [Building from Source](#building-from-source)).
 
-`python3 tools/verify_dri.py` builds the nucleus, the assembler and the
-debugger of both releases with `--dri-exact` and compares them with Digital
-Research's binaries.
+`python3 tools/verify_dri.py` builds the nucleus, BNKBDOS, `ABORT.RSP`,
+`DUMP.PRL`, the assembler, the debugger and the loader of both releases with
+`--dri-exact` and compares them with Digital Research's binaries.
 
 ## Access Logging
 

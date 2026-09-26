@@ -9,17 +9,23 @@ so each one should come back byte for byte.
     python3 tools/verify_dri.py            # both releases
     python3 tools/verify_dri.py 2.1        # just one
 
-For an .SPR only the image and the relocation bits that cover it are
-compared.  DRI's linker left stale bytes in the tail of the bitmap, past
-the end of the program, which no loader reads and no assembler can
-reproduce.
+Every file is compared whole, header page, image, relocation bit map and
+the padding of the last record, but for the bytes in UNSET below and
+outside the PART of a file that is DRI's assembler source.  A difference
+is reported by the part it is in, at its offset in that part: for an
+.SPR, .RSP or .PRL the header page, the image, the bit map or the padding
+after it.
+
+The nucleus, BNKBDOS, ABORT.RSP and DUMP.PRL are RMAC modules DRI linked
+with LINK, which fills the last record with ^Z, as tools/build.py does
+(Builder.pad_as_link).  The BNKBDOS.ASM DRI shipped with the V2.0 sources
+is V2.1's, so BNKBDOS.SPR is compared with V2.1's only.
 
 ASM.PRL, RDT.PRL and DDT.COM were made with GENMOD (UTIL1/ASM.SUB,
-DDT.SUB), not a linker, and are compared whole, except for the bytes in
-UNSET below.  The two masters carry the same three files.  (The copies
-next to their sources in mpm2src/UTIL1 are a later rebuild that was never
-shipped, and are not a reference; see docs/mpm2_v21.md, "ASM, RDT and
-DDT".)
+DDT.SUB), not a linker.  The two masters carry the same three files.
+(The copies next to their sources in mpm2src/UTIL1 are a later rebuild
+that was never shipped, and are not a reference; see docs/mpm2_v21.md,
+"ASM, RDT and DDT".)
 
 Of MPMLDR.COM only the part MAC assembled is compared (PART below): the
 loader's BDOS and the skeleton of its BIOS.  The rest is PL/M, and uplm80
@@ -37,17 +43,26 @@ REFS = {
     "2.1": ROOT / "mpm2_external/mpm2dist",
 }
 
-# (build.py target, file)
+# (build.py target, file, the releases it is compared in)
+BOTH = ("2.0", "2.1")
 TARGETS = [
-    ("XDOS", "XDOS.SPR"),
-    ("BNKXDOS", "BNKXDOS.SPR"),
-    ("RESBDOS", "RESBDOS.SPR"),
-    ("TMP", "TMP.SPR"),
-    ("ASM", "ASM.PRL"),
-    ("RDT", "RDT.PRL"),
-    ("DDT", "DDT.COM"),
-    ("MPMLDR", "MPMLDR.COM"),
+    ("XDOS", "XDOS.SPR", BOTH),
+    ("BNKXDOS", "BNKXDOS.SPR", BOTH),
+    ("RESBDOS", "RESBDOS.SPR", BOTH),
+    ("TMP", "TMP.SPR", BOTH),
+    ("BNKBDOS", "BNKBDOS.SPR", ("2.1",)),
+    ("ABORT", "ABORT.RSP", BOTH),
+    ("DUMP", "DUMP.PRL", BOTH),
+    ("ASM", "ASM.PRL", BOTH),
+    ("RDT", "RDT.PRL", BOTH),
+    ("DDT", "DDT.COM", BOTH),
+    ("MPMLDR", "MPMLDR.COM", BOTH),
 ]
+
+# Why a file is not compared in a release it is left out of.
+NOT_COMPARED = {
+    "BNKBDOS.SPR": "not compared: the BNKBDOS.ASM DRI shipped is V2.1's",
+}
 
 # Bytes that no source sets and that the build cannot reproduce, as offsets
 # into the file.  In a GENMOD'd program a DS area, or the gap before a
@@ -85,61 +100,59 @@ def offsets(ranges):
     return out
 
 
-class Spr:
-    def __init__(self, path):
-        b = pathlib.Path(path).read_bytes()
-        self.length = b[1] | (b[2] << 8)
-        self.extra = b[4] | (b[5] << 8)
-        self.code = b[256:256 + self.length]
-        bits = b[256 + self.length:]
-        # the bitmap only describes the program; the rest is padding
-        self.bitmap = bits[:(self.length + 7) // 8]
+def parts(name, data):
+    """[(first offset, end offset, what)] - the parts of a file."""
+    if not name.endswith((".SPR", ".RSP", ".PRL", ".BRS")):
+        return [(0, len(data), "file")]
+    length = data[1] | (data[2] << 8)
+    image = 0x100 + length
+    bitmap = image + (length + 7) // 8
+    return [(0, 0x100, "header"), (0x100, image, "image"),
+            (image, bitmap, "bit map"), (bitmap, len(data), "padding")]
 
 
-def compare_spr(ref, built):
-    a, b = Spr(ref), Spr(built)
-    if a.length != b.length:
-        return f"program length {a.length:04x} vs {b.length:04x}"
-    if a.extra != b.extra:
-        return f"extra memory {a.extra:04x} vs {b.extra:04x}"
-    bad = [i for i in range(a.length) if a.code[i] != b.code[i]]
-    if bad:
-        return (f"{len(bad)} code bytes differ, first at "
-                + " ".join(f"{i:04X}" for i in bad[:8]))
-    bad = [i for i in range(len(a.bitmap)) if a.bitmap[i] != b.bitmap[i]]
-    if bad:
-        return (f"{len(bad)} relocation bytes differ, first at "
-                + " ".join(f"{i:04X}" for i in bad[:8]))
-    return None
-
-
-def compare_file(ref, built):
+def compare(ref, built):
+    """None if `built' is DRI's `ref', else what differs."""
     a, b = ref.read_bytes(), built.read_bytes()
+    name = ref.name
+    if name.endswith((".SPR", ".RSP", ".PRL", ".BRS")):
+        for lo, what in ((1, "program length"), (4, "extra memory")):
+            x, y = a[lo] | (a[lo + 1] << 8), b[lo] | (b[lo + 1] << 8)
+            if x != y:
+                return f"{what} {x:04x} vs {y:04x}"
     if len(a) != len(b):
         return f"length {len(a)} vs {len(b)}"
-    unset = offsets(UNSET.get(ref.name, ""))
-    part = sorted(offsets(PART[ref.name])) if ref.name in PART else range(len(a))
+    unset = offsets(UNSET.get(name, ""))
+    part = offsets(PART[name]) if name in PART else range(len(a))
     bad = [i for i in part if a[i] != b[i] and i not in unset]
-    if bad:
-        return (f"{len(bad)} bytes differ, first at "
-                + " ".join(f"{i:04X}" for i in bad[:8]))
-    return None
+    if not bad:
+        return None
+    out = []
+    for lo, hi, what in parts(name, a):
+        here = [i for i in bad if lo <= i < hi]
+        if here:
+            out.append(f"{len(here)} {what} bytes differ, first at "
+                       + " ".join(f"{i - lo:04X}" for i in here[:8]))
+    return "; ".join(out)
 
 
 def run(version, keep=None):
     out = pathlib.Path(keep) if keep else pathlib.Path(tempfile.mkdtemp())
+    targets = [t for t in TARGETS if version in t[2]]
     cmd = [sys.executable, str(ROOT / "tools/build.py"),
            "--version", version, "--dri-exact",
-           "--output-dir", str(out), *[t[0] for t in TARGETS]]
+           "--output-dir", str(out), *sorted({t[0] for t in targets})]
     r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     if r.returncode:
         print(r.stdout + r.stderr)
         return False
     ok = True
-    for _, name in TARGETS:
+    for _, name, releases in TARGETS:
+        if version not in releases:
+            print(f"  {name:<12} {NOT_COMPARED[name]}")
+            continue
         ref = REFS[version] / name
         built = out / name
-        compare = compare_spr if name.endswith(".SPR") else compare_file
         why = compare(ref, built) if built.exists() else "not built"
         if why is None:
             why = "identical to DRI " + version

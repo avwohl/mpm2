@@ -780,9 +780,44 @@ class Builder:
         if target.post_build == "mpmldr":
             if not self.post_build_mpmldr(target, output_file):
                 return False
+        if self.dri_linked(target) and not self.pad_as_link(output_file):
+            return False
 
         self.log(f"  Created {output_file}")
         return all_success
+
+    @staticmethod
+    def dri_linked(target: BuildTarget) -> bool:
+        """DRI made this file with LINK, RMAC's linker: an .SPR, .RSP or .PRL
+        of assembler modules alone - the nucleus and BNKBDOS (`link
+        bnkbdos[os]'), ABORT.RSP (`link abort[or]') and DUMP.PRL (`link
+        dump,extrn[op]').  DRI's PL/M .PRL, .RSP and .BRS files were made
+        with GENMOD instead (UTIL2/SCHED.SUB, PLM_WORK/PRL.SUB)."""
+        return (target.output_type in ("spr", "rsp", "prl") and not target.genmod
+                and all(s.upper().endswith(".ASM") for s in target.sources))
+
+    def pad_as_link(self, output_file: Path) -> bool:
+        """The last record filled with ^Z, as DRI's LINK wrote it.
+
+        LINK writes the header page, the image and its relocation bit map
+        in 128-byte records and fills the rest of the last one with 1AH,
+        CP/M's end-of-file mark: every such file DRI shipped ends that
+        way, from the 10 bytes after TMP.SPR's bit map to the 102 after
+        DUMP.PRL's.  ul80 fills it with zeros, which is what GENMOD wrote
+        for DRI's PL/M programs, so those are left as they are.  No loader
+        reads past the bit map.
+        """
+        data = bytearray(output_file.read_bytes())
+        length = data[1] | (data[2] << 8)
+        end = 0x100 + length + (length + 7) // 8
+        if end > len(data):
+            self.log(f"  ERROR: {output_file.name} ends at {len(data):04X}H, "
+                     f"inside its relocation bit map (to {end:04X}H)")
+            return False
+        data[end:] = b"\x1a" * (len(data) - end)
+        data.extend(b"\x1a" * (-len(data) % 128))
+        output_file.write_bytes(data)
+        return True
 
     def post_build_mpmldr(self, target: BuildTarget, output_file: Path) -> bool:
         """MPMLDR.COM as MPMLDR.SUB made it.

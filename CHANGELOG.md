@@ -7,6 +7,29 @@ release notes; they are summarised below from their commits, in less detail
 than they would have carried at the time, so the record before 0.3.5 is short
 rather than empty.
 
+## [Unreleased]
+
+### Added
+
+`tools/verify_dri.py` compares three more files with DRI's: `ABORT.RSP` and
+`DUMP.PRL` in both releases, and `BNKBDOS.SPR` in V2.1, the release whose
+source DRI shipped (see Known issues under 0.3.6). All three are identical.
+Every file is now compared whole, the header page and the padding of the
+last record included, and a difference is reported by the part it is in -
+header, image, bit map or padding - at its offset in that part.
+
+### Fixed
+
+The files DRI made with LINK, RMAC's linker - XDOS, BNKXDOS, RESBDOS, TMP,
+BNKBDOS, `ABORT.RSP` and `DUMP.PRL` - end their last record with ^Z (1AH)
+after the relocation bit map, as DRI's do; ul80 fills it with zeros. So
+`tools/build.py` pads the output of every target DRI linked (an `.SPR`,
+`.RSP` or `.PRL` of assembler modules alone) with 1AH. DRI made its PL/M
+`.PRL`, `.RSP` and `.BRS` files with GENMOD, which fills with zeros, and
+those stay as they are. The padding is past the bit map, where no loader
+reads. `verify_dri.py` used to stop at the end of an `.SPR`'s bit map
+because "DRI's linker left stale bytes" there; they were the ^Z padding.
+
 ## [0.3.6] - 2026-09-26
 
 MP/M II V2.1 now builds from source as well as V2.0. In both releases XDOS,
