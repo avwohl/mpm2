@@ -767,8 +767,10 @@ compare$recs:
 ; ***** MP/M 2.1
 ; HL already holds the error code; shell$err would load aret over it
 	pop h! lxi h,0007! jmp shellerr1
-; Replaced code
-;	pop h! lxi h,0007! jmp shell$err
+; Replaced code, a statement a line: an exclamation mark ends a comment in MAC
+;	pop h
+;	lxi h,0007
+;	jmp shell$err
 	ELSE
 	pop h! lxi h,0007! jmp shell$err
 	ENDIF

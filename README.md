@@ -190,7 +190,8 @@ Every one of DRI's assembler sources is assembled with `um80 --dri`, which
 reads it as MAC and RMAC do: a `$` inside a name is ignored (DRI's text
 spells some names two ways - `MPM.ASM` stores to `nmb$lst`, which
 `DATAPG.ASM` defines as `nmblst`), a label needs no colon, `PUSH A` is
-`PUSH PSW`, and a line that starts with `*` is a comment. So they build from
+`PUSH PSW`, a line that starts with `*` is a comment, and a `!` ends a `;`
+comment and starts the next statement. So they build from
 DRI's text: `BNKBDOS.ASM`, `MPMLDR/LDRBDOS.ASM` and `LDRBIOS.ASM`, and the
 nucleus modules V2.1 did not change, as they stand; the nucleus modules it
 did change from overrides that are DRI's text but for the V2.1 changes, the

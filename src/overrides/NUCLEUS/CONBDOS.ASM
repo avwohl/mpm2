@@ -70,8 +70,10 @@ func6:
 ; ***** MP/M 2.1
 ; a character that was read ahead and pushed back counts as ready
 		push d! call kbconst! pop d
-; Replaced code
-;		push d! call constf! pop d
+; Replaced code, a statement a line: an exclamation mark ends a comment in MAC
+;		push d
+;		call constf
+;		pop d
 		ELSE
 		push d! call constf! pop d
 		ENDIF

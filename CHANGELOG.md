@@ -243,10 +243,16 @@ issues):
 MACRO-80: a `$` inside a name is ignored, the first word of a statement is a
 label without a colon when it is no instruction or directive
 (`UTIL3/GENHEX.ASM`'s `OBP DS 1`), `PUSH A` is `PUSH PSW` (`RESBDOS1.ASM`,
-`BNKBDOS.ASM`), and a line that starts with `*` is a comment. Without it um80
-0.3.51 reads a source as MACRO-80 does, and GENHEX, RESBDOS and BNKBDOS do
-not assemble. The runtimes in `src/`, what uplm80 writes and the emulator's
-own `asm/*.asm` are MACRO-80 text and are read that way. `tools/v21/where.py`
+`BNKBDOS.ASM`), a line that starts with `*` is a comment, and a `!` ends a
+`;` comment and starts the next statement, as it does outside one. Without it
+um80 0.3.51 reads a source as MACRO-80 does, and GENHEX, RESBDOS and BNKBDOS
+do not assemble. The `.mac` modules in `src/`, what uplm80 writes and the
+emulator's own `asm/*.asm` are MACRO-80 text and are read that way. Two of
+the V2.1 overrides noted the code they replace as DRI wrote it, several
+statements to a line - `;<TAB>pop h! lxi h,0007! jmp shell$err` in
+`RESBDOS1.ASM`, `;<TAB>push d! call constf! pop d` in `CONBDOS.ASM` - which
+MAC, and so um80 0.3.51, assembles after the first `!`; the notes now have a
+statement to a line, and V2.1's RESBDOS.SPR is DRI's again. `tools/v21/where.py`
 and `syms.py` pass `--dri` too, so `PRISTINE=1` works for every target.
 With all of that, every target but GENSYS.COM and MPMLDR.COM (below) is byte
 for byte what the same tree built with um80/ul80 0.3.50 and the overrides
