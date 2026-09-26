@@ -560,7 +560,7 @@ PORT=2311 ./scripts/run_tests.sh all                   # SSH on 2311, HTTP on 83
 | `http` | a file read over HTTP, through the SFTP RSP |
 | `sftp` | `scripts/test_sftp.exp`: files put over SFTP read back over SFTP and HTTP, then open from a console - `type` one, `submit` the other; `pip` copies a file HTTP is reading; HTTP is refused a file `ed` has open, and the system carries on; and a 64K file goes up and comes back intact while HTTP reads another file, which stays intact too |
 | `all` | all of the above |
-| `src` | `build_all.sh --tree=src` (V2.0), then `basic`, `rsp`, `http` and `sftp` |
+| `src` | `build_all.sh --tree=src` (V2.0), then `basic`, `rsp`, `http` and `sftp`; a build that fails fails the test |
 | `interactive` | an SSH session to type at |
 
 The SSH port is `PORT` (default 2222) and the HTTP port `HTTP_PORT` (default

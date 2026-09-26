@@ -787,6 +787,11 @@ class Builder:
         if not rel_files:
             self.log(f"  ERROR: No object files produced for {target.name}")
             return False
+        if not all_success:
+            # Linking what did build would write an output that looks
+            # built and is not: MPMLDR.COM of LDMONX and LDRBDOS alone.
+            self.log(f"  ERROR: {target.name} not linked: a source failed")
+            return False
 
         # Link the runtime modules - DRI's interface module and the
         # compiler's own page-zero names - unless skip_runtime is set (the

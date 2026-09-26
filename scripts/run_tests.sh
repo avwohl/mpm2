@@ -17,7 +17,8 @@ set -o errexit
 #   sftp    - Files put over SFTP are closed behind them: TYPE and SUBMIT
 #             open them from a console
 #   all     - All of the above
-#   src     - Build from source and run the basic, rsp, http and sftp tests
+#   src     - Build from source and run the basic, rsp, http and sftp tests;
+#             a build that fails fails the run
 #   interactive - Start interactive SSH session
 #
 
@@ -221,61 +222,16 @@ test_src_build() {
         EMU_PID=""
     fi
 
-    # Build with source tree
-    # Note: Some programs may fail to build due to uplm80 strictness.
-    # We continue if the core system files are built successfully.
+    # Build with source tree.  A failed build fails the test: every target
+    # builds, and a run that carried on after a failure would test the
+    # binaries and the disk image an earlier build left behind.
     echo "Building with --tree=src..."
-    "$SCRIPT_DIR/build_all.sh" --tree=src > "$SRC_BUILD_LOG" 2>&1 || {
-        echo "WARNING: Some source builds had errors (see $SRC_BUILD_LOG)"
-        echo "Continuing with partial build..."
-    }
-
-    # Check if disk image was created (indicates at least partial success)
-    if [ ! -f "$DISKS_DIR/mpm2_system.img" ]; then
-        echo "ERROR: Disk image not created. Build completely failed."
-        cat "$SRC_BUILD_LOG"
+    if ! "$SCRIPT_DIR/build_all.sh" --tree=src > "$SRC_BUILD_LOG" 2>&1; then
+        echo "ERROR: the source build failed (see $SRC_BUILD_LOG):"
+        tail -30 "$SRC_BUILD_LOG"
         return 1
     fi
-
-    # Check that key source-built files exist
-    # Core system files must be present; utilities are optional
-    echo "Verifying source-built binaries..."
-    local core_files=(
-        "$PROJECT_DIR/bin/src/MPMLDR.COM"
-        "$PROJECT_DIR/bin/src/XDOS.SPR"
-        "$PROJECT_DIR/bin/src/RESBDOS.SPR"
-        "$PROJECT_DIR/bin/src/TMP.SPR"
-        "$PROJECT_DIR/bin/src/BNKBDOS.SPR"
-    )
-    local optional_files=(
-        "$PROJECT_DIR/bin/src/DIR.PRL"
-        "$PROJECT_DIR/bin/src/STAT.PRL"
-    )
-
-    echo "Core system files:"
-    local missing_core=0
-    for f in "${core_files[@]}"; do
-        if [ ! -f "$f" ]; then
-            echo "  MISSING: $(basename $f)"
-            missing_core=1
-        else
-            echo "  OK: $(basename $f)"
-        fi
-    done
-
-    if [ $missing_core -eq 1 ]; then
-        echo "ERROR: Core system files are missing. Cannot run test."
-        return 1
-    fi
-
-    echo "Optional utilities:"
-    for f in "${optional_files[@]}"; do
-        if [ ! -f "$f" ]; then
-            echo "  SKIP: $(basename $f) (build failed)"
-        else
-            echo "  OK: $(basename $f)"
-        fi
-    done
+    grep "^Build complete:" "$SRC_BUILD_LOG" || true
 
     # Start emulator with source-built disk
     echo ""

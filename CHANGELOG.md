@@ -32,6 +32,14 @@ those stay as they are. The padding is past the bit map, where no loader
 reads. `verify_dri.py` used to stop at the end of an `.SPR`'s bit map
 because "DRI's linker left stale bytes" there; they were the ^Z padding.
 
+`run_tests.sh src` carried on when the source build failed ("Continuing with
+partial build"), and tested whatever binaries and disk image an earlier build
+had left, so a pass did not show that the build worked. A failed build now
+fails the run, with the end of `build/mpm2_src_build.log`. And
+`tools/build.py` no longer links a target one of whose sources failed to
+compile or assemble: it linked the rest, so a failed `MPMLDR.PLM` left an
+`MPMLDR.COM` of `LDMONX` and the loader's BDOS alone in `bin/src`.
+
 GENHEX, GENMOD and the part of `MPMLDR.COM` that is DRI's assembler source are
 put together as DRI's submit files did it, with MAC and LOAD, and a byte no
 statement loads - a DS area, the gap before a later ORG - is now what LOAD
