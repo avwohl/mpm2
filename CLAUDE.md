@@ -556,3 +556,6 @@ GPL-3.0-or-later
 - MP/M II System Guide (mpm2_external/docs/)
 - MP/M II Programmer's Guide
 - CP/M BIOS specification
+
+## README stays short
+README.md is at most 150 lines. New detail goes in docs/<topic>.md with a one-line link from the README; never add sections to the README.
